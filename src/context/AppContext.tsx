@@ -729,6 +729,9 @@ AOKING Direct B2B Platform`,
 
   // Salesperson: Extend Reservation
   const salesExtendReservation = useCallback((orderId: string, additionalHours: number) => {
+    if (!beginOrderAction(`extend:${orderId}`)) {
+      return { success: false, error: '该订单延期操作正在进行，请勿重复提交。' };
+    }
     const order = orders.find(o => o.id === orderId);
     if (!order) return { success: false, error: '订单不存在' };
     if (order.status !== 'CONFIRMED') {

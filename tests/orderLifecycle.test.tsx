@@ -165,6 +165,25 @@ describe('order lifecycle integration', () => {
     expect(JSON.stringify(orderById(result, orderId))).toBe(order);
   });
 
+  it('blocks a same-tick duplicate extension while allowing a later deliberate extension', async () => {
+    const { result } = setup();
+    let first: { success: boolean } | undefined;
+    let second: { success: boolean; error?: string } | undefined;
+    act(() => {
+      first = result.current.salesExtendReservation('ord-001', 48);
+      second = result.current.salesExtendReservation('ord-001', 48);
+    });
+    expect(first?.success).toBe(true);
+    expect(second?.success).toBe(false);
+    expect(second?.error).toMatch(/正在进行/);
+    expect(orderById(result, 'ord-001').reservation_extended_count).toBe(1);
+    await Promise.resolve();
+    act(() => {
+      expect(result.current.salesExtendReservation('ord-001', 48).success).toBe(true);
+    });
+    expect(orderById(result, 'ord-001').reservation_extended_count).toBe(2);
+  });
+
   it('releases a confirmed order once and rejects repeated release', async () => {
     const { result } = setup();
     expect(balance(result, 'sku-9042-blk', 'wh-sh').reserved).toBe(20);
