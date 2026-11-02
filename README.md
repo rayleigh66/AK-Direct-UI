@@ -38,7 +38,7 @@ The project does **not** need a Google/Gemini API key, Google AI Studio, Google 
 - Whole-order payment must equal the confirmed total in integer cents; partial or excess payment is rejected and cannot enable shipment. A pending cancellation/quantity-change request also blocks payment or release until it is approved or rejected.
 - Product images are imported through Vite so production builds use hashed assets; the Demo data itself remains fictional. The four product JPGs are resized to 1000px and recompressed for the prototype.
 - Customer-facing screens use English display fields/mappings while internal product IDs, SKU codes and sales/admin workflows remain unchanged.
-- The customer flow is verified in Playwright at 375, 390, 430, 768 and 1440 CSS pixels. This is still browser emulation, not real-device Safari/Chrome acceptance. See [Mobile Customer UX](docs/ui-review/MOBILE_CUSTOMER_UX.md). Admin product management is documented in [Admin Catalog](docs/ui-review/ADMIN_CATALOG.md).
+- The customer flow is verified in Playwright at 375, 390, 430, 768 and 1440 CSS pixels. This is still browser emulation, not real-device Safari/Chrome acceptance. See [Mobile Customer UX](docs/ui-review/MOBILE_CUSTOMER_UX.md). Admin product management is documented in [Admin Catalog](docs/ui-review/ADMIN_CATALOG.md). Internal mobile operations and local inventory import are documented in [Internal Operations](docs/ui-review/INTERNAL_OPERATIONS.md).
 
 Do not deploy this UI as a publicly accessible system containing real customers, credentials, orders or inventory.
 

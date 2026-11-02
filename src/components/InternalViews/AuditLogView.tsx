@@ -53,7 +53,7 @@ export const AuditLogView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24">
+    <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -95,7 +95,22 @@ export const AuditLogView: React.FC = () => {
 
       {/* Audit Table */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="sm:hidden divide-y divide-slate-100">
+          {filteredLogs.map(log => (
+            <div key={log.id} className="p-4 space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[10px] text-slate-400">{log.timestamp}</span>
+                <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                  {log.action}
+                </span>
+              </div>
+              <div className="font-semibold text-slate-800">{log.actor}</div>
+              <div className="font-mono text-[11px] text-slate-500">{log.target}</div>
+              <div className="text-slate-600 leading-relaxed">{log.details}</div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] font-semibold border-b border-slate-100">
               <tr>
