@@ -34,6 +34,7 @@ The project does **not** need a Google/Gemini API key, Google AI Studio, Google 
 - Prices, promotion dates, product codes, SKU images and copy are demonstration content requiring a separate PRD consistency review before production development.
 - The multi-warehouse reservation is an in-memory allocation mock. It plans the whole order before changing state and fails as a whole when stock is short, but it is **not an atomic database transaction** and does not guarantee isolation under concurrent users.
 - Order actions validate the current status and exact warehouse allocations. Duplicate release/payment/shipment/confirmation and repeated change approvals are rejected; approved quantity changes re-plan the entire order and leave both order and inventory unchanged on failure.
+- Whole-order payment must equal the confirmed total in integer cents; partial or excess payment is rejected and cannot enable shipment. A pending cancellation/quantity-change request also blocks payment or release until it is approved or rejected.
 - Product images are imported through Vite so production builds use hashed assets; the Demo data itself remains fictional.
 
 Do not deploy this UI as a publicly accessible system containing real customers, credentials, orders or inventory.

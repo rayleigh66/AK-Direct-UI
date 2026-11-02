@@ -52,6 +52,8 @@ import {
   applyReservationAllocations,
   releaseReservationAllocations,
   consumeReservationAllocations,
+  usdToCents,
+  centsToUsd,
 } from '../utils/rules';
 
 interface CartLine {
@@ -223,6 +225,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const endOrderAction = (key: string) => {
     orderActionLocks.current.delete(key);
   };
+  const pendingChangeError = (order: Order) =>
+    order.change_request?.status === 'pending'
+      ? '该订单有待审核的取消/数量修改申请，请先处理审批，不能直接付款或释放预占。'
+      : null;
 
   // Current User / Company
   const currentCustomerUser = useMemo(() => {
@@ -784,6 +790,8 @@ AOKING Direct B2B Platform`,
     if (order.status !== 'CONFIRMED') {
       return { success: false, error: '只有已确认且预占中的订单可以释放预占。' };
     }
+    const pendingChange = pendingChangeError(order);
+    if (pendingChange) return { success: false, error: pendingChange };
     if (!reason.trim()) return { success: false, error: '请填写释放预占的原因。' };
 
     const nextInventory = releaseReservationAllocations(
@@ -842,10 +850,32 @@ AOKING Direct B2B Platform`,
             : '只有已确认且预占中的订单可以登记付款。',
       };
     }
+    const pendingChange = pendingChangeError(order);
+    if (pendingChange) return { success: false, error: pendingChange };
     if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
       return { success: false, error: '付款金额必须大于 0。' };
     }
+    const cents = amountUsd * 100;
+    if (Math.abs(cents - Math.round(cents)) > 1e-6) {
+      return { success: false, error: '付款金额最多保留两位小数（USD 分）。' };
+    }
+    const amountCents = usdToCents(amountUsd);
+    const expectedTotal = order.total_confirmed_usd ?? order.total_quoted_usd;
+    const expectedCents = usdToCents(expectedTotal);
+    if (amountCents < expectedCents) {
+      return {
+        success: false,
+        error: `付款金额不足：订单确认总额 USD $${centsToUsd(expectedCents).toFixed(2)}，本次输入 USD $${centsToUsd(amountCents).toFixed(2)}。整单付款必须全额，未登记入账。`,
+      };
+    }
+    if (amountCents > expectedCents) {
+      return {
+        success: false,
+        error: `付款金额超过订单确认总额 USD $${centsToUsd(expectedCents).toFixed(2)}；本原型只支持整单全额付款。`,
+      };
+    }
     if (!reference.trim()) return { success: false, error: '请填写付款凭证索引。' };
+    const paidAmount = centsToUsd(amountCents);
 
     const paymentTime = new Date().toISOString().replace('T', ' ').substr(0, 19);
 
@@ -857,9 +887,9 @@ AOKING Direct B2B Platform`,
               ...o,
               status: 'PAYMENT_RECORDED',
               payment_recorded_at: paymentTime,
-              payment_amount_usd: amountUsd,
+              payment_amount_usd: paidAmount,
               payment_reference: reference,
-              customer_visible_note: `实收货款 USD $${amountUsd} 已核验入账（凭证: ${reference}）。订单进入发货备料阶段。根据规则，已付款订单不可取消。`,
+              customer_visible_note: `实收货款 USD $${paidAmount.toFixed(2)} 已核验入账（凭证: ${reference}）。订单进入发货备料阶段。根据规则，已付款订单不可取消。`,
               internal_note: `财务核验已到账，已入账客户历史有效采购额。`,
               updated_at: paymentTime,
             }
@@ -871,7 +901,8 @@ AOKING Direct B2B Platform`,
     setCompanies(prev =>
       prev.map(c => {
         if (c.id !== order.company_id) return c;
-        const newSpend = c.cumulative_spend_usd + amountUsd;
+        const newSpendCents = usdToCents(c.cumulative_spend_usd) + amountCents;
+        const newSpend = centsToUsd(newSpendCents);
         // Evaluate new base tier and current tier
         const evalResult = evaluateCustomerTier(newSpend, 0, tierRules);
         return {
@@ -891,7 +922,7 @@ AOKING Direct B2B Platform`,
         id: `notif-${Date.now()}`,
         company_id: order.company_id,
         title: `货款到账确认：${order.order_no}`,
-        message: `USD $${amountUsd} 货款已核对入账，已全额计入公司历史有效采购累计额，并重置采购计时。`,
+        message: `USD $${paidAmount.toFixed(2)} 货款已核对入账，已全额计入公司历史有效采购累计额，并重置采购计时。`,
         event_type: 'PAYMENT_RECEIVED',
         related_id: order.id,
         is_read: false,
@@ -912,7 +943,7 @@ AOKING Direct B2B Platform`,
         subject: `[AOKING Direct] Payment Acknowledged — Order #${order.order_no}`,
         body_text: `Dear Partner (${company?.short_name}),
 
-We acknowledge receipt of your wire transfer of USD $${amountUsd} (Ref: ${reference}) for Order #${order.order_no}.
+We acknowledge receipt of your wire transfer of USD $${paidAmount.toFixed(2)} (Ref: ${reference}) for Order #${order.order_no}.
 
 Your order status is now updated to PAYMENT_RECORDED. Our logistics warehouse has initiated final inspection and pallet preparation.
 Furthermore, this purchase has been credited to your historical cumulative purchasing volume.
@@ -931,7 +962,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       currentSalesUser.name,
       'RECORD_PAYMENT',
       order.order_no,
-      `Recorded USD $${amountUsd} payment. Reference: ${reference}. Updated customer spend and tier.`
+      `Recorded USD $${paidAmount.toFixed(2)} payment. Reference: ${reference}. Updated customer spend and tier.`
     );
 
     return { success: true };
@@ -967,6 +998,8 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
             : '只有已登记全额付款的订单可以整单发货。',
       };
     }
+    const pendingChange = pendingChangeError(order);
+    if (pendingChange) return { success: false, error: pendingChange };
 
     const nextInventory = consumeReservationAllocations(
       inventory,

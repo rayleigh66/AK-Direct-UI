@@ -147,6 +147,191 @@ describe('order lifecycle integration', () => {
     expect(balance(result, 'sku-9042-blk', 'wh-sh').reserved).toBe(20);
   });
 
+  it('rejects underpayment/overpayment and allows exact full payment before shipment', async () => {
+    const { result } = setup();
+    const orderBefore = JSON.stringify(orderById(result, 'ord-001'));
+    const inventoryBefore = JSON.stringify(result.current.inventory);
+    const spendBefore = result.current.companies.find((company) => company.id === 'comp-001')!
+      .cumulative_spend_usd;
+
+    act(() => {
+      const under = result.current.salesRecordPayment('ord-001', 1268.99, 'WIRE-UNDER');
+      expect(under.success).toBe(false);
+      expect(under.error).toMatch(/不足/);
+    });
+    await Promise.resolve();
+    act(() => {
+      const over = result.current.salesRecordPayment('ord-001', 1269.01, 'WIRE-OVER');
+      expect(over.success).toBe(false);
+      expect(over.error).toMatch(/超过/);
+    });
+    await Promise.resolve();
+    act(() => {
+      const fractional = result.current.salesRecordPayment('ord-001', 1268.999, 'WIRE-FRACTION');
+      expect(fractional.success).toBe(false);
+    });
+    expect(JSON.stringify(orderById(result, 'ord-001'))).toBe(orderBefore);
+    expect(JSON.stringify(result.current.inventory)).toBe(inventoryBefore);
+    expect(
+      result.current.companies.find((company) => company.id === 'comp-001')!.cumulative_spend_usd
+    ).toBe(spendBefore);
+    expect(orderById(result, 'ord-001').status).toBe('CONFIRMED');
+
+    await Promise.resolve();
+    act(() => {
+      expect(
+        result.current.salesUpdateShipment('ord-001', {
+          carrier: 'DHL',
+          trackingNo: 'DHL-UNDERPAID',
+          actualShipDate: '2026-11-05',
+          estimatedDeliveryDate: '2026-11-10',
+          customerVisibleNote: 'Must not ship.',
+          internalNote: 'Must not ship.',
+        }).success
+      ).toBe(false);
+    });
+    expect(orderById(result, 'ord-001').status).toBe('CONFIRMED');
+
+    await Promise.resolve();
+    act(() => {
+      const full = result.current.salesRecordPayment('ord-001', 1269, 'WIRE-FULL');
+      expect(full.success).toBe(true);
+    });
+    const paid = orderById(result, 'ord-001');
+    expect(paid.status).toBe('PAYMENT_RECORDED');
+    expect(paid.payment_amount_usd).toBe(1269);
+    expect(
+      result.current.companies.find((company) => company.id === 'comp-001')!.cumulative_spend_usd
+    ).toBe(69669);
+
+    act(() => {
+      expect(
+        result.current.salesUpdateShipment('ord-001', {
+          carrier: 'DHL',
+          trackingNo: 'DHL-FULL-PAY',
+          actualShipDate: '2026-11-05',
+          estimatedDeliveryDate: '2026-11-10',
+          customerVisibleNote: 'Shipped after full payment.',
+          internalNote: 'Full payment verified.',
+        }).success
+      ).toBe(true);
+    });
+    expect(orderById(result, 'ord-001').status).toBe('SHIPPED');
+    expect(balance(result, 'sku-9042-blk', 'wh-sh')).toMatchObject({
+      on_hand: 140,
+      reserved: 0,
+    });
+    expect(balance(result, 'sku-7710-slv', 'wh-sh')).toMatchObject({
+      on_hand: 140,
+      reserved: 0,
+    });
+  });
+
+  it('blocks payment and release while a cancellation request is pending', () => {
+    const { result } = setup();
+    act(() => {
+      expect(result.current.customerCancelOrder('ord-001', 'Pending cancellation').success).toBe(
+        true
+      );
+    });
+    expect(orderById(result, 'ord-001').change_request?.status).toBe('pending');
+    const orderBefore = JSON.stringify(orderById(result, 'ord-001'));
+    const inventoryBefore = JSON.stringify(result.current.inventory);
+    const spendBefore = result.current.companies.find((company) => company.id === 'comp-001')!
+      .cumulative_spend_usd;
+    act(() => {
+      const payment = result.current.salesRecordPayment('ord-001', 1269, 'WIRE-PENDING');
+      expect(payment.success).toBe(false);
+      expect(payment.error).toMatch(/待审核/);
+      const release = result.current.salesReleaseReservation('ord-001', 'Pending release');
+      expect(release.success).toBe(false);
+      expect(release.error).toMatch(/待审核/);
+    });
+    expect(JSON.stringify(orderById(result, 'ord-001'))).toBe(orderBefore);
+    expect(JSON.stringify(result.current.inventory)).toBe(inventoryBefore);
+    expect(
+      result.current.companies.find((company) => company.id === 'comp-001')!.cumulative_spend_usd
+    ).toBe(spendBefore);
+    expect(orderById(result, 'ord-001').change_request?.status).toBe('pending');
+  });
+
+  it('blocks payment and release while a modification request is pending', () => {
+    const { result } = setup();
+    act(() => {
+      expect(
+        result.current.customerRequestChange('ord-001', 'Pending modification', [
+          { sku_id: 'sku-9042-blk', new_qty: 30 },
+        ]).success
+      ).toBe(true);
+    });
+    expect(orderById(result, 'ord-001').change_request?.status).toBe('pending');
+    const orderBefore = JSON.stringify(orderById(result, 'ord-001'));
+    const inventoryBefore = JSON.stringify(result.current.inventory);
+    const spendBefore = result.current.companies.find((company) => company.id === 'comp-001')!
+      .cumulative_spend_usd;
+    act(() => {
+      expect(result.current.salesRecordPayment('ord-001', 1269, 'WIRE-PENDING-MOD').success).toBe(
+        false
+      );
+      expect(result.current.salesReleaseReservation('ord-001', 'Pending modification').success).toBe(
+        false
+      );
+    });
+    expect(JSON.stringify(orderById(result, 'ord-001'))).toBe(orderBefore);
+    expect(JSON.stringify(result.current.inventory)).toBe(inventoryBefore);
+    expect(
+      result.current.companies.find((company) => company.id === 'comp-001')!.cumulative_spend_usd
+    ).toBe(spendBefore);
+    expect(orderById(result, 'ord-001').change_request?.status).toBe('pending');
+  });
+
+  it('allows payment and shipment after a quantity change is approved', async () => {
+    const { result } = setup();
+    act(() => {
+      expect(
+        result.current.customerRequestChange('ord-001', 'Increase black', [
+          { sku_id: 'sku-9042-blk', new_qty: 30 },
+        ]).success
+      ).toBe(true);
+    });
+    await Promise.resolve();
+    act(() => {
+      expect(result.current.salesHandleChangeRequest('ord-001', true).success).toBe(true);
+    });
+    expect(orderById(result, 'ord-001').total_confirmed_usd).toBe(1611);
+    expect(orderById(result, 'ord-001').change_request?.status).toBe('approved');
+
+    act(() => {
+      expect(result.current.salesRecordPayment('ord-001', 1611, 'WIRE-CHANGED').success).toBe(true);
+    });
+    expect(orderById(result, 'ord-001').status).toBe('PAYMENT_RECORDED');
+    expect(
+      result.current.companies.find((company) => company.id === 'comp-001')!.cumulative_spend_usd
+    ).toBe(70011);
+
+    act(() => {
+      expect(
+        result.current.salesUpdateShipment('ord-001', {
+          carrier: 'DHL',
+          trackingNo: 'DHL-CHANGED',
+          actualShipDate: '2026-11-06',
+          estimatedDeliveryDate: '2026-11-11',
+          customerVisibleNote: 'Shipped after approved change.',
+          internalNote: 'Approved quantity change.',
+        }).success
+      ).toBe(true);
+    });
+    expect(orderById(result, 'ord-001').status).toBe('SHIPPED');
+    expect(balance(result, 'sku-9042-blk', 'wh-gz')).toMatchObject({
+      on_hand: 60,
+      reserved: 0,
+    });
+    expect(balance(result, 'sku-7710-slv', 'wh-sh')).toMatchObject({
+      on_hand: 140,
+      reserved: 0,
+    });
+  });
+
   it('rejects duplicate confirmation without touching inventory', async () => {
     const { result } = setup();
     const orderId = submitNewBlackOrder(result);

@@ -380,7 +380,7 @@ export const SalesOrdersView: React.FC = () => {
                       <button
                         onClick={() => {
                           setPaymentOrder(order);
-                          setPaymentAmount(order.total_quoted_usd);
+                          setPaymentAmount(order.total_confirmed_usd ?? order.total_quoted_usd);
                           setPaymentReference(`WIRE-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-CITI`);
                         }}
                         className="min-h-[44px] px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
@@ -426,7 +426,8 @@ export const SalesOrdersView: React.FC = () => {
             <form onSubmit={handleRecordPaymentSubmit} className="p-5 space-y-4">
               <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
                 <div>订单号: <strong className="font-mono">{paymentOrder.order_no}</strong></div>
-                <div>应收参考总额: <strong className="font-mono text-slate-900">USD ${paymentOrder.total_quoted_usd.toFixed(2)}</strong></div>
+                <div>确认应收总额: <strong className="font-mono text-slate-900">USD ${(paymentOrder.total_confirmed_usd ?? paymentOrder.total_quoted_usd).toFixed(2)}</strong></div>
+                <div className="text-amber-700">本 Demo 只接受整单全额付款，不支持部分付款。</div>
                 <div>结算方式: 线下电汇 (T/T Bank Wire Transfer)</div>
               </div>
 

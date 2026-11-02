@@ -205,6 +205,15 @@ export function generateTemporaryPassword(): string {
   return pwd;
 }
 
+/** Convert USD to integer cents for exact whole-order payment comparisons. */
+export function usdToCents(amountUsd: number): number {
+  return Math.round(amountUsd * 100);
+}
+
+export function centsToUsd(cents: number): number {
+  return Number((cents / 100).toFixed(2));
+}
+
 export interface ReservationAllocation {
   sku_id: string;
   warehouse_id: string;
