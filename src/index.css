@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #151515;
+  --ink-soft: #3f4142;
+  --muted: #858789;
+  --line: #e8e8e6;
+  --surface: #ffffff;
+  --bg: #f8f8f6;
+  --orange: #ff681e;
+  --orange-pale: #fff1e8;
+  --orange-deep: #dd4a00;
+  --green: #198364;
+  --green-pale: #eaf7f0;
+  --red: #d34f36;
+  --red-pale: #fff0ed;
+  --yellow: #aa750e;
+  --yellow-pale: #fff7e5;
+  --radius: 17px;
+  --shadow: 0 8px 32px rgba(15, 15, 15, 0.035);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .font-mono, .tabular-nums {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+}
