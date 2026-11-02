@@ -548,6 +548,7 @@ export const ProductAdminView: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => beginSku(product, sku)}
+                            data-testid="admin-edit-sku"
                             className="min-h-[36px] px-3 rounded-[8px] border border-[#e8e8e6] text-xs font-bold"
                           >
                             编辑

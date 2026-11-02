@@ -17,12 +17,7 @@ async function switchRole(page: Page, profilePattern: RegExp, option: string) {
 async function openAdminProducts(page: Page) {
   const width = page.viewportSize()?.width ?? 1440;
   if (width < 1024) {
-    const sidebarButton = page.locator('aside').getByRole('button', { name: /商品目录管理/ });
-    if (await sidebarButton.isVisible()) {
-      await sidebarButton.click();
-    } else {
-      await page.getByRole('button', { name: '商品管理' }).last().click();
-    }
+    await page.getByRole('button', { name: '商品管理' }).last().click();
   } else {
     await page.getByRole('button', { name: /商品目录管理/ }).first().click();
   }
@@ -99,6 +94,14 @@ test('admin creates a product and SKU, lists it and sees it in the customer cata
   await editor.getByLabel('English customer title').fill('Admin E2E Pack Updated');
   await editor.getByTestId('admin-save-product').click();
   await expect(page.getByText(/商品信息已保存/)).toBeVisible();
+
+  await row.getByTestId('admin-edit-sku').first().click();
+  const skuForm = page.getByTestId('admin-sku-form');
+  await skuForm.getByLabel('可售状态').selectOption('discontinued');
+  await page.getByTestId('admin-save-sku').click();
+  await expect(
+    page.getByText(/Unpublish the product before deactivating its last active SKU/)
+  ).toBeVisible();
 
   await switchRole(page, /Sarah Lin|Admin Lin/, 'AK000123A (Apex buyer 1)');
   await page.goto('/#/');

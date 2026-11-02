@@ -343,12 +343,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsMobileSimulator(prev => !prev);
   }, []);
 
+  const orderEligibilityError = (product: Product, sku: ProductSKU) => {
+    if (!currentCustomerUser || currentCustomerUser.status !== 'active')
+      return 'Your customer account is inactive. Please contact your administrator.';
+    if (!currentCompany || currentCompany.status !== 'active')
+      return 'Your customer company is inactive. Please contact your administrator.';
+    if (product.active === false) return 'This product is no longer available.';
+    if (sku.sellable_status !== 'active') return 'This SKU is no longer available.';
+    if (
+      !brandGrants.some(
+        grant =>
+          grant.company_id === currentCompany.id && grant.brand_id === product.brand_id
+      )
+    )
+      return 'Your company is no longer authorized for this brand.';
+    return null;
+  };
+
   // Cart operations
   const addToCart = useCallback((skuId: string, quantity: number) => {
     const check = validateSKUQuantity(quantity);
     if (!check.valid) {
       return { success: false, message: check.error };
     }
+    let product: Product | undefined;
+    let sku: ProductSKU | undefined;
+    for (const item of products) {
+      const found = item.skus.find(entry => entry.id === skuId);
+      if (found) {
+        product = item;
+        sku = found;
+        break;
+      }
+    }
+    if (!product || !sku) return { success: false, message: 'SKU not found.' };
+    const eligibility = orderEligibilityError(product, sku);
+    if (eligibility) return { success: false, message: eligibility };
 
     // Check available stock
     const { totalAvailable } = calculateSKUAvailableStock(skuId, inventory);
@@ -370,7 +400,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     return { success: true };
-  }, [inventory]);
+  }, [inventory, products, currentCustomerUser, currentCompany, brandGrants]);
 
   const updateCartQuantity = useCallback((skuId: string, quantity: number) => {
     if (quantity === 0) {
@@ -382,6 +412,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!check.valid) {
       return { success: false, message: check.error };
     }
+    let product: Product | undefined;
+    let sku: ProductSKU | undefined;
+    for (const item of products) {
+      const found = item.skus.find(entry => entry.id === skuId);
+      if (found) {
+        product = item;
+        sku = found;
+        break;
+      }
+    }
+    if (!product || !sku) return { success: false, message: 'SKU not found.' };
+    const eligibility = orderEligibilityError(product, sku);
+    if (eligibility) return { success: false, message: eligibility };
 
     const { totalAvailable } = calculateSKUAvailableStock(skuId, inventory);
     if (quantity > totalAvailable) {
@@ -395,7 +438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map(item => (item.sku_id === skuId ? { ...item, quantity } : item))
     );
     return { success: true };
-  }, [inventory]);
+  }, [inventory, products, currentCustomerUser, currentCompany, brandGrants]);
 
   const removeFromCart = useCallback((skuId: string) => {
     setCart(prev => prev.filter(i => i.sku_id !== skuId));
@@ -414,6 +457,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }) => {
     if (!currentCompany || !currentCustomerUser) {
       return { success: false, error: 'Please sign in to a customer account.' };
+    }
+    if (currentCustomerUser.status !== 'active') {
+      return { success: false, error: 'Your customer account is inactive. Please contact your administrator.' };
+    }
+    if (currentCompany.status !== 'active') {
+      return { success: false, error: 'Your customer company is inactive. Please contact your administrator.' };
     }
 
     if (cart.length === 0) {
@@ -437,17 +486,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, error: val.error };
       }
 
-      const { totalAvailable } = calculateSKUAvailableStock(item.sku_id, inventory);
-      if (item.quantity > totalAvailable) {
-        return {
-          success: false,
-          error: `SKU ${item.sku_id} now has ${totalAvailable} PCS available; ${item.quantity} PCS cannot be ordered.`,
-        };
-      }
-
-      // Find product & sku info
-      let foundSku = null;
-      let foundProduct = null;
+      // Find product & sku info before eligibility and stock checks.
+      let foundSku: ProductSKU | undefined;
+      let foundProduct: Product | undefined;
       for (const p of products) {
         const s = p.skus.find(sk => sk.id === item.sku_id);
         if (s) {
@@ -456,8 +497,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           break;
         }
       }
+      if (!foundSku || !foundProduct) {
+        return {
+          success: false,
+          error: `SKU ${item.sku_id} is no longer available. Your order list was kept.`,
+        };
+      }
+      const eligibility = orderEligibilityError(foundProduct, foundSku);
+      if (eligibility) {
+        return {
+          success: false,
+          error: `${eligibility} Your order list and shipping details were kept.`,
+        };
+      }
 
-      if (!foundSku || !foundProduct) continue;
+      const { totalAvailable } = calculateSKUAvailableStock(item.sku_id, inventory);
+      if (item.quantity > totalAvailable) {
+        return {
+          success: false,
+          error: `SKU ${item.sku_id} now has ${totalAvailable} PCS available; ${item.quantity} PCS cannot be ordered.`,
+        };
+      }
 
       const priceInfo = calculateEffectiveUnitPrice(
         foundSku.base_price_usd,
@@ -520,6 +580,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentCompanyTierInfo,
     products,
     promotions,
+    brandGrants,
     addAuditLog,
   ]);
 
@@ -1874,7 +1935,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Created SKU for ${product.product_code} with initial on-hand ${initialOnHand}.`
     );
     return { success: true as const, skuId };
-  }, [products, currentAdminUser, addAuditLog]);
+  }, [products, orders, currentAdminUser, addAuditLog]);
 
   const adminUpdateSku = useCallback((productId: string, skuId: string, input: AdminSkuInput) => {
     const product = products.find(item => item.id === productId);
@@ -1883,6 +1944,15 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     if (!sku) return { success: false, error: 'SKU not found.' };
     const code = input.skuCode.trim();
     if (!code) return { success: false, error: 'SKU code is required.' };
+    if (
+      code !== sku.sku_code &&
+      orders.some(order => order.lines.some(line => line.sku_id === skuId))
+    )
+      return {
+        success: false,
+        error:
+          'This SKU is referenced by a historical order. Keep the SKU code; price, name and status can still be edited.',
+      };
     if (
       products.some(item =>
         item.skus.some(
@@ -1902,6 +1972,20 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
         success: false,
         error: 'A SKU image must belong to the current product gallery.',
       };
+    if (
+      product.active !== false &&
+      sku.sellable_status === 'active' &&
+      input.sellableStatus !== 'active' &&
+      !product.skus.some(
+        other => other.id !== skuId && other.sellable_status === 'active'
+      )
+    ) {
+      return {
+        success: false,
+        error:
+          'Unpublish the product before deactivating its last active SKU. No status was changed.',
+      };
+    }
 
     const nextSku: ProductSKU = {
       ...sku,
@@ -1930,7 +2014,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Updated SKU ${sku.sku_code}; order snapshots and reservation IDs were preserved.`
     );
     return { success: true as const };
-  }, [products, currentAdminUser, addAuditLog]);
+  }, [products, orders, currentAdminUser, addAuditLog]);
 
   const adminSaveSeries = useCallback((nextSeries: SeriesDefinition[]) => {
     if (!nextSeries.length) return { success: false, error: 'At least one series is required.' };
@@ -1944,9 +2028,14 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
         return { success: false, error: 'Series order must be a positive whole number.' };
       ids.add(item.id);
     }
-    const removed = series.find(item => !ids.has(item.id));
-    if (removed && products.some(product => product.series_id === removed.id))
-      return { success: false, error: 'Cannot remove a series that is assigned to a product.' };
+    const removedIds = new Set(
+      series.filter(item => !ids.has(item.id)).map(item => item.id)
+    );
+    if (products.some(product => product.series_id && removedIds.has(product.series_id)))
+      return {
+        success: false,
+        error: 'Cannot remove a series that is assigned to a product. The whole batch was rejected.',
+      };
     setSeries([...nextSeries].sort((a, b) => a.order - b.order));
     addAuditLog(currentAdminUser.name, 'SAVE_SERIES', 'catalog', 'Updated series dictionary.');
     return { success: true as const };
@@ -1967,12 +2056,18 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
         return { success: false, error: 'Tag order must be a positive whole number.' };
       codes.add(tag.code);
     }
-    const removed = featureTags.find(tag => !codes.has(tag.code));
+    const removedCodes = new Set(
+      featureTags.filter(tag => !codes.has(tag.code)).map(tag => tag.code)
+    );
     if (
-      removed &&
-      products.some(product => (product.tag_codes ?? []).includes(removed.code))
+      products.some(product =>
+        (product.tag_codes ?? []).some(code => removedCodes.has(code))
+      )
     )
-      return { success: false, error: 'Cannot remove a tag that is assigned to a product.' };
+      return {
+        success: false,
+        error: 'Cannot remove a tag that is assigned to a product. The whole batch was rejected.',
+      };
     setFeatureTags([...nextTags].sort((a, b) => a.order - b.order));
     addAuditLog(currentAdminUser.name, 'SAVE_FEATURE_TAGS', 'catalog', 'Updated feature tag dictionary.');
     return { success: true as const };

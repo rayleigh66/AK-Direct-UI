@@ -216,6 +216,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('customer', 'user-001a');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
@@ -232,6 +233,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('customer', 'user-001b');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
@@ -248,6 +250,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('sales');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
@@ -262,6 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('admin');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >

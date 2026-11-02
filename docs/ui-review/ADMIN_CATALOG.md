@@ -15,7 +15,7 @@ Base：`feat/react-mobile-customer-ux`（`147661a`）
   - `ProductSKU.image_url`
   - `SeriesDefinition`、`FeatureTagDefinition`
 - 新增 `DEMO_IMAGE_LIBRARY`（4 张本地 Demo 图）与 `isDemoImageUrl` 校验。
-- 现有 27 项单元/集成测试保留；新增 5 项管理集成测试，共 **32** 项。
+- 现有 27 项单元/集成测试保留；新增 12 项管理/订单资格集成测试，共 **39** 项。
 - 仅管理员角色显示管理入口；`ProductAdminView` 还做前端角色校验。角色切换只是 Demo，不是服务端安全权限。
 - 更新商品/SKU 不会改写历史订单行、订单价格快照、库存引用或预占 ID。
 
@@ -65,12 +65,20 @@ Base：`feat/react-mobile-customer-ux`（`147661a`）
 | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `npm ci`                   | PASS，0 vulnerabilities                                                                                         |
 | `npm run lint`             | PASS                                                                                                            |
-| `npm test`                 | PASS — **32 / 32**（3 文件）                                                                                    |
-| `npm run test:e2e`         | PASS — **61 passed / 3 skipped（共 64）**                                                                       |
+| `npm test`                 | PASS — **39 / 39**（4 文件）                                                                                    |
+| `npm run test:e2e`         | PASS — **62 passed / 6 skipped（共 68）**                                                                       |
 | `npm run test:e2e:preview` | PASS — **1 / 1** 生产预览冒烟                                                                                   |
-| `npm run build`            | PASS — 主 JS 500.83 KB / gzip 137.69 KB；管理视图按需分包 30.21 KB / gzip 7.66 KB；CSS 64.32 KB / gzip 11.93 KB |
+| `npm run build`            | PASS — 主 JS 503.92 KB / gzip 138.52 KB；管理视图按需分包 30.24 KB / gzip 7.67 KB；CSS 64.32 KB / gzip 11.54 KB |
 | `npm run verify:assets`    | PASS — 4 张 hashed 图，均 <160 KB                                                                               |
-| GitHub Actions             | install → typecheck → 32 unit → build → asset check → Playwright → preview smoke                                |
+| GitHub Actions             | install → typecheck → 39 unit → build → asset check → Playwright → preview smoke                                |
+
+### 审核修复（P0/P1）
+
+- **旧购物车拦截**：提交订单前重新检查商品上架、SKU 可售、品牌授权、客户账户/公司状态、MOQ 和库存；失败保留购物车与运输草稿（sessionStorage），不创建订单。客户购物车显示明确英文原因。
+- **批量删除保护**：系列/标签保存检查本次删除集合中的所有条目；任一仍被商品引用即整批拒绝，不部分成功。
+- **历史 SKU 编码**：被历史订单引用的 SKU 禁止改编码；价格、颜色名、状态仍可编辑，内部 ID 与订单快照不变。
+- **最后一个启用 SKU**：已上架商品不能直接停用最后一个启用 SKU；要求先下架，给出明确错误，不静默改状态。
+- 修复移动端角色切换后 Sidebar 未关闭遮挡底部导航的问题。
 
 新增测试覆盖：
 
@@ -82,7 +90,12 @@ Base：`feat/react-mobile-customer-ux`（`147661a`）
 - 管理员列表默认收起、单展开、搜索 + 系列筛选；
 - 新建商品 → SKU → 上架 → 客户目录即时可见；
 - 上架/下架即时影响客户目录；
-- 客户系列 + 标签组合筛选。
+- 客户系列 + 标签组合筛选；
+- 管理员下架/停用 SKU/撤销品牌后旧购物车禁止提交，恢复后正常提交；
+- 运输表单在跨角色返回后保留；
+- 批量删除未引用项 + 被引用项时整批拒绝；
+- 历史订单 SKU 编码修改被拒，价格/名称仍可改；
+- 最后一个启用 SKU 停售被拒，先下架后可停售。
 
 ## 截图
 
@@ -98,6 +111,7 @@ Base：`feat/react-mobile-customer-ux`（`147661a`）
 - [SKU editor 390](admin-catalog/admin-sku-editor-390.jpg)
 - [Series/tag dictionary 1440](admin-catalog/admin-taxonomy-1440.jpg)
 - [Series/tag dictionary 390](admin-catalog/admin-taxonomy-390.jpg)
+- [Blocked customer cart after admin unpublish 390](admin-catalog/cart-blocked-product-390.jpg)
 
 ## 未完成 / 未验证
 
