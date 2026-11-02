@@ -21,6 +21,9 @@ import {
   CustomerNotification,
   InternalEmailTemplate,
   AuditLog,
+  SeriesDefinition,
+  FeatureTagDefinition,
+  ProductSKU,
 } from '../types';
 import {
   INITIAL_BRANDS,
@@ -38,7 +41,10 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_EMAIL_TEMPLATES,
   INITIAL_AUDIT_LOGS,
+  INITIAL_SERIES,
+  INITIAL_FEATURE_TAGS,
 } from '../data/mockData';
+import { isDemoImageUrl } from '../data/demoImageLibrary';
 import {
   calculateSKUAvailableStock,
   calculateEffectiveUnitPrice,
@@ -61,6 +67,32 @@ interface CartLine {
   quantity: number;
 }
 
+export interface AdminProductInput {
+  brandId: string;
+  productCode: string;
+  title: string;
+  titleEn: string;
+  category: Product['category'];
+  description: string;
+  descriptionEn: string;
+  material: string;
+  capacityOrSize: string;
+  seriesId?: string;
+  tagCodes: string[];
+  primaryImage: string;
+  galleryImages: string[];
+}
+
+export interface AdminSkuInput {
+  skuCode: string;
+  colorName: string;
+  colorNameEn: string;
+  colorHex: string;
+  basePriceUsd: number;
+  sellableStatus: ProductSKU['sellable_status'];
+  imageUrl?: string;
+}
+
 interface AppContextType {
   // Authentication & Role
   currentRole: Role;
@@ -77,6 +109,8 @@ interface AppContextType {
   brands: Brand[];
   brandGrants: BrandGrant[];
   products: Product[];
+  series: SeriesDefinition[];
+  featureTags: FeatureTagDefinition[];
   warehouses: Warehouse[];
   inventory: InventoryBalance[];
   tierRules: TierRule[];
@@ -147,6 +181,15 @@ interface AppContextType {
   adminAddOrUpdatePromotion: (promo: Omit<Promotion, 'id'>) => void;
   excelImportStock: (rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[]) => { success: boolean; count: number; error?: string };
 
+  // Admin product catalogue
+  adminCreateProduct: (input: AdminProductInput) => { success: boolean; productId?: string; error?: string };
+  adminUpdateProduct: (productId: string, input: AdminProductInput) => { success: boolean; error?: string };
+  adminSetProductActive: (productId: string, active: boolean) => { success: boolean; error?: string };
+  adminCreateSku: (productId: string, input: AdminSkuInput, initialOnHand?: number) => { success: boolean; skuId?: string; error?: string };
+  adminUpdateSku: (productId: string, skuId: string, input: AdminSkuInput) => { success: boolean; error?: string };
+  adminSaveSeries: (series: SeriesDefinition[]) => { success: boolean; error?: string };
+  adminSaveFeatureTags: (tags: FeatureTagDefinition[]) => { success: boolean; error?: string };
+
   // Drawer & Modals
   activeDrawer: { type: 'order' | 'sku' | 'material' | 'restock' | 'mail'; id: string } | null;
   openDrawer: (type: 'order' | 'sku' | 'material' | 'restock' | 'mail', id: string) => void;
@@ -201,7 +244,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [customerUsers, setCustomerUsers] = useState<CustomerUser[]>(INITIAL_CUSTOMER_USERS);
   const [brands] = useState<Brand[]>(INITIAL_BRANDS);
   const [brandGrants, setBrandGrants] = useState<BrandGrant[]>(INITIAL_BRAND_GRANTS);
-  const [products] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [series, setSeries] = useState<SeriesDefinition[]>(INITIAL_SERIES);
+  const [featureTags, setFeatureTags] = useState<FeatureTagDefinition[]>(INITIAL_FEATURE_TAGS);
   const [warehouses] = useState<Warehouse[]>(INITIAL_WAREHOUSES);
   const [inventory, setInventory] = useState<InventoryBalance[]>(INITIAL_INVENTORY);
   const [tierRules, setTierRules] = useState<TierRule[]>(INITIAL_TIER_RULES);
@@ -1620,6 +1665,319 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     return { success: true, count: successCount };
   }, [warehouses, products, inventory, currentAdminUser, addAuditLog]);
 
+  // Admin product catalogue
+  const adminCreateProduct = useCallback((input: AdminProductInput) => {
+    const code = input.productCode.trim();
+    const title = input.title.trim();
+    const titleEn = input.titleEn.trim();
+    if (!code) return { success: false, error: 'Product code is required.' };
+    if (!title || !titleEn)
+      return { success: false, error: 'Chinese and English product names are required.' };
+    if (products.some(p => p.product_code.toLowerCase() === code.toLowerCase()))
+      return { success: false, error: `Product code ${code} already exists.` };
+    if (!brands.some(b => b.id === input.brandId))
+      return { success: false, error: 'Select a valid brand.' };
+    if (input.seriesId && !series.some(item => item.id === input.seriesId))
+      return { success: false, error: 'Select a valid series.' };
+    if (input.tagCodes.some(codeValue => !featureTags.some(tag => tag.code === codeValue)))
+      return { success: false, error: 'Select valid feature tags.' };
+    const images = [input.primaryImage, ...input.galleryImages].filter(Boolean);
+    if (images.some(image => !isDemoImageUrl(image)))
+      return { success: false, error: 'Choose images from the local demo image library.' };
+    if (input.primaryImage && !isDemoImageUrl(input.primaryImage))
+      return { success: false, error: 'The primary image is not a valid local demo image.' };
+
+    const productId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const primaryImage = input.primaryImage || input.galleryImages[0] || '';
+    const product: Product = {
+      id: productId,
+      brand_id: input.brandId,
+      product_code: code,
+      title,
+      title_en: titleEn,
+      category: input.category,
+      description: input.description.trim(),
+      description_en: input.descriptionEn.trim(),
+      material: input.material.trim(),
+      capacity_or_size: input.capacityOrSize.trim(),
+      primary_image: primaryImage,
+      gallery_images: [...new Set(input.galleryImages.filter(Boolean))],
+      active: false,
+      series_id: input.seriesId || undefined,
+      tag_codes: featureTags
+        .filter(tag => input.tagCodes.includes(tag.code))
+        .map(tag => tag.code),
+      skus: [],
+    };
+    setProducts(prev => [product, ...prev]);
+    addAuditLog(
+      currentAdminUser.name,
+      'CREATE_PRODUCT',
+      code,
+      `Created product ${titleEn} as an unlisted draft with no SKUs.`
+    );
+    return { success: true as const, productId };
+  }, [products, brands, series, featureTags, currentAdminUser, addAuditLog]);
+
+  const adminUpdateProduct = useCallback((productId: string, input: AdminProductInput) => {
+    const product = products.find(item => item.id === productId);
+    if (!product) return { success: false, error: 'Product not found.' };
+    const code = input.productCode.trim();
+    const title = input.title.trim();
+    const titleEn = input.titleEn.trim();
+    if (!code || !title || !titleEn)
+      return { success: false, error: 'Product code and both product names are required.' };
+    if (
+      products.some(
+        item =>
+          item.id !== productId && item.product_code.toLowerCase() === code.toLowerCase()
+      )
+    )
+      return { success: false, error: `Product code ${code} already exists.` };
+    if (!brands.some(b => b.id === input.brandId))
+      return { success: false, error: 'Select a valid brand.' };
+    if (input.seriesId && !series.some(item => item.id === input.seriesId))
+      return { success: false, error: 'Select a valid series.' };
+    if (input.tagCodes.some(codeValue => !featureTags.some(tag => tag.code === codeValue)))
+      return { success: false, error: 'Select valid feature tags.' };
+    const images = [input.primaryImage, ...input.galleryImages].filter(Boolean);
+    if (images.some(image => !isDemoImageUrl(image)))
+      return { success: false, error: 'Choose images from the local demo image library.' };
+    const primaryImage = input.primaryImage || input.galleryImages[0] || '';
+    if (product.active !== false && !isDemoImageUrl(primaryImage))
+      return {
+        success: false,
+        error: 'A listed product must keep at least one valid primary image.',
+      };
+    const galleryImages = [...new Set(input.galleryImages.filter(Boolean))];
+    const allowedImages = new Set([primaryImage, ...galleryImages]);
+    const next: Product = {
+      ...product,
+      brand_id: input.brandId,
+      product_code: code,
+      title,
+      title_en: titleEn,
+      category: input.category,
+      description: input.description.trim(),
+      description_en: input.descriptionEn.trim(),
+      material: input.material.trim(),
+      capacity_or_size: input.capacityOrSize.trim(),
+      primary_image: primaryImage,
+      gallery_images: galleryImages,
+      series_id: input.seriesId || undefined,
+      tag_codes: featureTags
+        .filter(tag => input.tagCodes.includes(tag.code))
+        .map(tag => tag.code),
+      skus: product.skus.map(sku =>
+        sku.image_url && !allowedImages.has(sku.image_url)
+          ? { ...sku, image_url: undefined }
+          : sku
+      ),
+    };
+    setProducts(prev => prev.map(item => (item.id === productId ? next : item)));
+    addAuditLog(
+      currentAdminUser.name,
+      'UPDATE_PRODUCT',
+      code,
+      `Updated product fields; historical order snapshots were not changed.`
+    );
+    return { success: true as const };
+  }, [products, brands, series, featureTags, currentAdminUser, addAuditLog]);
+
+  const adminSetProductActive = useCallback((productId: string, active: boolean) => {
+    const product = products.find(item => item.id === productId);
+    if (!product) return { success: false, error: 'Product not found.' };
+    if (active) {
+      const activeSkus = product.skus.filter(sku => sku.sellable_status === 'active');
+      if (!activeSkus.length) {
+        return { success: false, error: 'Add at least one active SKU before listing.' };
+      }
+      const image = product.primary_image || product.gallery_images[0];
+      if (!isDemoImageUrl(image)) {
+        return { success: false, error: 'Add at least one valid local product image before listing.' };
+      }
+    }
+    setProducts(prev =>
+      prev.map(item => (item.id === productId ? { ...item, active } : item))
+    );
+    addAuditLog(
+      currentAdminUser.name,
+      active ? 'PUBLISH_PRODUCT' : 'UNPUBLISH_PRODUCT',
+      product.product_code,
+      active
+        ? 'Listed product in the customer catalog.'
+        : 'Unlisted product from the customer catalog.'
+    );
+    return { success: true as const };
+  }, [products, currentAdminUser, addAuditLog]);
+
+  const adminCreateSku = useCallback((
+    productId: string,
+    input: AdminSkuInput,
+    initialOnHand = 0
+  ) => {
+    const product = products.find(item => item.id === productId);
+    if (!product) return { success: false, error: 'Product not found.' };
+    const code = input.skuCode.trim();
+    if (!code) return { success: false, error: 'SKU code is required.' };
+    if (
+      products.some(item =>
+        item.skus.some(sku => sku.sku_code.toLowerCase() === code.toLowerCase())
+      )
+    )
+      return { success: false, error: `SKU code ${code} already exists.` };
+    if (!input.colorName.trim() || !input.colorHex)
+      return { success: false, error: 'Colour name and swatch are required.' };
+    if (!Number.isFinite(input.basePriceUsd) || input.basePriceUsd <= 0)
+      return { success: false, error: 'Base wholesale price must be greater than 0.' };
+    const productImages = new Set([product.primary_image, ...product.gallery_images]);
+    if (input.imageUrl && (!isDemoImageUrl(input.imageUrl) || !productImages.has(input.imageUrl)))
+      return {
+        success: false,
+        error: 'A SKU image must belong to the current product gallery.',
+      };
+    if (!Number.isInteger(initialOnHand) || initialOnHand < 0)
+      return { success: false, error: 'Initial on-hand must be a non-negative whole number.' };
+
+    const skuId = `sku-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const sku: ProductSKU = {
+      id: skuId,
+      product_id: productId,
+      sku_code: code,
+      color_name: input.colorName.trim(),
+      color_name_en: input.colorNameEn.trim(),
+      image_url: input.imageUrl,
+      color_hex: input.colorHex,
+      base_price_usd: input.basePriceUsd,
+      sellable_status: input.sellableStatus,
+    };
+    setProducts(prev =>
+      prev.map(item =>
+        item.id === productId ? { ...item, skus: [...item.skus, sku] } : item
+      )
+    );
+    setInventory(prev => [
+      ...prev,
+      {
+        warehouse_id: 'wh-sh',
+        sku_id: skuId,
+        on_hand: initialOnHand,
+        reserved: 0,
+        unsellable: 0,
+        updated_at: new Date().toISOString().slice(0, 10),
+      },
+    ]);
+    addAuditLog(
+      currentAdminUser.name,
+      'CREATE_SKU',
+      code,
+      `Created SKU for ${product.product_code} with initial on-hand ${initialOnHand}.`
+    );
+    return { success: true as const, skuId };
+  }, [products, currentAdminUser, addAuditLog]);
+
+  const adminUpdateSku = useCallback((productId: string, skuId: string, input: AdminSkuInput) => {
+    const product = products.find(item => item.id === productId);
+    if (!product) return { success: false, error: 'Product not found.' };
+    const sku = product.skus.find(item => item.id === skuId);
+    if (!sku) return { success: false, error: 'SKU not found.' };
+    const code = input.skuCode.trim();
+    if (!code) return { success: false, error: 'SKU code is required.' };
+    if (
+      products.some(item =>
+        item.skus.some(
+          other =>
+            other.id !== skuId && other.sku_code.toLowerCase() === code.toLowerCase()
+        )
+      )
+    )
+      return { success: false, error: `SKU code ${code} already exists.` };
+    if (!input.colorName.trim() || !input.colorHex)
+      return { success: false, error: 'Colour name and swatch are required.' };
+    if (!Number.isFinite(input.basePriceUsd) || input.basePriceUsd <= 0)
+      return { success: false, error: 'Base wholesale price must be greater than 0.' };
+    const productImages = new Set([product.primary_image, ...product.gallery_images]);
+    if (input.imageUrl && (!isDemoImageUrl(input.imageUrl) || !productImages.has(input.imageUrl)))
+      return {
+        success: false,
+        error: 'A SKU image must belong to the current product gallery.',
+      };
+
+    const nextSku: ProductSKU = {
+      ...sku,
+      sku_code: code,
+      color_name: input.colorName.trim(),
+      color_name_en: input.colorNameEn.trim(),
+      image_url: input.imageUrl,
+      color_hex: input.colorHex,
+      base_price_usd: input.basePriceUsd,
+      sellable_status: input.sellableStatus,
+    };
+    setProducts(prev =>
+      prev.map(item =>
+        item.id === productId
+          ? {
+              ...item,
+              skus: item.skus.map(entry => (entry.id === skuId ? nextSku : entry)),
+            }
+          : item
+      )
+    );
+    addAuditLog(
+      currentAdminUser.name,
+      'UPDATE_SKU',
+      code,
+      `Updated SKU ${sku.sku_code}; order snapshots and reservation IDs were preserved.`
+    );
+    return { success: true as const };
+  }, [products, currentAdminUser, addAuditLog]);
+
+  const adminSaveSeries = useCallback((nextSeries: SeriesDefinition[]) => {
+    if (!nextSeries.length) return { success: false, error: 'At least one series is required.' };
+    const ids = new Set<string>();
+    for (const item of nextSeries) {
+      if (!/^[a-z0-9-]{1,40}$/.test(item.id) || ids.has(item.id))
+        return { success: false, error: 'Series IDs must be unique lowercase codes.' };
+      if (!item.nameZh.trim() || !item.nameEn.trim())
+        return { success: false, error: 'Each series needs Chinese and English names.' };
+      if (!Number.isSafeInteger(item.order) || item.order < 1)
+        return { success: false, error: 'Series order must be a positive whole number.' };
+      ids.add(item.id);
+    }
+    const removed = series.find(item => !ids.has(item.id));
+    if (removed && products.some(product => product.series_id === removed.id))
+      return { success: false, error: 'Cannot remove a series that is assigned to a product.' };
+    setSeries([...nextSeries].sort((a, b) => a.order - b.order));
+    addAuditLog(currentAdminUser.name, 'SAVE_SERIES', 'catalog', 'Updated series dictionary.');
+    return { success: true as const };
+  }, [series, products, currentAdminUser, addAuditLog]);
+
+  const adminSaveFeatureTags = useCallback((nextTags: FeatureTagDefinition[]) => {
+    if (!nextTags.length)
+      return { success: false, error: 'At least one feature tag is required.' };
+    const codes = new Set<string>();
+    for (const tag of nextTags) {
+      if (!/^[A-Z0-9_]{2,40}$/.test(tag.code) || codes.has(tag.code))
+        return { success: false, error: 'Tag codes must be unique uppercase codes.' };
+      if (!tag.nameZh.trim() || !tag.nameEn.trim())
+        return { success: false, error: 'Each tag needs Chinese and English names.' };
+      if (!['orange', 'blue', 'sky', 'green', 'grey', 'purple'].includes(tag.tone))
+        return { success: false, error: 'Choose a valid tag tone.' };
+      if (!Number.isSafeInteger(tag.order) || tag.order < 1)
+        return { success: false, error: 'Tag order must be a positive whole number.' };
+      codes.add(tag.code);
+    }
+    const removed = featureTags.find(tag => !codes.has(tag.code));
+    if (
+      removed &&
+      products.some(product => (product.tag_codes ?? []).includes(removed.code))
+    )
+      return { success: false, error: 'Cannot remove a tag that is assigned to a product.' };
+    setFeatureTags([...nextTags].sort((a, b) => a.order - b.order));
+    addAuditLog(currentAdminUser.name, 'SAVE_FEATURE_TAGS', 'catalog', 'Updated feature tag dictionary.');
+    return { success: true as const };
+  }, [featureTags, products, currentAdminUser, addAuditLog]);
+
   // Complete first-time password reset
   const completePasswordReset = useCallback((_newPassword: string) => {
     if (!currentCustomerUser) return;
@@ -1701,6 +2059,8 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
         brands,
         brandGrants,
         products,
+        series,
+        featureTags,
         warehouses,
         inventory,
         tierRules,
@@ -1738,6 +2098,13 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
         adminUpdateTierRule,
         adminAddOrUpdatePromotion,
         excelImportStock,
+        adminCreateProduct,
+        adminUpdateProduct,
+        adminSetProductActive,
+        adminCreateSku,
+        adminUpdateSku,
+        adminSaveSeries,
+        adminSaveFeatureTags,
         activeDrawer,
         openDrawer,
         closeDrawer,

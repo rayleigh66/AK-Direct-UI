@@ -37,6 +37,8 @@ import {
 export const CatalogView: React.FC = () => {
   const {
     products,
+    series,
+    featureTags,
     inventory,
     promotions,
     currentCompany,
@@ -55,6 +57,8 @@ export const CatalogView: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [selectedBrandCode, setSelectedBrandCode] = useState<string>('AOKING');
+  const [selectedSeries, setSelectedSeries] = useState<string>('all');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // Detail Modal & Restock Modal states
   const [restockSku, setRestockSku] = useState<{ product: Product; sku: ProductSKU } | null>(null);
@@ -75,13 +79,43 @@ export const CatalogView: React.FC = () => {
   }, [currentCompany, brandGrants, activeBrand]);
 
   // Filter products by brand and search/category
+  const activeSeries = useMemo(
+    () => series.filter(item => item.active).sort((a, b) => a.order - b.order),
+    [series]
+  );
+  const activeTags = useMemo(
+    () => featureTags.filter(tag => tag.active).sort((a, b) => a.order - b.order),
+    [featureTags]
+  );
+  const tagLabel = (code: string) => featureTags.find(tag => tag.code === code)?.nameEn ?? code;
+  const tagColor = (code: string) =>
+    ({
+      orange: '#ff681e',
+      blue: '#2f6fed',
+      sky: '#1c8199',
+      green: '#198364',
+      grey: '#777',
+      purple: '#7048b5',
+    })[featureTags.find(tag => tag.code === code)?.tone ?? 'grey'];
+
   const filteredProducts = useMemo(() => {
     if (!isBrandAuthorized) return [];
 
     return products.filter(p => {
-      if (p.brand_id !== activeBrand.id) return false;
+      if (p.brand_id !== activeBrand.id || p.active === false) return false;
+      const activeSkuList = p.skus.filter(sku => sku.sellable_status === 'active');
+      if (!activeSkuList.length) return false;
 
       if (selectedCategory !== 'all' && p.category !== selectedCategory) {
+        return false;
+      }
+      if (selectedSeries !== 'all' && p.series_id !== selectedSeries) {
+        return false;
+      }
+      if (
+        selectedTags.length > 0 &&
+        !selectedTags.every(code => (p.tag_codes ?? []).includes(code))
+      ) {
         return false;
       }
 
@@ -101,7 +135,7 @@ export const CatalogView: React.FC = () => {
       }
 
       if (inStockOnly) {
-        const hasStock = p.skus.some(s => {
+        const hasStock = activeSkuList.some(s => {
           const { totalAvailable } = calculateSKUAvailableStock(s.id, inventory);
           return totalAvailable >= SKU_MOQ;
         });
@@ -110,7 +144,17 @@ export const CatalogView: React.FC = () => {
 
       return true;
     });
-  }, [products, activeBrand, isBrandAuthorized, selectedCategory, searchQuery, inStockOnly, inventory]);
+  }, [
+    products,
+    activeBrand,
+    isBrandAuthorized,
+    selectedCategory,
+    selectedSeries,
+    selectedTags,
+    searchQuery,
+    inStockOnly,
+    inventory,
+  ]);
 
   const categories = [
     { id: 'all', label: 'All in-stock' },
@@ -423,6 +467,34 @@ export const CatalogView: React.FC = () => {
               </label>
             </div>
 
+            {/* Series Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none" data-testid="series-filters">
+              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#999]">Series</span>
+              <button
+                onClick={() => setSelectedSeries('all')}
+                className={`min-h-[38px] px-3 py-1.5 text-[11px] font-bold rounded-[8px] whitespace-nowrap ${
+                  selectedSeries === 'all'
+                    ? 'bg-[#171717] text-white'
+                    : 'bg-white border border-[#e8e8e6] text-[#696b6c]'
+                }`}
+              >
+                All series
+              </button>
+              {activeSeries.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setSelectedSeries(item.id)}
+                  className={`min-h-[38px] px-3 py-1.5 text-[11px] font-bold rounded-[8px] whitespace-nowrap ${
+                    selectedSeries === item.id
+                      ? 'bg-[#171717] text-white'
+                      : 'bg-white border border-[#e8e8e6] text-[#696b6c]'
+                  }`}
+                >
+                  {item.nameEn}
+                </button>
+              ))}
+            </div>
+
             {/* Category Filter Tabs */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
               {categories.map(c => (
@@ -439,12 +511,42 @@ export const CatalogView: React.FC = () => {
                 </button>
               ))}
             </div>
+
+            {/* Feature Tag Filters */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none" data-testid="tag-filters">
+              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#999]">Tags</span>
+              {activeTags.map(tag => {
+                const selected = selectedTags.includes(tag.code);
+                return (
+                  <button
+                    key={tag.code}
+                    onClick={() =>
+                      setSelectedTags(prev =>
+                        prev.includes(tag.code)
+                          ? prev.filter(code => code !== tag.code)
+                          : [...prev, tag.code]
+                      )
+                    }
+                    aria-pressed={selected}
+                    className="min-h-[34px] px-2.5 py-1 rounded-full border text-[10px] font-semibold whitespace-nowrap"
+                    style={{
+                      borderColor: selected ? tagColor(tag.code) : '#e8e8e6',
+                      background: selected ? `${tagColor(tag.code)}14` : '#fff',
+                      color: selected ? tagColor(tag.code) : '#696b6c',
+                    }}
+                  >
+                    {tag.nameEn}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Product Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {filteredProducts.map(product => {
-              const primarySku = product.skus[0];
+              const productSkus = product.skus.filter(sku => sku.sellable_status === 'active');
+              const primarySku = productSkus[0];
               const { totalAvailable } = calculateSKUAvailableStock(primarySku.id, inventory);
               const priceInfo = calculateEffectiveUnitPrice(
                 primarySku.base_price_usd,
@@ -499,7 +601,7 @@ export const CatalogView: React.FC = () => {
                       <div className="flex items-center gap-1.5 mt-2.5">
                         <span className="text-[10px] text-[#aaa]">Colours:</span>
                         <div className="flex items-center gap-1">
-                          {product.skus.map(s => {
+                          {productSkus.map(s => {
                             const sStock = calculateSKUAvailableStock(s.id, inventory).totalAvailable;
                             return (
                               <span
@@ -514,6 +616,23 @@ export const CatalogView: React.FC = () => {
                           })}
                         </div>
                       </div>
+                      {(product.tag_codes ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {(product.tag_codes ?? []).slice(0, 3).map(code => (
+                            <span
+                              key={code}
+                              className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border"
+                              style={{
+                                color: tagColor(code),
+                                borderColor: `${tagColor(code)}40`,
+                                background: `${tagColor(code)}0f`,
+                              }}
+                            >
+                              {tagLabel(code)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Footer: Price & Stock Actions */}

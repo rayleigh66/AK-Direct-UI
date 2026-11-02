@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -27,6 +27,11 @@ import { RestockManageView } from './components/InternalViews/RestockManageView'
 import { InternalMailboxView } from './components/InternalViews/InternalMailboxView';
 import { InventoryImportView } from './components/InternalViews/InventoryImportView';
 import { CompanyAccountsView } from './components/InternalViews/CompanyAccountsView';
+const ProductAdminView = lazy(() =>
+  import('./components/InternalViews/ProductAdminView').then(module => ({
+    default: module.ProductAdminView,
+  }))
+);
 import { PromoTierConfigView } from './components/InternalViews/PromoTierConfigView';
 import { AuditLogView } from './components/InternalViews/AuditLogView';
 
@@ -63,6 +68,16 @@ const MainLayout: React.FC = () => {
       // Internal / Admin Views
       case 'inventory_import':
         return <InventoryImportView />;
+      case 'admin_products':
+        return (
+          <Suspense
+            fallback={
+              <div className="p-8 text-center text-xs text-slate-500">正在加载商品管理…</div>
+            }
+          >
+            <ProductAdminView />
+          </Suspense>
+        );
       case 'admin_companies':
         return <CompanyAccountsView />;
       case 'promo_tier':

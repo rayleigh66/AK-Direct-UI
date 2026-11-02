@@ -28,7 +28,12 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
 
   const found = useMemo(() => {
     for (const product of products) {
-      const sku = product.skus.find((item) => item.id === skuId || item.sku_code === skuId);
+      if (product.active === false) continue;
+      const sku = product.skus.find(
+        (item) =>
+          (item.id === skuId || item.sku_code === skuId) &&
+          item.sellable_status === 'active'
+      );
       if (sku) return { product, sku };
     }
     return null;
@@ -38,6 +43,7 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
   const [quantity, setQuantity] = useState(SKU_MOQ);
   const [error, setError] = useState('');
   const [added, setAdded] = useState(false);
+  const [activeImageUrl, setActiveImageUrl] = useState('');
 
   useEffect(() => {
     setSelectedSkuId(found?.sku.id ?? '');
@@ -56,8 +62,10 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
     };
   }, [onClose]);
 
+  const availableSkus =
+    found?.product.skus.filter((item) => item.sellable_status === 'active') ?? [];
   const selectedSku: ProductSKU | undefined =
-    found?.product.skus.find((item) => item.id === selectedSkuId) ?? found?.sku;
+    availableSkus.find((item) => item.id === selectedSkuId) ?? found?.sku;
   const tierDiscount = currentCompanyTierInfo?.currentTier.discount_rate ?? 0;
   const stock = selectedSku
     ? calculateSKUAvailableStock(selectedSku.id, inventory).totalAvailable
@@ -73,15 +81,27 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
         promotions
       )
     : null;
-  // Demo data has one product photo per product, not per colour. Keep the real product image
-  // instead of cycling through unrelated gallery photos when the colour changes.
-  const image = selectedSku?.image_url ?? found?.product.primary_image ?? '';
+  const galleryUrls = found
+    ? [
+        ...new Set(
+          [
+            selectedSku?.image_url,
+            found.product.primary_image,
+            ...found.product.gallery_images,
+          ].filter((url): url is string => !!url)
+        ),
+      ]
+    : [];
+  const image = activeImageUrl && galleryUrls.includes(activeImageUrl)
+    ? activeImageUrl
+    : selectedSku?.image_url ?? found?.product.primary_image ?? '';
 
   useEffect(() => {
     setQuantity(SKU_MOQ);
     setError('');
     setAdded(false);
-  }, [selectedSkuId]);
+    setActiveImageUrl(selectedSku?.image_url ?? found?.product.primary_image ?? '');
+  }, [selectedSkuId, selectedSku?.image_url, found?.product.primary_image]);
 
   if (!found || !selectedSku || !priceInfo) return null;
 
@@ -154,6 +174,23 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
               </span>
             )}
           </div>
+          {galleryUrls.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Product images">
+              {galleryUrls.map(url => (
+                <button
+                  key={url}
+                  type="button"
+                  onClick={() => setActiveImageUrl(url)}
+                  aria-pressed={image === url}
+                  className={`w-14 h-14 rounded-[8px] overflow-hidden border shrink-0 ${
+                    image === url ? 'border-[#ff681e] ring-1 ring-[#ff681e]' : 'border-[#e8e8e6]'
+                  }`}
+                >
+                  <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div>
             <h1 className="text-xl font-extrabold tracking-tight text-[#151515] leading-snug">
@@ -167,7 +204,7 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
           <section aria-label="Choose a colour" className="space-y-2">
             <div className="text-xs font-bold text-[#151515]">Colour</div>
             <div className="grid grid-cols-2 gap-2" data-testid="color-options">
-              {product.skus.map((sku) => {
+              {availableSkus.map((sku) => {
                 const skuStock = calculateSKUAvailableStock(sku.id, inventory).totalAvailable;
                 const selected = sku.id === selectedSku.id;
                 return (
@@ -277,6 +314,9 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
                 Submitting an order request does not reserve stock. Your sales representative confirms
                 the final quantity and warehouse allocation before the demo reservation is created.
               </span>
+            </div>
+            <div className="mt-2 text-[11px] text-[#8f9191]">
+              {product.description_en || product.description}
             </div>
             <div className="mt-2 text-[11px] text-[#8f9191]">
               Material: {product.material} · Capacity: {product.capacity_or_size}

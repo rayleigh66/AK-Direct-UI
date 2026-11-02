@@ -3,10 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import businessBackpackImage from '../assets/images/aoking_business_backpack_1793546722780.jpg';
-import hardshellLuggageImage from '../assets/images/aoking_hardshell_luggage_1793546722486.jpg';
-import urbanCommuterPackImage from '../assets/images/aoking_urban_commuter_pack_1793546722814.jpg';
-import executiveBriefcaseImage from '../assets/images/aoking_executive_briefcase_1793546722874.jpg';
+import { DEMO_IMAGE_LIBRARY } from './demoImageLibrary';
 import {
   Brand,
   BrandGrant,
@@ -23,7 +20,33 @@ import {
   CustomerNotification,
   InternalEmailTemplate,
   AuditLog,
+  SeriesDefinition,
+  FeatureTagDefinition,
 } from '../types';
+
+export const INITIAL_SERIES: SeriesDefinition[] = [
+  { id: 'core', nameZh: '日常核心', nameEn: 'Everyday Core', order: 1, active: true },
+  { id: 'commute', nameZh: '城市通勤', nameEn: 'City Commute', order: 2, active: true },
+  { id: 'travel', nameZh: '旅行周末', nameEn: 'Travel & Weekender', order: 3, active: true },
+  { id: 'outdoor', nameZh: '户外探索', nameEn: 'Trail & Outdoor', order: 4, active: true },
+  { id: 'compact', nameZh: '轻便随身', nameEn: 'Compact Carry', order: 5, active: true },
+];
+
+export const INITIAL_FEATURE_TAGS: FeatureTagDefinition[] = [
+  { code: 'WATERPROOF', nameZh: '防水', nameEn: 'Waterproof', tone: 'blue', order: 1, active: true },
+  {
+    code: 'WATER_RESISTANT',
+    nameZh: '防泼水',
+    nameEn: 'Water-resistant',
+    tone: 'sky',
+    order: 2,
+    active: true,
+  },
+  { code: 'LAPTOP', nameZh: '电脑保护仓', nameEn: 'Laptop compartment', tone: 'purple', order: 3, active: true },
+  { code: 'RECYCLED', nameZh: '再生材料', nameEn: 'Recycled materials', tone: 'green', order: 4, active: true },
+  { code: 'LIGHTWEIGHT', nameZh: '轻量化', nameEn: 'Lightweight', tone: 'grey', order: 5, active: true },
+  { code: 'ANTI_THEFT', nameZh: '防盗设计', nameEn: 'Anti-theft', tone: 'orange', order: 6, active: true },
+];
 
 export const INITIAL_BRANDS: Brand[] = [
   {
@@ -56,14 +79,16 @@ export const INITIAL_PRODUCTS: Product[] = [
     title: 'AOKING 商务防水精英双肩包 (Elite Waterproof Travel Pack)',
     title_en: 'Elite Waterproof Travel Pack',
     category: 'Business Backpacks',
+    active: true,
+    series_id: 'core',
+    tag_codes: ['WATER_RESISTANT', 'LAPTOP'],
+    description_en:
+      'A clean everyday backpack with a padded 17-inch laptop compartment, water-resistant shell and thoughtful internal organisation.',
     description: '采用高强度哑光防水面料与防割防泼水涂层，内置 17.3 英寸加厚防震独立电脑舱与 USB 快速充能端口。人体工学 S 型蜂窝减压肩带与隐形防盗后袋。',
     material: '900D Matte High-Density Polyester / Water-Resistant YKK Zippers',
     capacity_or_size: '32L (48 x 33 x 18 cm)',
-    primary_image: businessBackpackImage,
-    gallery_images: [
-      businessBackpackImage,
-      urbanCommuterPackImage,
-    ],
+    primary_image: DEMO_IMAGE_LIBRARY[0].url,
+    gallery_images: [DEMO_IMAGE_LIBRARY[0].url],
     skus: [
       {
         id: 'sku-9042-blk',
@@ -114,12 +139,17 @@ export const INITIAL_PRODUCTS: Product[] = [
     title: 'AOKING 航空级全铝镁框防爆登机箱 20" (AeroLite Polycarbonate Spinner)',
     title_en: 'AeroLite Polycarbonate Spinner',
     category: 'Travel Luggage',
+    active: true,
+    series_id: 'travel',
+    tag_codes: [],
+    description_en:
+      'A lightweight cabin spinner with a flexible polycarbonate shell, aluminium frame and smooth dual-wheel mobility.',
     description: '德国拜耳三层复合 PC 韧性箱壳，航空级加厚铝镁合金防撞防爆中框与四角包边。静音万向双排万向轮，内嵌式海关 TSA 双重锁。',
     material: '100% Bayer Makrolon Polycarbonate / Aviation Aluminum Alloy Frame',
     capacity_or_size: '20 Inch Cabin Size (38L, 3.4kg)',
-    primary_image: hardshellLuggageImage,
+    primary_image: DEMO_IMAGE_LIBRARY[1].url,
     gallery_images: [
-      hardshellLuggageImage,
+      DEMO_IMAGE_LIBRARY[1].url,
     ],
     skus: [
       {
@@ -161,12 +191,17 @@ export const INITIAL_PRODUCTS: Product[] = [
     title: 'AOKING 城市机能战术卷顶双肩包 (Tactical Rolltop Commuter)',
     title_en: 'Tactical Rolltop Commuter',
     category: 'Urban Commuter',
+    active: true,
+    series_id: 'commute',
+    tag_codes: ['RECYCLED', 'LIGHTWEIGHT', 'LAPTOP'],
+    description_en:
+      'An expandable rolltop commuter with modular webbing, a padded laptop sleeve and a separate shoe compartment.',
     description: '灵动可扩容卷顶闭合架构，模块化战术织带外挂系统，两侧深口弹性保温水壶兜，下沉式独立鞋仓/脏衣仓。',
     material: '1000D Ballistic Cordura / Duraflex High-Strength Buckles',
     capacity_or_size: '28L - 35L Expandable (50 x 30 x 16 cm)',
-    primary_image: urbanCommuterPackImage,
+    primary_image: DEMO_IMAGE_LIBRARY[2].url,
     gallery_images: [
-      urbanCommuterPackImage,
+      DEMO_IMAGE_LIBRARY[2].url,
     ],
     skus: [
       {
@@ -198,12 +233,17 @@ export const INITIAL_PRODUCTS: Product[] = [
     title: 'AOKING 尊享头层牛皮公文包 (Executive Leather Laptop Briefcase)',
     title_en: 'Executive Leather Laptop Briefcase',
     category: 'Executive Briefcases',
+    active: true,
+    series_id: 'commute',
+    tag_codes: ['LAPTOP'],
+    description_en:
+      'A refined full-grain leather briefcase with a padded laptop section, detachable shoulder strap and polished hardware.',
     description: '甄选进口头层植鞣纳帕牛皮，细腻触感经久耐磨。定制精抛光银色金属卡扣，可拆卸真皮减压垫宽肩带，背后设有拉杆箱固定插带。',
     material: 'Full-Grain Tuscan Calfskin / Brushed Alloy Hardware',
     capacity_or_size: '15L (40 x 30 x 9 cm)',
-    primary_image: executiveBriefcaseImage,
+    primary_image: DEMO_IMAGE_LIBRARY[3].url,
     gallery_images: [
-      executiveBriefcaseImage,
+      DEMO_IMAGE_LIBRARY[3].url,
     ],
     skus: [
       {
@@ -235,10 +275,15 @@ export const INITIAL_PRODUCTS: Product[] = [
     title: 'VOYAGER 复古粗帆布周末旅行包 (Heritage Weekend Duffle)',
     title_en: 'Heritage Weekend Duffle',
     category: 'Travel Luggage',
+    active: true,
+    series_id: 'travel',
+    tag_codes: [],
+    description_en:
+      'A heritage-inspired weekend duffle in washed canvas and leather trim, sized for short trips.',
     description: '非 AOKING 授权品牌测试商品，用于验证 T02 未授权品牌访问拒绝机制。',
     material: '16oz Washed Canvas & Crazy Horse Leather',
     capacity_or_size: '45L',
-    primary_image: urbanCommuterPackImage,
+    primary_image: DEMO_IMAGE_LIBRARY[2].url,
     gallery_images: [],
     skus: [
       {
