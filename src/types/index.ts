@@ -42,6 +42,8 @@ export interface Brand {
   id: string;
   code: string; // e.g. "AOKING"
   name: string;
+  /** Customer-facing English label. */
+  name_en?: string;
   is_default_granted: boolean;
 }
 
@@ -56,6 +58,10 @@ export interface ProductSKU {
   product_id: string;
   sku_code: string; // e.g. "AK-9042-BLK"
   color_name: string;
+  /** Customer-facing English label; internal IDs/SKUs remain unchanged. */
+  color_name_en?: string;
+  /** Optional later per-colour image; Demo data currently uses the product image. */
+  image_url?: string;
   color_hex: string;
   base_price_usd: number;
   sellable_status: 'active' | 'discontinued';
@@ -66,6 +72,8 @@ export interface Product {
   brand_id: string;
   product_code: string; // e.g. "AK-9042"
   title: string;
+  /** Customer-facing English title; internal product_code and Demo IDs are unchanged. */
+  title_en?: string;
   category: 'Business Backpacks' | 'Travel Luggage' | 'Urban Commuter' | 'Executive Briefcases';
   description: string;
   material: string;
@@ -94,6 +102,8 @@ export interface TierRule {
   id: string;
   tier_level: number; // 1, 2, 3, 4, 5
   name: string; // e.g. "Tier 1 - Standard", "Tier 2 - Silver"
+  /** Customer-facing English label. */
+  name_en?: string;
   threshold_usd: number; // Cumulative spend threshold in USD
   discount_rate: number; // 0.05 = 5% off
 }

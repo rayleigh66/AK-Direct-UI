@@ -107,7 +107,7 @@ interface AppContextType {
     destinationCountryAlpha3: string;
     expectedShipDate: string;
     shippingRequirements: string;
-  }) => { success: boolean; orderId?: string; error?: string };
+  }) => { success: boolean; orderId?: string; order?: Order; error?: string };
   customerCancelOrder: (orderId: string, reason: string) => { success: boolean; message: string };
   customerRequestChange: (orderId: string, reason: string, modifiedLines?: { sku_id: string; new_qty: number }[]) => { success: boolean; message: string };
   
@@ -310,7 +310,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (quantity > totalAvailable) {
       return {
         success: false,
-        message: `订购数量 (${quantity} PCS) 超出当前精确可订库存 (${totalAvailable} PCS)`,
+        message: `Requested ${quantity} PCS exceeds current available stock (${totalAvailable} PCS).`,
       };
     }
 
@@ -342,7 +342,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (quantity > totalAvailable) {
       return {
         success: false,
-        message: `订购数量 (${quantity} PCS) 超出当前精确可订库存 (${totalAvailable} PCS)`,
+        message: `Requested ${quantity} PCS exceeds current available stock (${totalAvailable} PCS).`,
       };
     }
 
@@ -368,11 +368,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     shippingRequirements: string;
   }) => {
     if (!currentCompany || !currentCustomerUser) {
-      return { success: false, error: '请先登录客户账号' };
+      return { success: false, error: 'Please sign in to a customer account.' };
     }
 
     if (cart.length === 0) {
-      return { success: false, error: '订购清单为空，请先选择商品 SKU' };
+      return { success: false, error: 'Your order list is empty. Add a SKU first.' };
     }
 
     // Privacy check on remarks
@@ -396,7 +396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (item.quantity > totalAvailable) {
         return {
           success: false,
-          error: `SKU ${item.sku_id} 可订库存已变更为 ${totalAvailable} PCS，无法订购 ${item.quantity} PCS`,
+          error: `SKU ${item.sku_id} now has ${totalAvailable} PCS available; ${item.quantity} PCS cannot be ordered.`,
         };
       }
 
@@ -451,7 +451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       expected_ship_date: data.expectedShipDate,
       shipping_requirements: data.shippingRequirements.trim(),
       assigned_sales_id: currentCompany.assigned_sales_id,
-      customer_visible_note: '订购申请已提交。正在等待负责业务员人工核实数量与库存并为您预占。提交申请不立即锁库。',
+      customer_visible_note: 'Order request submitted. Your sales representative will verify quantities and stock before creating a reservation. Submitting does not lock stock.',
       created_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
       updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
     };
@@ -466,7 +466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Order submitted with ${lines.length} lines, total quote USD $${newOrder.total_quoted_usd}. No stock locked yet.`
     );
 
-    return { success: true, orderId: newOrder.id };
+    return { success: true, orderId: newOrder.id, order: newOrder };
   }, [
     currentCompany,
     currentCustomerUser,
@@ -481,7 +481,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Customer Cancel Order
   const customerCancelOrder = useCallback((orderId: string, reason: string) => {
     const order = orders.find(o => o.id === orderId);
-    if (!order) return { success: false, message: '订单不存在' };
+    if (!order) return { success: false, message: 'Order not found.' };
 
     if (order.status === 'PENDING_CONFIRMATION') {
       // Direct cancellation allowed before sales confirmation
@@ -491,7 +491,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ? {
                 ...o,
                 status: 'CANCELLED',
-                customer_visible_note: `客户已主动取消订购单。原因: ${reason}`,
+                customer_visible_note: `The customer cancelled this pending request. Reason: ${reason}`,
                 updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
               }
             : o
@@ -505,10 +505,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         `Customer cancelled unconfirmed order. Reason: ${reason}`
       );
 
-      return { success: true, message: '订单已成功取消' };
+      return { success: true, message: 'Order cancelled.' };
     }
 
     if (order.status === 'CONFIRMED') {
+      if (order.change_request?.status === 'pending') {
+        return {
+          success: false,
+          message: 'A cancellation or quantity change request is already pending review.',
+        };
+      }
       // Must submit a change request for review by sales rep
       setOrders(prev =>
         prev.map(o =>
@@ -523,7 +529,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   status: 'pending',
                   requested_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
                 },
-                customer_visible_note: `已提交取消申请，等待业务员核准并释放预占库存。原因: ${reason}`,
+                customer_visible_note: `Cancellation requested; awaiting sales review and release of reserved stock. Reason: ${reason}`,
                 updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
               }
             : o
@@ -539,13 +545,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return {
         success: true,
-        message: '订单已确认锁定库存，已向负责业务员提交取消审核申请。',
+        message: 'A cancellation request has been sent to your sales representative for review.',
       };
     }
 
     return {
       success: false,
-      message: '已进入付款或备货阶段的订单不允许直接取消，请线下联系业务员处理。',
+      message: 'Paid or preparing orders cannot be cancelled here. Please contact your sales representative.',
     };
   }, [orders, currentCustomerUser, addAuditLog]);
 
@@ -556,7 +562,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     modifiedLines?: { sku_id: string; new_qty: number }[]
   ) => {
     const order = orders.find(o => o.id === orderId);
-    if (!order) return { success: false, message: '订单不存在' };
+    if (!order) return { success: false, message: 'Order not found.' };
 
     if (order.status === 'PENDING_CONFIRMATION') {
       // If pending confirmation, apply modifications directly
@@ -597,11 +603,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           `Modified unconfirmed order quantities directly.`
         );
 
-        return { success: true, message: '订购数量已直接更新' };
+        return { success: true, message: 'Order quantities updated.' };
       }
     }
 
     if (order.status === 'CONFIRMED') {
+      if (order.change_request?.status === 'pending') {
+        return {
+          success: false,
+          message: 'A cancellation or quantity change request is already pending review.',
+        };
+      }
       setOrders(prev =>
         prev.map(o =>
           o.id === orderId
@@ -622,10 +634,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         )
       );
 
-      return { success: true, message: '已向业务员提交订单修改申请' };
+      return { success: true, message: 'Quantity change request sent to sales.' };
     }
 
-    return { success: false, message: '当前订单状态不支持修改申请' };
+    return { success: false, message: 'This order status does not allow a change request.' };
   }, [orders, currentCustomerUser, addAuditLog]);
 
   // Salesperson: Confirm Order (Atomic Stock Reservation)
@@ -674,7 +686,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               reservation_expires_at: expiryDate,
               reservation_extended_count: 0,
               reservation_allocations: plan.allocations,
-              customer_visible_note: `业务员 Tom 已确认订购单，并在本次前端 Demo 中完成整单模拟预占。库存预占期为 72 小时（截止 ${expiryDate.slice(0, 16).replace('T', ' ')} UTC）。该预占不是数据库事务。请按发票指引进行电汇结算。`,
+              customer_visible_note: `Your order was confirmed and a demo whole-order reservation was created. The reservation is valid for 72 hours (until ${expiryDate.slice(0, 16).replace('T', ' ')} UTC). This is not a database transaction. Please follow the proforma invoice for T/T payment.`,
               internal_note: '整单前端 Mock 预占完成（非数据库事务）。预占计时 72h 启动。',
               updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
             }
@@ -686,8 +698,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const notif: CustomerNotification = {
       id: `notif-${Date.now()}`,
       company_id: order.company_id,
-      title: `订单 ${order.order_no} 确认与库存预占`,
-      message: `业务员已确认您的订购申请，为您成功预占现货库存，预占期限为 72 小时。`,
+      title: `Order ${order.order_no} confirmed`,
+      message: 'Your order request was confirmed and demo stock was reserved for 72 hours.',
       event_type: 'ORDER_CONFIRMED',
       related_id: order.id,
       is_read: false,
@@ -759,7 +771,7 @@ AOKING Direct B2B Platform`,
               ...o,
               reservation_expires_at: newExp,
               reservation_extended_count: (o.reservation_extended_count || 0) + 1,
-              customer_visible_note: `业务员已为您延长库存预占期限 +${additionalHours} 小时，新到期时间: ${newExp.slice(0, 16).replace('T', ' ')} UTC。`,
+              customer_visible_note: `The demo reservation was extended by ${additionalHours} hours. New expiry: ${newExp.slice(0, 16).replace('T', ' ')} UTC.`,
               updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
             }
           : o
@@ -813,7 +825,7 @@ AOKING Direct B2B Platform`,
           ? {
               ...o,
               status: 'RESERVATION_EXPIRED',
-              customer_visible_note: `库存预占已解除并释放回现货大池。原因: ${reason}`,
+              customer_visible_note: `The demo reservation was released back to available stock. Reason: ${reason}`,
               updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
             }
           : o
@@ -889,7 +901,7 @@ AOKING Direct B2B Platform`,
               payment_recorded_at: paymentTime,
               payment_amount_usd: paidAmount,
               payment_reference: reference,
-              customer_visible_note: `实收货款 USD $${paidAmount.toFixed(2)} 已核验入账（凭证: ${reference}）。订单进入发货备料阶段。根据规则，已付款订单不可取消。`,
+              customer_visible_note: `Full payment of USD $${paidAmount.toFixed(2)} has been verified (reference: ${reference}). The order is now preparing for shipment and can no longer be cancelled.`,
               internal_note: `财务核验已到账，已入账客户历史有效采购额。`,
               updated_at: paymentTime,
             }
@@ -921,8 +933,8 @@ AOKING Direct B2B Platform`,
       {
         id: `notif-${Date.now()}`,
         company_id: order.company_id,
-        title: `货款到账确认：${order.order_no}`,
-        message: `USD $${paidAmount.toFixed(2)} 货款已核对入账，已全额计入公司历史有效采购累计额，并重置采购计时。`,
+        title: `Payment received: ${order.order_no}`,
+        message: `USD $${paidAmount.toFixed(2)} has been verified, added to your company\'s historical purchase total, and your inactivity timer was reset.`,
         event_type: 'PAYMENT_RECEIVED',
         related_id: order.id,
         is_read: false,
@@ -1039,8 +1051,8 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       {
         id: `notif-${Date.now()}`,
         company_id: order.company_id,
-        title: `订单 ${order.order_no} 已整单发货`,
-        message: `承运商: ${shipmentData.carrier}, 运单号: ${shipmentData.trackingNo}。`,
+        title: `Order ${order.order_no} shipped`,
+        message: `Carrier: ${shipmentData.carrier}. Tracking: ${shipmentData.trackingNo}.`,
         event_type: 'SHIPMENT_DISPATCHED',
         related_id: order.id,
         is_read: false,
@@ -1120,7 +1132,7 @@ AOKING Direct`,
             ? {
                 ...o,
                 change_request: { ...cr, status: 'rejected', reviewed_at: reviewedAt },
-                customer_visible_note: '变更申请被业务员驳回。订单与库存预占维持原状。',
+                customer_visible_note: 'The change request was rejected. The order and reserved stock remain unchanged.',
                 updated_at: updateTime,
               }
             : o
@@ -1155,7 +1167,7 @@ AOKING Direct`,
                 ...o,
                 status: 'CANCELLED',
                 change_request: { ...cr, status: 'approved', reviewed_at: reviewedAt },
-                customer_visible_note: '业务员已核准您的订单取消申请，原仓库预占库存已释放。',
+                customer_visible_note: 'Your cancellation request was approved and the reserved stock was released.',
                 updated_at: updateTime,
               }
             : o
@@ -1242,7 +1254,7 @@ AOKING Direct`,
               total_confirmed_usd: newTotal,
               reservation_allocations: plan.allocations,
               change_request: { ...cr, status: 'approved', reviewed_at: reviewedAt },
-              customer_visible_note: `业务员已核准数量修改申请，订单总额更新为 USD $${newTotal.toFixed(2)}，原仓库预占已按新数量重新分配。`,
+              customer_visible_note: `Your quantity change was approved. The order total is now USD $${newTotal.toFixed(2)} and the demo reservation was reallocated.`,
               updated_at: updateTime,
             }
           : o
@@ -1259,7 +1271,7 @@ AOKING Direct`,
 
   // Submit Restock Request
   const submitRestockRequest = useCallback((skuId: string, requestedQty: number) => {
-    if (!currentCompany) return { success: false, message: '请先登录客户账号' };
+    if (!currentCompany) return { success: false, message: 'Please sign in to a customer account.' };
 
     let foundSku = null;
     let foundProduct = null;
@@ -1271,7 +1283,7 @@ AOKING Direct`,
         break;
       }
     }
-    if (!foundSku || !foundProduct) return { success: false, message: 'SKU 不存在' };
+    if (!foundSku || !foundProduct) return { success: false, message: 'SKU not found.' };
 
     const newReq: RestockRequest = {
       id: `restock-${Date.now()}`,
@@ -1294,7 +1306,7 @@ AOKING Direct`,
       `Customer requested restock of ${requestedQty} PCS.`
     );
 
-    return { success: true, message: '补货需求已登记并通知业务员！到货后将收到提醒通知。' };
+    return { success: true, message: 'Restock request recorded. You will be notified when stock reaches the MOQ.' };
   }, [currentCompany, products, addAuditLog]);
 
   // Replenish stock & Notify customer if available >= 10 (PRD D09, T24)
@@ -1343,8 +1355,8 @@ AOKING Direct`,
           {
             id: `notif-${Date.now()}-${Math.random()}`,
             company_id: req.company_id,
-            title: `到货通知：${req.sku_code} 现货已恢复`,
-            message: `您之前登记的 ${req.product_title} (${req.color_name}) 现货可订库存已达到起订量，请尽快选购。温馨提示：到货提醒不自动锁定库存。`,
+            title: `Back in stock: ${req.sku_code}`,
+            message: `${req.sku_code} is now available at or above the MOQ. A restock notification does not reserve stock.`,
             event_type: 'RESTOCK_AVAILABLE',
             is_read: false,
             created_at: new Date().toISOString().replace('T', ' ').substr(0, 19),

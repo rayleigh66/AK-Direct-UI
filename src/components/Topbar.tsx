@@ -57,12 +57,25 @@ export const Topbar: React.FC<TopbarProps> = ({
     audit_logs: '敏感操作审计日志',
   };
 
-  const currentTabName = tabTitles[activeTab] || '总览看板';
-  const currentDate = new Date().toLocaleDateString('zh-CN', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'short',
-  });
+  const customerTabTitles: { [key: string]: string } = {
+    catalog: 'Catalog',
+    cart: 'Order list',
+    orders: 'My orders',
+    membership: 'Membership',
+    notifications: 'Notifications',
+  };
+  const currentTabName =
+    currentRole === 'customer'
+      ? customerTabTitles[activeTab] ?? 'Catalog'
+      : tabTitles[activeTab] || '总览看板';
+  const currentDate = new Date().toLocaleDateString(
+    currentRole === 'customer' ? 'en-US' : 'zh-CN',
+    {
+      month: 'long',
+      day: 'numeric',
+      weekday: 'short',
+    }
+  );
 
   const companyNotifs = notifications.filter(n => n.company_id === currentCompany?.id);
 
@@ -73,7 +86,7 @@ export const Topbar: React.FC<TopbarProps> = ({
         <button
           onClick={onOpenMobileSidebar}
           className="lg:hidden w-[39px] h-[39px] border border-[#e8e8e6] rounded-[10px] bg-white flex items-center justify-center text-[#4f5150] hover:bg-[#f6f6f4] shrink-0"
-          aria-label="菜单"
+          aria-label={currentRole === 'customer' ? 'Open navigation' : '菜单'}
         >
           <Menu className="w-4 h-4" />
         </button>
@@ -93,11 +106,11 @@ export const Topbar: React.FC<TopbarProps> = ({
         <button
           onClick={() => setIsCommandSearchOpen(true)}
           className="w-10 sm:w-[260px] h-10 bg-[#f8f8f7] border border-[#eeeeed] rounded-[10px] flex items-center justify-center sm:justify-start gap-2.5 px-0 sm:px-3 text-[#8c8d8c] hover:border-[#ccc] transition-colors shrink-0"
-          title="全局快速搜索 (⌘ K)"
-          aria-label="全局快速搜索"
+          title="Global search (⌘ K)"
+          aria-label="Global search"
         >
           <Search className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden sm:block flex-1 text-left text-xs truncate">搜索款号、订单、客户...</span>
+          <span className="hidden sm:block flex-1 text-left text-xs truncate">{currentRole === 'customer' ? 'Search products, orders...' : '搜索款号、订单、客户...'}</span>
           <span className="text-[10px] font-mono bg-white border border-[#ebebeb] rounded-[5px] px-1.5 py-0.5 text-[#9b9b9b] hidden sm:inline">
             ⌘ K
           </span>
@@ -111,38 +124,43 @@ export const Topbar: React.FC<TopbarProps> = ({
         {/* Divider */}
         <div className="hidden sm:block w-[1px] h-6 bg-[#e8e8e6]" />
 
-        {/* Acceptance Test Matrix Button */}
-        <button
-          onClick={onOpenTestMatrix}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-2 border border-[#e8e8e6] bg-white hover:bg-[#f8f8f6] rounded-[9px] text-xs font-bold text-[#343434] transition-all hover:-translate-y-0.5 shadow-2xs"
-          title="打开核心验收矩阵"
-        >
-          <FileCheck className="w-3.5 h-3.5 text-[#ff681e]" />
-          <span className="hidden md:inline">验收矩阵</span>
-          <span className="text-[10px] font-mono bg-[#fff1e8] text-[#ff681e] px-1 rounded font-bold">
-            T01-T35
-          </span>
-        </button>
+        {/* Acceptance Test Matrix Button (internal QA only) */}
+        {currentRole !== 'customer' && (
+          <button
+            onClick={onOpenTestMatrix}
+            className="hidden lg:flex items-center gap-1.5 px-3 py-2 border border-[#e8e8e6] bg-white hover:bg-[#f8f8f6] rounded-[9px] text-xs font-bold text-[#343434] transition-all hover:-translate-y-0.5 shadow-2xs"
+            title="打开核心验收矩阵"
+          >
+            <FileCheck className="w-3.5 h-3.5 text-[#ff681e]" />
+            <span className="hidden md:inline">验收矩阵</span>
+            <span className="text-[10px] font-mono bg-[#fff1e8] text-[#ff681e] px-1 rounded font-bold">
+              T01-T35
+            </span>
+          </button>
+        )}
 
-        {/* Mobile Viewport Toggle */}
-        <button
-          onClick={toggleMobileSimulator}
-          className="w-[39px] h-[39px] border border-[#e8e8e6] rounded-[10px] bg-white flex items-center justify-center text-[#4f5150] hover:bg-[#f6f6f4] transition-colors"
-          title="切换手机视口模拟"
-        >
-          {isMobileSimulator ? (
-            <Monitor className="w-4 h-4 text-[#ff681e]" />
-          ) : (
-            <Smartphone className="w-4 h-4 text-[#858789]" />
-          )}
-        </button>
+        {/* Mobile viewport simulator is an internal QA control, not customer UI. */}
+        {currentRole !== 'customer' && (
+          <button
+            onClick={toggleMobileSimulator}
+            className="w-[39px] h-[39px] border border-[#e8e8e6] rounded-[10px] bg-white flex items-center justify-center text-[#4f5150] hover:bg-[#f6f6f4] transition-colors"
+            title="切换手机视口模拟"
+          >
+            {isMobileSimulator ? (
+              <Monitor className="w-4 h-4 text-[#ff681e]" />
+            ) : (
+              <Smartphone className="w-4 h-4 text-[#858789]" />
+            )}
+          </button>
+        )}
 
         {/* Notification Bell */}
         <div className="relative">
           <button
             onClick={() => setIsNotifOpen(!isNotifOpen)}
             className="w-[39px] h-[39px] border border-[#e8e8e6] rounded-[10px] bg-white flex items-center justify-center text-[#4f5150] hover:bg-[#f6f6f4] relative transition-colors"
-            title="通知中心"
+            title={currentRole === 'customer' ? 'Notifications' : '通知中心'}
+            aria-label={currentRole === 'customer' ? 'Notifications' : '通知中心'}
           >
             <Bell className="w-4 h-4" />
             {unreadNotificationCount > 0 && (
@@ -154,9 +172,9 @@ export const Topbar: React.FC<TopbarProps> = ({
           {isNotifOpen && (
             <div className="absolute right-0 mt-2 w-[340px] bg-white rounded-[14px] border border-[#e8e8e6] shadow-[0_12px_45px_rgba(0,0,0,0.12)] p-4 z-50 animate-in fade-in zoom-in-95 duration-100">
               <div className="flex items-center justify-between pb-3 border-b border-[#f0f0ef]">
-                <h3 className="text-sm font-bold text-[#151515]">消息中心</h3>
+                <h3 className="text-sm font-bold text-[#151515]">{currentRole === 'customer' ? 'Notifications' : '消息中心'}</h3>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#fff1e8] text-[#ff681e]">
-                  {unreadNotificationCount} 条未读
+                  {currentRole === 'customer' ? `${unreadNotificationCount} unread` : `${unreadNotificationCount} 条未读`}
                 </span>
               </div>
 
@@ -172,7 +190,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                 ))}
 
                 {companyNotifs.length === 0 && (
-                  <div className="py-6 text-center text-xs text-[#aaa]">暂无未读消息</div>
+                  <div className="py-6 text-center text-xs text-[#aaa]">{currentRole === 'customer' ? 'No unread notifications' : '暂无未读消息'}</div>
                 )}
               </div>
 
@@ -184,7 +202,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                   }}
                   className="w-full py-1.5 text-center text-xs font-bold text-[#ff681e] hover:text-[#dd4a00] flex items-center justify-center gap-1"
                 >
-                  <span>查看全部通知记录</span>
+                  <span>{currentRole === 'customer' ? 'View all notifications' : '查看全部通知记录'}</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
