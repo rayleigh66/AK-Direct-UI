@@ -129,7 +129,7 @@ export function calculateEffectiveUnitPrice(
   skuId: string,
   tierDiscountRate: number,
   promotions: Promotion[],
-  currentDate: string = '2026-11-01'
+  currentDate: string = new Date().toISOString().slice(0, 10)
 ): {
   effectivePrice: number;
   isPromo: boolean;
@@ -203,6 +203,141 @@ export function generateTemporaryPassword(): string {
     pwd += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return pwd;
+}
+
+export interface ReservationAllocation {
+  sku_id: string;
+  warehouse_id: string;
+  quantity: number;
+}
+
+export type ReservationPlan =
+  | { success: true; allocations: ReservationAllocation[] }
+  | { success: false; sku_id: string; required: number; available: number };
+
+/**
+ * Plan a whole-order reservation across warehouses without mutating state.
+ * Allocation is deterministic by warehouse id. If any SKU is short, no allocations are returned.
+ */
+export function planOrderReservation(
+  lines: { sku_id: string; quantity: number }[],
+  balances: InventoryBalance[]
+): ReservationPlan {
+  const requiredBySku = new Map<string, number>();
+  for (const line of lines) {
+    if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+      return { success: false, sku_id: line.sku_id, required: line.quantity, available: 0 };
+    }
+    requiredBySku.set(line.sku_id, (requiredBySku.get(line.sku_id) ?? 0) + line.quantity);
+  }
+
+  const allocations: ReservationAllocation[] = [];
+  for (const [skuId, required] of requiredBySku) {
+    const skuBalances = balances
+      .filter((balance) => balance.sku_id === skuId)
+      .slice()
+      .sort((a, b) => a.warehouse_id.localeCompare(b.warehouse_id));
+    let remaining = required;
+    let available = 0;
+    for (const balance of skuBalances) {
+      const free = Math.max(0, balance.on_hand - balance.reserved - balance.unsellable);
+      available += free;
+      if (remaining <= 0) continue;
+      const take = Math.min(free, remaining);
+      if (take > 0) {
+        allocations.push({ sku_id: skuId, warehouse_id: balance.warehouse_id, quantity: take });
+        remaining -= take;
+      }
+    }
+    if (remaining > 0) {
+      return { success: false, sku_id: skuId, required, available };
+    }
+  }
+
+  return { success: true, allocations };
+}
+
+/** Apply planned reservations atomically in memory; returns null if any allocation no longer fits. */
+export function applyReservationAllocations(
+  balances: InventoryBalance[],
+  allocations: ReservationAllocation[]
+): InventoryBalance[] | null {
+  const next = balances.map((balance) => ({ ...balance }));
+  for (const allocation of allocations) {
+    const balance = next.find(
+      (item) =>
+        item.sku_id === allocation.sku_id && item.warehouse_id === allocation.warehouse_id
+    );
+    if (!balance) return null;
+    const free = Math.max(0, balance.on_hand - balance.reserved - balance.unsellable);
+    if (allocation.quantity <= 0 || allocation.quantity > free) return null;
+    balance.reserved += allocation.quantity;
+  }
+  return next;
+}
+
+/** Release reserved quantities by their original warehouse allocations. */
+export function releaseReservationAllocations(
+  balances: InventoryBalance[],
+  allocations: ReservationAllocation[]
+): InventoryBalance[] {
+  const next = balances.map((balance) => ({ ...balance }));
+  for (const allocation of allocations) {
+    const balance = next.find(
+      (item) =>
+        item.sku_id === allocation.sku_id && item.warehouse_id === allocation.warehouse_id
+    );
+    if (balance) balance.reserved = Math.max(0, balance.reserved - allocation.quantity);
+  }
+  return next;
+}
+
+/** Consume a shipped reservation from the same warehouses that were originally held. */
+export function consumeReservationAllocations(
+  balances: InventoryBalance[],
+  allocations: ReservationAllocation[]
+): InventoryBalance[] {
+  const next = balances.map((balance) => ({ ...balance }));
+  for (const allocation of allocations) {
+    const balance = next.find(
+      (item) =>
+        item.sku_id === allocation.sku_id && item.warehouse_id === allocation.warehouse_id
+    );
+    if (balance) {
+      balance.on_hand = Math.max(0, balance.on_hand - allocation.quantity);
+      balance.reserved = Math.max(0, balance.reserved - allocation.quantity);
+    }
+  }
+  return next;
+}
+
+/**
+ * Best-effort allocations for legacy orders created before the allocation field existed.
+ * Uses only warehouses that currently show reserved stock for each SKU.
+ */
+export function legacyReservationAllocations(
+  lines: { sku_id: string; quantity: number }[],
+  balances: InventoryBalance[]
+): ReservationAllocation[] {
+  const allocations: ReservationAllocation[] = [];
+  for (const line of lines) {
+    let remaining = line.quantity;
+    for (const balance of balances
+      .filter((item) => item.sku_id === line.sku_id && item.reserved > 0)
+      .sort((a, b) => a.warehouse_id.localeCompare(b.warehouse_id))) {
+      if (remaining <= 0) break;
+      const take = Math.min(balance.reserved, remaining);
+      if (take > 0) {
+        allocations.push({
+          sku_id: line.sku_id,
+          warehouse_id: balance.warehouse_id,
+          quantity: take,
+        });
+        remaining -= take;
+      }
+    }
+  }
+  return allocations;
 }
 
 /**

@@ -255,7 +255,7 @@ export const MyOrdersView: React.FC = () => {
                           {
                             title: '2. 业务员确认',
                             done: ['CONFIRMED', 'PAYMENT_RECORDED', 'PREPARING_SHIPMENT', 'SHIPPED', 'DELIVERED', 'COMPLETED'].includes(order.status),
-                            sub: '原子预占 72h',
+                            sub: '模拟预占 72h',
                           },
                           {
                             title: '3. 付款入账',

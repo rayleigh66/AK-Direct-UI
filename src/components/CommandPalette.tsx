@@ -68,7 +68,7 @@ export const CommandPalette: React.FC = () => {
     { id: 'cart', title: '订购清单 (Order List)', desc: '校验起订量 10 PCS 与提交申请', icon: ShoppingCart },
     { id: 'orders', title: '我的订单 (My Orders)', desc: '订单状态时间轴与变更申请', icon: Clock },
     { id: 'membership', title: '会员与等级 (Membership)', desc: '历史累计采购额与未采购降级计时', icon: Award },
-    { id: 'sales_orders', title: '业务员订单处理 (Sales Orders)', desc: '订单核准、原子锁库 72h 与付款登记', icon: ClipboardList },
+    { id: 'sales_orders', title: '业务员订单处理 (Sales Orders)', desc: '订单核准、整单模拟预占 72h 与付款登记', icon: ClipboardList },
     { id: 'restock_manage', title: '缺货补货需求 (Restock)', desc: '跟踪客户缺货需求与到货通知', icon: Boxes },
     { id: 'internal_mailbox', title: '业务员内部邮件中心 (Mailbox)', desc: '客户英文通知草稿与线下复制发送', icon: Mail },
     { id: 'inventory_import', title: '库存管理与 Excel 导入 (Inventory)', desc: '多仓库存监控与批量导入模拟', icon: Layers },

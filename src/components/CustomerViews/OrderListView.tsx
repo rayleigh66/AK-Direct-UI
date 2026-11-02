@@ -132,7 +132,7 @@ export const OrderListView: React.FC = () => {
           <h2 className="text-xl font-bold text-slate-900">订购申请已成功提交！</h2>
           <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
             您的批发订购申请已发送至负责业务员（Tom Miller）。
-            业务员将核实交期与多仓现货情况，核准后将为您<strong>原子预占库存 72 小时</strong>并发送形式发票。
+            业务员将核实交期与多仓现货情况，核准后将为您<strong>整单模拟预占库存 72 小时</strong>并发送形式发票（Demo）
           </p>
         </div>
 
@@ -323,7 +323,7 @@ export const OrderListView: React.FC = () => {
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <strong>特别提醒 (PRD 1.0 & D10):</strong> 客户在线提交的是【订购申请】，不是自动成交或在线支付订单。
-              订单提交时<strong>不会立即锁库</strong>；由业务员人工核验数量无误并确认后，系统才在单笔原子事务内为您预占库存。
+              订单提交时<strong>不会立即锁库</strong>；由业务员人工核验数量无误并确认后，系统才在本次前端模拟中为您整单预占库存；这不是数据库事务。
             </div>
           </div>
         </div>

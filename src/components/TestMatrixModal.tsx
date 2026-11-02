@@ -103,14 +103,14 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
     {
       id: 'T07',
       category: 'order',
-      title: '原子预占防超卖事务',
-      expectation: '业务员确认订单时原子核验各 SKU 可订量；整单成功或整单失败，不出现部分锁定。',
+      title: '整单模拟预占（Demo，非数据库事务）',
+      expectation: '业务员确认订单时先按多仓可订量规划整单；任一 SKU 不足则整单失败，不出现部分锁定。前端 Mock 不宣称数据库事务。',
       action: () => {
         switchRole('sales');
         setActiveTab('sales_orders');
         onClose();
       },
-      actionLabel: '切换业务员端体验原子确认与锁库',
+      actionLabel: '切换业务员端体验整单模拟预占',
     },
     {
       id: 'T10',

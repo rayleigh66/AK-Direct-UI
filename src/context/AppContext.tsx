@@ -48,7 +48,11 @@ import {
   deriveUsername,
   generateTemporaryPassword,
   checkPrivacyViolations,
-  SKU_MOQ,
+  planOrderReservation,
+  applyReservationAllocations,
+  releaseReservationAllocations,
+  consumeReservationAllocations,
+  legacyReservationAllocations,
 } from '../utils/rules';
 
 interface CartLine {
@@ -614,40 +618,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: '订单不在待确认状态' };
     }
 
-    // Atomic stock verification across all lines
-    for (const line of order.lines) {
-      const { totalAvailable } = calculateSKUAvailableStock(line.sku_id, inventory);
-      if (line.quantity > totalAvailable) {
-        return {
-          success: false,
-          error: `库存不足：SKU ${line.sku_code} 需求 ${line.quantity} PCS，当前实无可订量 ${totalAvailable} PCS。整单预占失败。`,
-        };
-      }
+    // Plan the whole order across warehouses first; a short SKU fails the entire reservation.
+    const plan = planOrderReservation(order.lines, inventory);
+    if (!plan.success) {
+      const line = order.lines.find((item) => item.sku_id === plan.sku_id);
+      return {
+        success: false,
+        error: `库存不足：SKU ${line?.sku_code ?? plan.sku_id} 需求 ${plan.required} PCS，当前实无可订量 ${plan.available} PCS。整单预占失败，未产生部分预占。`,
+      };
     }
-
-    // Deduct available by increasing 'reserved' in default warehouse (WH-SH or first)
-    setInventory(prev => {
-      const next = [...prev];
-      for (const line of order.lines) {
-        const itemIdx = next.findIndex(b => b.sku_id === line.sku_id && b.warehouse_id === 'wh-sh');
-        if (itemIdx >= 0) {
-          next[itemIdx] = {
-            ...next[itemIdx],
-            reserved: next[itemIdx].reserved + line.quantity,
-          };
-        } else {
-          // fallback to any balance with this sku
-          const fallbackIdx = next.findIndex(b => b.sku_id === line.sku_id);
-          if (fallbackIdx >= 0) {
-            next[fallbackIdx] = {
-              ...next[fallbackIdx],
-              reserved: next[fallbackIdx].reserved + line.quantity,
-            };
-          }
-        }
-      }
-      return next;
-    });
+    const nextInventory = applyReservationAllocations(inventory, plan.allocations);
+    if (!nextInventory) {
+      return {
+        success: false,
+        error: '库存数据在本次前端模拟预占前发生变化，整单预占失败，未产生部分预占。请刷新后重试。',
+      };
+    }
+    setInventory(nextInventory);
 
     const expiryDate = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
 
@@ -661,8 +648,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               total_confirmed_usd: o.total_quoted_usd,
               reservation_expires_at: expiryDate,
               reservation_extended_count: 0,
-              customer_visible_note: `业务员 Tom 已确认订购单，并已原子锁定现货库存。库存有效预占期为 72 小时（截止 ${expiryDate.slice(0, 16).replace('T', ' ')} UTC）。请按发票指引进行电汇结算。`,
-              internal_note: '现货库存原子锁定成功。预占计时 72h 启动。',
+              reservation_allocations: plan.allocations,
+              customer_visible_note: `业务员 Tom 已确认订购单，并在本次前端 Demo 中完成整单模拟预占。库存预占期为 72 小时（截止 ${expiryDate.slice(0, 16).replace('T', ' ')} UTC）。该预占不是数据库事务。请按发票指引进行电汇结算。`,
+              internal_note: '整单前端 Mock 预占完成（非数据库事务）。预占计时 72h 启动。',
               updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
             }
           : o
@@ -714,7 +702,7 @@ AOKING Direct B2B Platform`,
       currentSalesUser.name,
       'CONFIRM_ORDER',
       order.order_no,
-      `Order confirmed atomically. Reserved ${order.lines.reduce((s, l) => s + l.quantity, 0)} PCS. Expiry 72h.`
+      `Frontend mock reservation completed (not a database transaction). Reserved ${order.lines.reduce((s, l) => s + l.quantity, 0)} PCS. Expiry 72h.`
     );
 
     return { success: true };
@@ -752,20 +740,12 @@ AOKING Direct B2B Platform`,
     const order = orders.find(o => o.id === orderId);
     if (!order) return { success: false };
 
-    // Release reserved inventory
-    setInventory(prev => {
-      const next = [...prev];
-      for (const line of order.lines) {
-        const itemIdx = next.findIndex(b => b.sku_id === line.sku_id && b.reserved >= line.quantity);
-        if (itemIdx >= 0) {
-          next[itemIdx] = {
-            ...next[itemIdx],
-            reserved: Math.max(0, next[itemIdx].reserved - line.quantity),
-          };
-        }
-      }
-      return next;
-    });
+    // Release the exact warehouse allocations that were originally held.
+    const allocations =
+      order.reservation_allocations?.length
+        ? order.reservation_allocations
+        : legacyReservationAllocations(order.lines, inventory);
+    setInventory(prev => releaseReservationAllocations(prev, allocations));
 
     setOrders(prev =>
       prev.map(o =>
@@ -788,7 +768,7 @@ AOKING Direct B2B Platform`,
     );
 
     return { success: true };
-  }, [orders, currentSalesUser, addAuditLog]);
+  }, [orders, inventory, currentSalesUser, addAuditLog]);
 
   // Salesperson: Record Payment (Updates Customer Cumulative Spend & Tier)
   const salesRecordPayment = useCallback((orderId: string, amountUsd: number, reference: string) => {
@@ -900,21 +880,12 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     const order = orders.find(o => o.id === orderId);
     if (!order) return { success: false };
 
-    // Deduct stock permanently: on_hand -= qty, reserved -= qty
-    setInventory(prev => {
-      const next = [...prev];
-      for (const line of order.lines) {
-        const itemIdx = next.findIndex(b => b.sku_id === line.sku_id && b.reserved >= line.quantity);
-        if (itemIdx >= 0) {
-          next[itemIdx] = {
-            ...next[itemIdx],
-            on_hand: Math.max(0, next[itemIdx].on_hand - line.quantity),
-            reserved: Math.max(0, next[itemIdx].reserved - line.quantity),
-          };
-        }
-      }
-      return next;
-    });
+    // Consume the exact warehouse allocations that were originally held.
+    const allocations =
+      order.reservation_allocations?.length
+        ? order.reservation_allocations
+        : legacyReservationAllocations(order.lines, inventory);
+    setInventory(prev => consumeReservationAllocations(prev, allocations));
 
     const updateTime = new Date().toISOString().replace('T', ' ').substr(0, 19);
 
@@ -990,7 +961,7 @@ AOKING Direct`,
     );
 
     return { success: true };
-  }, [orders, companies, currentSalesUser, addAuditLog]);
+  }, [orders, inventory, companies, currentSalesUser, addAuditLog]);
 
   // Salesperson: Handle Change Request
   const salesHandleChangeRequest = useCallback((orderId: string, approve: boolean) => {
@@ -1000,20 +971,12 @@ AOKING Direct`,
     const cr = order.change_request;
     if (approve) {
       if (cr.request_type === 'cancel_order') {
-        // Release inventory
-        setInventory(prev => {
-          const next = [...prev];
-          for (const line of order.lines) {
-            const itemIdx = next.findIndex(b => b.sku_id === line.sku_id && b.reserved >= line.quantity);
-            if (itemIdx >= 0) {
-              next[itemIdx] = {
-                ...next[itemIdx],
-                reserved: Math.max(0, next[itemIdx].reserved - line.quantity),
-              };
-            }
-          }
-          return next;
-        });
+        // Release the exact warehouse allocations that were originally held.
+        const allocations =
+          order.reservation_allocations?.length
+            ? order.reservation_allocations
+            : legacyReservationAllocations(order.lines, inventory);
+        setInventory(prev => releaseReservationAllocations(prev, allocations));
 
         setOrders(prev =>
           prev.map(o =>
@@ -1052,7 +1015,7 @@ AOKING Direct`,
     );
 
     return { success: true };
-  }, [orders, currentSalesUser, addAuditLog]);
+  }, [orders, inventory, currentSalesUser, addAuditLog]);
 
   // Submit Restock Request
   const submitRestockRequest = useCallback((skuId: string, requestedQty: number) => {

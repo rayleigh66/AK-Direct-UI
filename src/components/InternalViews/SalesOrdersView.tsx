@@ -72,7 +72,7 @@ export const SalesOrdersView: React.FC = () => {
   const handleConfirm = (orderId: string) => {
     const res = salesConfirmOrder(orderId);
     if (res.success) {
-      setActionMessage('订单确认成功！已原子锁定现货库存并生成 72 小时预占期与客户邮件草稿。');
+      setActionMessage('订单确认成功！已完成整单模拟预占（Demo，非数据库事务），并生成 72 小时预占期与客户邮件草稿。');
       setTimeout(() => setActionMessage(''), 4000);
     } else {
       alert(res.error);
@@ -311,7 +311,7 @@ export const SalesOrdersView: React.FC = () => {
                       {hasInsufficientStock ? (
                         <div className="text-xs text-rose-600 font-semibold flex items-center gap-1">
                           <AlertTriangle className="w-4 h-4" />
-                          <span>库存不足，无法原子锁库（PRD 5.2/T08）</span>
+                          <span>库存不足，无法完成整单模拟预占（PRD 5.2/T08）</span>
                         </div>
                       ) : (
                         <button
@@ -319,7 +319,7 @@ export const SalesOrdersView: React.FC = () => {
                           className="min-h-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-sm"
                         >
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>确认订单并原子预占库存 (72h)</span>
+                          <span>确认订单并整单模拟预占 (72h)</span>
                         </button>
                       )}
                     </>

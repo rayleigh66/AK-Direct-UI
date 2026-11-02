@@ -92,11 +92,12 @@ export const Topbar: React.FC<TopbarProps> = ({
         {/* Global Search Trigger (Command K) */}
         <button
           onClick={() => setIsCommandSearchOpen(true)}
-          className="w-[180px] sm:w-[260px] h-[40px] bg-[#f8f8f7] border border-[#eeeeed] rounded-[10px] flex items-center gap-2.5 px-3 text-[#8c8d8c] hover:border-[#ccc] transition-colors"
+          className="w-10 sm:w-[260px] h-10 bg-[#f8f8f7] border border-[#eeeeed] rounded-[10px] flex items-center justify-center sm:justify-start gap-2.5 px-0 sm:px-3 text-[#8c8d8c] hover:border-[#ccc] transition-colors shrink-0"
           title="全局快速搜索 (⌘ K)"
+          aria-label="全局快速搜索"
         >
           <Search className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1 text-left text-xs truncate">搜索款号、订单、客户...</span>
+          <span className="hidden sm:block flex-1 text-left text-xs truncate">搜索款号、订单、客户...</span>
           <span className="text-[10px] font-mono bg-white border border-[#ebebeb] rounded-[5px] px-1.5 py-0.5 text-[#9b9b9b] hidden sm:inline">
             ⌘ K
           </span>
@@ -113,7 +114,7 @@ export const Topbar: React.FC<TopbarProps> = ({
         {/* Acceptance Test Matrix Button */}
         <button
           onClick={onOpenTestMatrix}
-          className="flex items-center gap-1.5 px-3 py-2 border border-[#e8e8e6] bg-white hover:bg-[#f8f8f6] rounded-[9px] text-xs font-bold text-[#343434] transition-all hover:-translate-y-0.5 shadow-2xs"
+          className="hidden sm:flex items-center gap-1.5 px-3 py-2 border border-[#e8e8e6] bg-white hover:bg-[#f8f8f6] rounded-[9px] text-xs font-bold text-[#343434] transition-all hover:-translate-y-0.5 shadow-2xs"
           title="打开核心验收矩阵"
         >
           <FileCheck className="w-3.5 h-3.5 text-[#ff681e]" />
