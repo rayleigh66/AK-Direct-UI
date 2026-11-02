@@ -6,7 +6,7 @@ import {
   calculateSKUAvailableStock,
   consumeReservationAllocations,
   evaluateCustomerTier,
-  legacyReservationAllocations,
+  validateReservationAllocations,
   planOrderReservation,
   releaseReservationAllocations,
   validateSKUQuantity,
@@ -201,15 +201,18 @@ describe('multi-warehouse availability and reservation', () => {
     expect(reserved!.find((item) => item.warehouse_id === 'wh-gz')?.reserved).toBe(8);
     expect(reserved!.find((item) => item.warehouse_id === 'wh-sh')?.reserved).toBe(4);
 
-    const released = releaseReservationAllocations(reserved!, allocations);
-    expect(released.every((item) => item.reserved === 0)).toBe(true);
+    const lines = [{ sku_id: 'sku-test', quantity: 12 }];
+    const released = releaseReservationAllocations(reserved!, allocations, lines);
+    expect(released).not.toBeNull();
+    expect(released!.every((item) => item.reserved === 0)).toBe(true);
 
-    const consumed = consumeReservationAllocations(reserved!, allocations);
-    expect(consumed.find((item) => item.warehouse_id === 'wh-gz')).toMatchObject({
+    const consumed = consumeReservationAllocations(reserved!, allocations, lines);
+    expect(consumed).not.toBeNull();
+    expect(consumed!.find((item) => item.warehouse_id === 'wh-gz')).toMatchObject({
       on_hand: 12,
       reserved: 0,
     });
-    expect(consumed.find((item) => item.warehouse_id === 'wh-sh')).toMatchObject({
+    expect(consumed!.find((item) => item.warehouse_id === 'wh-sh')).toMatchObject({
       on_hand: 16,
       reserved: 0,
     });
@@ -230,15 +233,35 @@ describe('multi-warehouse availability and reservation', () => {
     ).toBeNull();
   });
 
-  it('finds legacy reserved stock for pre-allocation orders', () => {
+  it('rejects release and shipment when allocations are missing, incomplete or inconsistent', () => {
+    const lines = [{ sku_id: 'sku-test', quantity: 12 }];
+    const allocations = [
+      { sku_id: 'sku-test', warehouse_id: 'wh-gz', quantity: 8 },
+      { sku_id: 'sku-test', warehouse_id: 'wh-sh', quantity: 4 },
+    ];
     expect(
-      legacyReservationAllocations(
-        [{ sku_id: 'sku-test', quantity: 12 }],
-        [balance('wh-sh', 20, 10), balance('wh-gz', 20, 5)]
+      validateReservationAllocations(undefined, lines, [balance('wh-sh', 20)], 'release')
+    ).toMatchObject({ valid: false });
+    expect(
+      validateReservationAllocations(
+        [{ sku_id: 'sku-test', warehouse_id: 'wh-sh', quantity: 11 }],
+        lines,
+        [balance('wh-sh', 20, 11)],
+        'release'
       )
-    ).toEqual([
-      { sku_id: 'sku-test', warehouse_id: 'wh-gz', quantity: 5 },
-      { sku_id: 'sku-test', warehouse_id: 'wh-sh', quantity: 7 },
-    ]);
+    ).toMatchObject({ valid: false });
+    expect(
+      validateReservationAllocations(allocations, lines, [balance('wh-sh', 20, 4)], 'release')
+    ).toMatchObject({ valid: false });
+    expect(
+      validateReservationAllocations(
+        [{ sku_id: 'sku-test', warehouse_id: 'wh-sh', quantity: 12 }],
+        lines,
+        [balance('wh-sh', 10, 12)],
+        'consume'
+      )
+    ).toMatchObject({ valid: false });
+    expect(releaseReservationAllocations([balance('wh-sh', 20, 12)], allocations, lines)).toBeNull();
+    expect(consumeReservationAllocations([balance('wh-sh', 8, 12)], allocations, lines)).toBeNull();
   });
 });

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback, useRef } from 'react';
 import {
   Role,
   CustomerCompany,
@@ -52,7 +52,6 @@ import {
   applyReservationAllocations,
   releaseReservationAllocations,
   consumeReservationAllocations,
-  legacyReservationAllocations,
 } from '../utils/rules';
 
 interface CartLine {
@@ -112,8 +111,8 @@ interface AppContextType {
   
   // Sales Actions
   salesConfirmOrder: (orderId: string) => { success: boolean; error?: string };
-  salesExtendReservation: (orderId: string, additionalHours: number) => { success: boolean };
-  salesReleaseReservation: (orderId: string, reason: string) => { success: boolean };
+  salesExtendReservation: (orderId: string, additionalHours: number) => { success: boolean; error?: string };
+  salesReleaseReservation: (orderId: string, reason: string) => { success: boolean; error?: string };
   salesRecordPayment: (orderId: string, amountUsd: number, reference: string) => { success: boolean; error?: string };
   salesUpdateShipment: (
     orderId: string,
@@ -125,8 +124,8 @@ interface AppContextType {
       customerVisibleNote: string;
       internalNote: string;
     }
-  ) => { success: boolean };
-  salesHandleChangeRequest: (orderId: string, approve: boolean) => { success: boolean };
+  ) => { success: boolean; error?: string };
+  salesHandleChangeRequest: (orderId: string, approve: boolean) => { success: boolean; error?: string };
   markEmailTemplateSent: (templateId: string) => void;
 
   // Restock Actions
@@ -211,6 +210,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [internalEmailTemplates, setInternalEmailTemplates] = useState<InternalEmailTemplate[]>(INITIAL_EMAIL_TEMPLATES);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const orderActionLocks = useRef(new Set<string>());
+
+  const beginOrderAction = (key: string) => {
+    if (orderActionLocks.current.has(key)) return false;
+    orderActionLocks.current.add(key);
+    // Hold only for the current synchronous handler; a rapid double-click is rejected,
+    // while a later retry still reaches the normal status/stock checks.
+    queueMicrotask(() => orderActionLocks.current.delete(key));
+    return true;
+  };
+  const endOrderAction = (key: string) => {
+    orderActionLocks.current.delete(key);
+  };
 
   // Current User / Company
   const currentCustomerUser = useMemo(() => {
@@ -612,8 +624,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Salesperson: Confirm Order (Atomic Stock Reservation)
   const salesConfirmOrder = useCallback((orderId: string) => {
+    const lockKey = `confirm:${orderId}`;
+    if (!beginOrderAction(lockKey)) {
+      return { success: false, error: '该订单确认操作正在进行，请勿重复提交。' };
+    }
     const order = orders.find(o => o.id === orderId);
-    if (!order) return { success: false, error: '订单不存在' };
+    if (!order) {
+      endOrderAction(lockKey);
+      return { success: false, error: '订单不存在' };
+    }
     if (order.status !== 'PENDING_CONFIRMATION') {
       return { success: false, error: '订单不在待确认状态' };
     }
@@ -710,42 +729,72 @@ AOKING Direct B2B Platform`,
 
   // Salesperson: Extend Reservation
   const salesExtendReservation = useCallback((orderId: string, additionalHours: number) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return { success: false, error: '订单不存在' };
+    if (order.status !== 'CONFIRMED') {
+      return { success: false, error: '只有已确认且预占中的订单可以延期。' };
+    }
+    if (!order.reservation_expires_at) {
+      return { success: false, error: '订单没有有效的预占到期时间，无法延期。' };
+    }
+    if (!Number.isInteger(additionalHours) || additionalHours <= 0 || additionalHours > 720) {
+      return { success: false, error: '延期小时数必须是 1–720 的整数。' };
+    }
+
+    const currentExp = new Date(order.reservation_expires_at).getTime();
+    const newExp = new Date(currentExp + additionalHours * 3600 * 1000).toISOString();
     setOrders(prev =>
-      prev.map(o => {
-        if (o.id !== orderId) return o;
-        const currentExp = o.reservation_expires_at ? new Date(o.reservation_expires_at).getTime() : Date.now();
-        const newExp = new Date(currentExp + additionalHours * 3600 * 1000).toISOString();
-        return {
-          ...o,
-          reservation_expires_at: newExp,
-          reservation_extended_count: (o.reservation_extended_count || 0) + 1,
-          customer_visible_note: `业务员已为您延长库存预占期限 +${additionalHours} 小时，新到期时间: ${newExp.slice(0, 16).replace('T', ' ')} UTC。`,
-          updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
-        };
-      })
+      prev.map(o =>
+        o.id === orderId
+          ? {
+              ...o,
+              reservation_expires_at: newExp,
+              reservation_extended_count: (o.reservation_extended_count || 0) + 1,
+              customer_visible_note: `业务员已为您延长库存预占期限 +${additionalHours} 小时，新到期时间: ${newExp.slice(0, 16).replace('T', ' ')} UTC。`,
+              updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
+            }
+          : o
+      )
     );
 
     addAuditLog(
       currentSalesUser.name,
       'EXTEND_RESERVATION',
-      orderId,
+      order.order_no,
       `Extended inventory reservation by ${additionalHours} hours.`
     );
 
     return { success: true };
-  }, [currentSalesUser, addAuditLog]);
+  }, [orders, currentSalesUser, addAuditLog]);
 
   // Salesperson: Release Reservation
   const salesReleaseReservation = useCallback((orderId: string, reason: string) => {
+    const lockKey = `release:${orderId}`;
+    if (!beginOrderAction(lockKey)) {
+      return { success: false, error: '该订单释放操作正在进行，请勿重复提交。' };
+    }
     const order = orders.find(o => o.id === orderId);
-    if (!order) return { success: false };
+    if (!order) {
+      endOrderAction(lockKey);
+      return { success: false, error: '订单不存在' };
+    }
+    if (order.status !== 'CONFIRMED') {
+      return { success: false, error: '只有已确认且预占中的订单可以释放预占。' };
+    }
+    if (!reason.trim()) return { success: false, error: '请填写释放预占的原因。' };
 
-    // Release the exact warehouse allocations that were originally held.
-    const allocations =
-      order.reservation_allocations?.length
-        ? order.reservation_allocations
-        : legacyReservationAllocations(order.lines, inventory);
-    setInventory(prev => releaseReservationAllocations(prev, allocations));
+    const nextInventory = releaseReservationAllocations(
+      inventory,
+      order.reservation_allocations ?? [],
+      order.lines
+    );
+    if (!nextInventory) {
+      return {
+        success: false,
+        error: '预占分配与当前仓库库存不一致，整单释放已拒绝，订单和库存均未改变。',
+      };
+    }
+    setInventory(nextInventory);
 
     setOrders(prev =>
       prev.map(o =>
@@ -772,8 +821,28 @@ AOKING Direct B2B Platform`,
 
   // Salesperson: Record Payment (Updates Customer Cumulative Spend & Tier)
   const salesRecordPayment = useCallback((orderId: string, amountUsd: number, reference: string) => {
+    const lockKey = `payment:${orderId}`;
+    if (!beginOrderAction(lockKey)) {
+      return { success: false, error: '该订单付款操作正在进行，请勿重复提交。' };
+    }
     const order = orders.find(o => o.id === orderId);
-    if (!order) return { success: false, error: '订单不存在' };
+    if (!order) {
+      endOrderAction(lockKey);
+      return { success: false, error: '订单不存在' };
+    }
+    if (order.status !== 'CONFIRMED') {
+      return {
+        success: false,
+        error:
+          order.status === 'PAYMENT_RECORDED'
+            ? '该订单已登记付款，不能重复入账。'
+            : '只有已确认且预占中的订单可以登记付款。',
+      };
+    }
+    if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+      return { success: false, error: '付款金额必须大于 0。' };
+    }
+    if (!reference.trim()) return { success: false, error: '请填写付款凭证索引。' };
 
     const paymentTime = new Date().toISOString().replace('T', ' ').substr(0, 19);
 
@@ -877,15 +946,37 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       internalNote: string;
     }
   ) => {
+    const lockKey = `ship:${orderId}`;
+    if (!beginOrderAction(lockKey)) {
+      return { success: false, error: '该订单发货操作正在进行，请勿重复提交。' };
+    }
     const order = orders.find(o => o.id === orderId);
-    if (!order) return { success: false };
+    if (!order) {
+      endOrderAction(lockKey);
+      return { success: false, error: '订单不存在' };
+    }
+    if (order.status !== 'PAYMENT_RECORDED') {
+      return {
+        success: false,
+        error:
+          order.status === 'SHIPPED'
+            ? '该订单已发货，不能重复发货。'
+            : '只有已登记全额付款的订单可以整单发货。',
+      };
+    }
 
-    // Consume the exact warehouse allocations that were originally held.
-    const allocations =
-      order.reservation_allocations?.length
-        ? order.reservation_allocations
-        : legacyReservationAllocations(order.lines, inventory);
-    setInventory(prev => consumeReservationAllocations(prev, allocations));
+    const nextInventory = consumeReservationAllocations(
+      inventory,
+      order.reservation_allocations ?? [],
+      order.lines
+    );
+    if (!nextInventory) {
+      return {
+        success: false,
+        error: '订单预占分配与当前仓库库存不一致，整单发货已拒绝，订单和库存均未改变。',
+      };
+    }
+    setInventory(nextInventory);
 
     const updateTime = new Date().toISOString().replace('T', ' ').substr(0, 19);
 
@@ -963,57 +1054,170 @@ AOKING Direct`,
     return { success: true };
   }, [orders, inventory, companies, currentSalesUser, addAuditLog]);
 
-  // Salesperson: Handle Change Request
+  // Salesperson: Handle Change Request (all-or-nothing)
   const salesHandleChangeRequest = useCallback((orderId: string, approve: boolean) => {
+    const lockKey = `change:${orderId}`;
+    if (!beginOrderAction(lockKey)) {
+      return { success: false, error: '该订单变更申请正在处理中，请勿重复提交。' };
+    }
     const order = orders.find(o => o.id === orderId);
-    if (!order || !order.change_request) return { success: false };
-
+    if (!order) {
+      endOrderAction(lockKey);
+      return { success: false, error: '订单不存在' };
+    }
     const cr = order.change_request;
-    if (approve) {
-      if (cr.request_type === 'cancel_order') {
-        // Release the exact warehouse allocations that were originally held.
-        const allocations =
-          order.reservation_allocations?.length
-            ? order.reservation_allocations
-            : legacyReservationAllocations(order.lines, inventory);
-        setInventory(prev => releaseReservationAllocations(prev, allocations));
+    if (!cr) return { success: false, error: '该订单没有变更申请' };
+    if (order.status !== 'CONFIRMED') {
+      return { success: false, error: '只有已确认且预占中的订单可以处理变更申请。' };
+    }
+    if (cr.status !== 'pending') {
+      return { success: false, error: '该变更申请已处理，不能重复操作。' };
+    }
 
-        setOrders(prev =>
-          prev.map(o =>
-            o.id === orderId
-              ? {
-                  ...o,
-                  status: 'CANCELLED',
-                  change_request: { ...cr, status: 'approved', reviewed_at: new Date().toISOString() },
-                  customer_visible_note: `业务员已核准您的订单取消申请，预占库存已释放。`,
-                  updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
-                }
-              : o
-          )
-        );
-      }
-    } else {
+    const reviewedAt = new Date().toISOString();
+    const updateTime = new Date().toISOString().replace('T', ' ').substr(0, 19);
+
+    if (!approve) {
       setOrders(prev =>
         prev.map(o =>
           o.id === orderId
             ? {
                 ...o,
-                change_request: { ...cr, status: 'rejected', reviewed_at: new Date().toISOString() },
-                customer_visible_note: `变更申请被业务员驳回。订单仍维持已确认锁定状态。`,
-                updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
+                change_request: { ...cr, status: 'rejected', reviewed_at: reviewedAt },
+                customer_visible_note: '变更申请被业务员驳回。订单与库存预占维持原状。',
+                updated_at: updateTime,
               }
             : o
         )
       );
+      addAuditLog(
+        currentSalesUser.name,
+        'REJECT_CHANGE_REQUEST',
+        order.order_no,
+        'Rejected change request. Order and reserved inventory were not changed.'
+      );
+      return { success: true };
     }
 
+    if (cr.request_type === 'cancel_order') {
+      const nextInventory = releaseReservationAllocations(
+        inventory,
+        order.reservation_allocations ?? [],
+        order.lines
+      );
+      if (!nextInventory) {
+        return {
+          success: false,
+          error: '订单预占分配与当前仓库库存不一致，取消申请未通过，订单和库存均未改变。',
+        };
+      }
+      setInventory(nextInventory);
+      setOrders(prev =>
+        prev.map(o =>
+          o.id === orderId
+            ? {
+                ...o,
+                status: 'CANCELLED',
+                change_request: { ...cr, status: 'approved', reviewed_at: reviewedAt },
+                customer_visible_note: '业务员已核准您的订单取消申请，原仓库预占库存已释放。',
+                updated_at: updateTime,
+              }
+            : o
+        )
+      );
+      addAuditLog(
+        currentSalesUser.name,
+        'APPROVE_CHANGE_REQUEST',
+        order.order_no,
+        "Approved cancellation. Released the order\'s exact warehouse allocations."
+      );
+      return { success: true };
+    }
+
+    if (cr.request_type !== 'modify_quantity') {
+      return { success: false, error: '不支持的变更申请类型。' };
+    }
+
+    const modified = cr.modified_lines ?? [];
+    if (!modified.length) {
+      return { success: false, error: '数量修改申请缺少有效的订单行。' };
+    }
+    const modifiedBySku = new Map<string, number>();
+    for (const line of modified) {
+      if (modifiedBySku.has(line.sku_id)) {
+        return { success: false, error: `数量修改申请包含重复 SKU：${line.sku_id}` };
+      }
+      if (!order.lines.some((item) => item.sku_id === line.sku_id)) {
+        return { success: false, error: `数量修改申请包含订单之外的 SKU：${line.sku_id}` };
+      }
+      const check = validateSKUQuantity(line.new_qty);
+      if (!check.valid) {
+        return { success: false, error: check.error ?? '数量修改不合法。' };
+      }
+      modifiedBySku.set(line.sku_id, line.new_qty);
+    }
+
+    const newLines = order.lines.map((line) => {
+      const newQty = modifiedBySku.get(line.sku_id);
+      if (newQty === undefined) return { ...line };
+      return {
+        ...line,
+        quantity: newQty,
+        line_subtotal: Number((line.quoted_unit_price * newQty).toFixed(2)),
+      };
+    });
+    const newTotal = Number(newLines.reduce((sum, line) => sum + line.line_subtotal, 0).toFixed(2));
+
+    const releasedInventory = releaseReservationAllocations(
+      inventory,
+      order.reservation_allocations ?? [],
+      order.lines
+    );
+    if (!releasedInventory) {
+      return {
+        success: false,
+        error: '订单原预占分配与当前仓库库存不一致，数量修改未通过，订单和库存均未改变。',
+      };
+    }
+    const plan = planOrderReservation(newLines, releasedInventory);
+    if (!plan.success) {
+      const line = newLines.find((item) => item.sku_id === plan.sku_id);
+      return {
+        success: false,
+        error: `数量修改后库存不足：SKU ${line?.sku_code ?? plan.sku_id} 需求 ${plan.required} PCS，可订 ${plan.available} PCS。整单未修改。`,
+      };
+    }
+    const nextInventory = applyReservationAllocations(releasedInventory, plan.allocations);
+    if (!nextInventory) {
+      return {
+        success: false,
+        error: '数量修改的仓库分配复核失败，整单未修改。',
+      };
+    }
+
+    setInventory(nextInventory);
+    setOrders(prev =>
+      prev.map(o =>
+        o.id === orderId
+          ? {
+              ...o,
+              lines: newLines,
+              total_quoted_usd: newTotal,
+              total_confirmed_usd: newTotal,
+              reservation_allocations: plan.allocations,
+              change_request: { ...cr, status: 'approved', reviewed_at: reviewedAt },
+              customer_visible_note: `业务员已核准数量修改申请，订单总额更新为 USD $${newTotal.toFixed(2)}，原仓库预占已按新数量重新分配。`,
+              updated_at: updateTime,
+            }
+          : o
+      )
+    );
     addAuditLog(
       currentSalesUser.name,
-      approve ? 'APPROVE_CHANGE_REQUEST' : 'REJECT_CHANGE_REQUEST',
+      'APPROVE_CHANGE_REQUEST',
       order.order_no,
-      `Processed change request: ${approve ? 'Approved' : 'Rejected'}.`
+      `Approved quantity change. New total USD $${newTotal.toFixed(2)}; reservation reallocated.`
     );
-
     return { success: true };
   }, [orders, inventory, currentSalesUser, addAuditLog]);
 
@@ -1324,38 +1528,39 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
 
   // Admin: Excel bulk import
   const excelImportStock = useCallback((rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[]) => {
-    let successCount = 0;
-    setInventory(prev => {
-      const next = [...prev];
-      for (const row of rows) {
-        // Find warehouse
-        const wh = warehouses.find(w => w.code === row.warehouse_code);
-        if (!wh) continue;
-
-        // Find SKU
-        let skuId: string | null = null;
-        for (const p of products) {
-          const s = p.skus.find(sk => sk.sku_code === row.sku_code);
-          if (s) {
-            skuId = s.id;
-            break;
-          }
-        }
-        if (!skuId) continue;
-
-        const idx = next.findIndex(b => b.sku_id === skuId && b.warehouse_id === wh.id);
-        if (idx >= 0) {
-          next[idx] = {
-            ...next[idx],
-            on_hand: row.on_hand,
-            unsellable: row.unsellable,
-            updated_at: new Date().toISOString().slice(0, 10),
-          };
-          successCount++;
+    const resolved = rows.flatMap((row) => {
+      const wh = warehouses.find(w => w.code === row.warehouse_code);
+      if (!wh) return [];
+      let skuId: string | null = null;
+      for (const p of products) {
+        const s = p.skus.find(sk => sk.sku_code === row.sku_code);
+        if (s) {
+          skuId = s.id;
+          break;
         }
       }
-      return next;
+      if (!skuId) return [];
+      const exists = inventory.some(b => b.sku_id === skuId && b.warehouse_id === wh.id);
+      return exists ? [{ ...row, skuId, warehouseId: wh.id }] : [];
     });
+    const successCount = resolved.length;
+    if (resolved.length) {
+      setInventory(prev => {
+        const next = [...prev];
+        for (const row of resolved) {
+          const idx = next.findIndex(b => b.sku_id === row.skuId && b.warehouse_id === row.warehouseId);
+          if (idx >= 0) {
+            next[idx] = {
+              ...next[idx],
+              on_hand: row.on_hand,
+              unsellable: row.unsellable,
+              updated_at: new Date().toISOString().slice(0, 10),
+            };
+          }
+        }
+        return next;
+      });
+    }
 
     addAuditLog(
       currentAdminUser.name,
@@ -1365,7 +1570,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     );
 
     return { success: true, count: successCount };
-  }, [warehouses, products, currentAdminUser, addAuditLog]);
+  }, [warehouses, products, inventory, currentAdminUser, addAuditLog]);
 
   // Complete first-time password reset
   const completePasswordReset = useCallback((_newPassword: string) => {
