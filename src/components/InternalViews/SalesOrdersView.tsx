@@ -143,7 +143,7 @@ export const SalesOrdersView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24">
+    <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -238,8 +238,32 @@ export const SalesOrdersView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line Items Table */}
-              <div className="overflow-x-auto rounded-xl border border-slate-100">
+              {/* Line Items: compact mobile cards, table on larger screens */}
+              <div className="sm:hidden space-y-2">
+                {order.lines.map((line, index) => {
+                  const { totalAvailable } = calculateSKUAvailableStock(line.sku_id, inventory);
+                  return (
+                    <div key={index} className="rounded-xl border border-slate-200 p-3 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-mono font-bold text-slate-900">{line.sku_code}</div>
+                          <div className="text-slate-600 truncate">{line.product_title}</div>
+                          <div className="text-slate-500">{line.color_name}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono font-bold">{line.quantity} PCS</div>
+                          <div className="text-[10px] text-slate-400">{totalAvailable} available</div>
+                        </div>
+                      </div>
+                      <div className="flex justify-between mt-2 text-[11px]">
+                        <span className="text-slate-500">${line.quoted_unit_price.toFixed(2)} / PCS</span>
+                        <strong className="font-mono">${line.line_subtotal.toFixed(2)}</strong>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] font-semibold">
                     <tr>
@@ -323,6 +347,23 @@ export const SalesOrdersView: React.FC = () => {
                 </div>
               </div>
 
+              {order.tracking_no && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <span className="text-emerald-700/70 block text-[10px]">承运商</span>
+                    <strong>{order.carrier}</strong>
+                  </div>
+                  <div>
+                    <span className="text-emerald-700/70 block text-[10px]">运单号</span>
+                    <strong className="font-mono">{order.tracking_no}</strong>
+                  </div>
+                  <div>
+                    <span className="text-emerald-700/70 block text-[10px]">发货 / 预计到达</span>
+                    <strong>{order.actual_ship_date} → {order.estimated_delivery_date}</strong>
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons for Sales Rep based on status */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                 <div className="text-xs text-slate-500">
@@ -350,6 +391,7 @@ export const SalesOrdersView: React.FC = () => {
                       ) : (
                         <button
                           onClick={() => handleConfirm(order.id)}
+                          data-testid="confirm-order"
                           className="min-h-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-sm"
                         >
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -414,7 +456,7 @@ export const SalesOrdersView: React.FC = () => {
       {/* Record Payment Modal (PRD D17, 7.1, T19) */}
       {paymentOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-200">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <DollarSign className="w-5 h-5 text-emerald-400" />
@@ -440,6 +482,7 @@ export const SalesOrdersView: React.FC = () => {
                   step="0.01"
                   min="1"
                   value={paymentAmount}
+                  data-testid="payment-amount"
                   onChange={e => setPaymentAmount(parseFloat(e.target.value) || 0)}
                   className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
                   required
@@ -453,6 +496,7 @@ export const SalesOrdersView: React.FC = () => {
                 <input
                   type="text"
                   value={paymentReference}
+                  data-testid="payment-reference"
                   onChange={e => setPaymentReference(e.target.value)}
                   placeholder="例如：WIRE-20261101-CITI8819"
                   className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -474,6 +518,7 @@ export const SalesOrdersView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  data-testid="submit-payment"
                   className="flex-1 h-11 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
                 >
                   确认到账并入账
@@ -487,7 +532,7 @@ export const SalesOrdersView: React.FC = () => {
       {/* Record Shipment Modal (PRD 6.3, D11, T15, T16) */}
       {shipmentOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
-          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-200">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Truck className="w-5 h-5 text-indigo-400" />
@@ -508,6 +553,7 @@ export const SalesOrdersView: React.FC = () => {
                   <input
                     type="text"
                     value={carrier}
+                    data-testid="shipment-carrier"
                     onChange={e => setCarrier(e.target.value)}
                     className="w-full h-11 px-3 rounded-xl border border-slate-300 text-xs"
                     required
@@ -518,6 +564,7 @@ export const SalesOrdersView: React.FC = () => {
                   <input
                     type="text"
                     value={trackingNo}
+                    data-testid="shipment-tracking"
                     onChange={e => setTrackingNo(e.target.value)}
                     className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-xs"
                     required
@@ -531,6 +578,7 @@ export const SalesOrdersView: React.FC = () => {
                   <input
                     type="date"
                     value={actualShipDate}
+                    data-testid="shipment-date"
                     onChange={e => setActualShipDate(e.target.value)}
                     className="w-full h-11 px-3 rounded-xl border border-slate-300 text-xs"
                     required
@@ -541,6 +589,7 @@ export const SalesOrdersView: React.FC = () => {
                   <input
                     type="date"
                     value={estimatedDelivery}
+                    data-testid="shipment-eta"
                     onChange={e => setEstimatedDelivery(e.target.value)}
                     className="w-full h-11 px-3 rounded-xl border border-slate-300 text-xs"
                     required
@@ -584,6 +633,7 @@ export const SalesOrdersView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  data-testid="submit-shipment"
                   className="flex-1 h-11 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
                 >
                   确认出库发货

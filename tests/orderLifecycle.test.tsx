@@ -560,7 +560,7 @@ describe('order lifecycle integration', () => {
     const orderId = submitNewBlackOrder(result);
     act(() => {
       const imported = result.current.excelImportStock([
-        { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 0, unsellable: 0 },
+        { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 20, unsellable: 0 },
         { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-GZ', on_hand: 0, unsellable: 0 },
       ]);
       expect(imported.success).toBe(true);

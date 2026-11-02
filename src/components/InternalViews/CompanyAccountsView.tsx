@@ -102,7 +102,7 @@ export const CompanyAccountsView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24">
+    <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
       {/* Header */}
       <div>
         <h1 className="text-lg font-bold text-slate-900">

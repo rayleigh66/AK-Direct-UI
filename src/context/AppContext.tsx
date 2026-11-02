@@ -46,6 +46,11 @@ import {
 } from '../data/mockData';
 import { isDemoImageUrl } from '../data/demoImageLibrary';
 import {
+  inventoryImportHeaders,
+  parseInventoryTable,
+  validateInventoryImport,
+} from '../utils/inventoryImport';
+import {
   calculateSKUAvailableStock,
   calculateEffectiveUnitPrice,
   evaluateCustomerTier,
@@ -179,7 +184,16 @@ interface AppContextType {
   adminToggleBrandGrant: (companyId: string, brandId: string) => void;
   adminUpdateTierRule: (tierId: string, thresholdUsd: number, discountRate: number) => void;
   adminAddOrUpdatePromotion: (promo: Omit<Promotion, 'id'>) => void;
-  excelImportStock: (rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[]) => { success: boolean; count: number; error?: string };
+  excelImportStock: (
+    rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[],
+    expected?: {
+      sku_code: string;
+      warehouse_code: string;
+      previousOnHand: number;
+      previousUnsellable: number;
+      reserved: number;
+    }[]
+  ) => { success: boolean; count: number; error?: string; stale?: boolean };
 
   // Admin product catalogue
   adminCreateProduct: (input: AdminProductInput) => { success: boolean; productId?: string; error?: string };
@@ -1680,50 +1694,94 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     );
   }, [currentAdminUser, addAuditLog]);
 
-  // Admin: Excel bulk import
-  const excelImportStock = useCallback((rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[]) => {
-    const resolved = rows.flatMap((row) => {
-      const wh = warehouses.find(w => w.code === row.warehouse_code);
-      if (!wh) return [];
-      let skuId: string | null = null;
-      for (const p of products) {
-        const s = p.skus.find(sk => sk.sku_code === row.sku_code);
-        if (s) {
-          skuId = s.id;
-          break;
-        }
+  // Admin: Excel bulk import. Fail-closed: every row is revalidated against current state.
+  const excelImportStock = useCallback((
+    rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[],
+    expected?: {
+      sku_code: string;
+      warehouse_code: string;
+      previousOnHand: number;
+      previousUnsellable: number;
+      reserved: number;
+    }[]
+  ) => {
+    const table = [
+      inventoryImportHeaders,
+      ...rows.map(row => [row.sku_code, row.warehouse_code, row.on_hand, row.unsellable]),
+    ];
+    const parsed = parseInventoryTable(table);
+    if (parsed.errors.length) {
+      return { success: false as const, count: 0, error: parsed.errors.join(' ') };
+    }
+    const checked = validateInventoryImport(parsed.lines, products, warehouses, inventory);
+    if (!checked.valid) {
+      return {
+        success: false as const,
+        count: 0,
+        error: checked.errors.join(' '),
+      };
+    }
+    if (expected) {
+      if (expected.length !== checked.rows.length) {
+        return {
+          success: false as const,
+          count: 0,
+          stale: true,
+          error:
+            'The preview no longer matches this batch. Review the refreshed differences and confirm again.',
+        };
       }
-      if (!skuId) return [];
-      const exists = inventory.some(b => b.sku_id === skuId && b.warehouse_id === wh.id);
-      return exists ? [{ ...row, skuId, warehouseId: wh.id }] : [];
-    });
-    const successCount = resolved.length;
-    if (resolved.length) {
-      setInventory(prev => {
-        const next = [...prev];
-        for (const row of resolved) {
-          const idx = next.findIndex(b => b.sku_id === row.skuId && b.warehouse_id === row.warehouseId);
-          if (idx >= 0) {
-            next[idx] = {
-              ...next[idx],
-              on_hand: row.on_hand,
-              unsellable: row.unsellable,
-              updated_at: new Date().toISOString().slice(0, 10),
-            };
-          }
-        }
-        return next;
+      const expectedMap = new Map(
+        expected.map(row => [
+          `${row.sku_code.toUpperCase()}::${row.warehouse_code.toUpperCase()}`,
+          row,
+        ])
+      );
+      const stale = checked.rows.some(row => {
+        const previous = expectedMap.get(
+          `${row.line.skuCode.toUpperCase()}::${row.line.warehouseCode.toUpperCase()}`
+        );
+        return (
+          !previous ||
+          previous.previousOnHand !== row.previousOnHand ||
+          previous.previousUnsellable !== row.previousUnsellable ||
+          previous.reserved !== row.reserved
+        );
       });
+      if (stale) {
+        return {
+          success: false as const,
+          count: 0,
+          stale: true,
+          error:
+            'Inventory changed since this preview. Review the refreshed differences and confirm again.',
+        };
+      }
     }
 
+    const now = new Date().toISOString().slice(0, 10);
+    const nextInventory = inventory.map(balance => {
+      const row = checked.rows.find(
+        item =>
+          item.skuId === balance.sku_id && item.warehouseId === balance.warehouse_id
+      );
+      return row
+        ? {
+            ...balance,
+            on_hand: row.line.onHand,
+            unsellable: row.line.unsellable,
+            updated_at: now,
+          }
+        : balance;
+    });
+    setInventory(nextInventory);
     addAuditLog(
       currentAdminUser.name,
       'EXCEL_IMPORT_STOCK',
       'Multi-Warehouse Inventory',
-      `Imported ${successCount} balance records from Excel batch.`
+      `Imported ${checked.rows.length} balance records from a validated local Mock batch.`
     );
-
-    return { success: true, count: successCount };
+    return { success: true as const, count: checked.rows.length };
   }, [warehouses, products, inventory, currentAdminUser, addAuditLog]);
 
   // Admin product catalogue
