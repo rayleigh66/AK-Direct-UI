@@ -45,16 +45,23 @@ Base：`feat/react-admin-catalog`（`131b56e`）
 - 提交仅调用现有 `excelImportStock`，更新匹配的 SKU + 仓库的 `on_hand/unsellable`，保留 `reserved`、订单和历史快照。
 - 成功后显示提交行数，并明确“刷新页面可能丢失”“前端 Mock，不是真实事务”。
 
+### 审核修复（P0）
+
+- **确认时重新校验**：`excelImportStock` 用共享纯校验器重新检查最新 SKU、仓库、库存、reserved；确认时携带预览快照，任一目标行 `on_hand/unsellable/reserved` 与预览不一致即拒绝，不写入。UI 显示“库存已变化”，刷新差异并要求再次确认。
+- **整批 all-or-nothing**：Context 写入入口先解析/校验全部行；未知 SKU/仓库、缺失余额、重复 SKU+仓库、空值/负数/非整数、unsellable 超限或 reserved 冲突任一存在则整批拒绝。失败不修改库存、不写成功审计。
+- 预览/写入共用 `inventoryImport.ts` 校验，避免 UI 与 Context 规则分叉。
+- 新增 Context 测试：reserved 增加后旧预览拒绝、源库存变化后旧预览拒绝、混合/重复/未知/缺失余额/负数批次不更新、有效多行准确更新且 reserved 不变、成功审计仅在完整成功后出现。
+
 ## 测试
 
 | 检查 | 结果 |
 | --- | --- |
 | `npm ci` | PASS，0 vulnerabilities |
 | `npm run lint` | PASS |
-| `npm test` | PASS — **43 / 43**（5 文件） |
+| `npm test` | PASS — **46 / 46**（5 文件） |
 | `npm run test:e2e` | PASS — **74 passed / 6 skipped（共 80）** |
 | `npm run test:e2e:preview` | PASS — **1 / 1** |
-| `npm run build` | PASS — 主 JS 516.33 KB / gzip 142.48 KB；Excel 解析分包 67.43 KB / gzip 19.18 KB；管理分包 30.24 KB / gzip 7.67 KB；CSS 64.87 KB / gzip 12.02 KB |
+| `npm run build` | PASS — 主 JS 517.50 KB / gzip 142.59 KB；Excel 解析分包 67.43 KB / gzip 19.18 KB；管理分包 30.24 KB / gzip 7.67 KB；CSS 64.87 KB / gzip 12.02 KB |
 | `npm run verify:assets` | PASS |
 
 新增覆盖：

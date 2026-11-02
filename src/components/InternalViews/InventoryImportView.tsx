@@ -121,12 +121,36 @@ export const InventoryImportView: React.FC = () => {
         warehouse_code: row.line.warehouseCode,
         on_hand: row.line.onHand,
         unsellable: row.line.unsellable,
+      })),
+      validation.rows.map(row => ({
+        sku_code: row.line.skuCode,
+        warehouse_code: row.line.warehouseCode,
+        previousOnHand: row.previousOnHand ?? -1,
+        previousUnsellable: row.previousUnsellable ?? -1,
+        reserved: row.reserved,
       }))
     );
-    if (!res.success || res.count !== validation.rows.length) {
+    if (!res.success) {
+      if (res.stale) {
+        const refreshed = validateInventoryImport(
+          validation.rows.map(row => row.line),
+          products,
+          warehouses,
+          inventory
+        );
+        setValidation(refreshed);
+        setImportError(
+          '库存自预览后已变化。已刷新差异，请重新检查并再次确认，不会自动覆盖。'
+        );
+        setIsPreviewOpen(true);
+      } else {
+        setImportError(res.error ?? '导入被拒绝，库存未改变。');
+      }
+      return;
+    }
+    if (res.count !== validation.rows.length) {
       setImportError(
-        res.error ??
-          `Import did not apply all rows (${res.count}/${validation.rows.length}). Inventory was not described as a real database transaction.`
+        `Import did not apply all rows (${res.count}/${validation.rows.length}). Inventory was not described as a real database transaction.`
       );
       return;
     }
@@ -347,6 +371,11 @@ export const InventoryImportView: React.FC = () => {
                 绝对库存快照只更新匹配的 SKU + 仓库；<strong>reserved 预占不变</strong>。
                 若新 on-hand 减去 unsellable 小于 reserved，整批不可提交。文件解析与库存更新都是前端 Mock，不是真实事务。
               </div>
+              {importError && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-semibold">
+                  {importError}
+                </div>
+              )}
 
               {previewErrors.length > 0 && (
                 <div role="alert" className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1">

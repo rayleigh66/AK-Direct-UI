@@ -98,6 +98,148 @@ describe('inventory file parsing and validation', () => {
     expect(checked.errors.join(' ')).toMatch(/Unsellable quantity cannot exceed on-hand/);
   });
 
+  it('rejects a stale preview when reserved changes and accepts a refreshed confirmation', async () => {
+    const { result } = renderHook(() => useApp(), { wrapper });
+    const line = {
+      rowNumber: 2,
+      skuCode: 'AK-9042-BLK',
+      warehouseCode: 'WH-SH',
+      onHand: 100,
+      unsellable: 5,
+    };
+    const preview = validateInventoryImport(
+      [line],
+      result.current.products,
+      result.current.warehouses,
+      result.current.inventory
+    );
+    const expected = preview.rows.map(row => ({
+      sku_code: row.line.skuCode,
+      warehouse_code: row.line.warehouseCode,
+      previousOnHand: row.previousOnHand ?? -1,
+      previousUnsellable: row.previousUnsellable ?? -1,
+      reserved: row.reserved,
+    }));
+    act(() => {
+      expect(result.current.salesReleaseReservation('ord-001', 'test').success).toBe(true);
+    });
+    await Promise.resolve();
+    const afterRelease = JSON.stringify(result.current.inventory);
+    const auditBefore = result.current.auditLogs.filter(
+      entry => entry.action === 'EXCEL_IMPORT_STOCK'
+    ).length;
+    let staleResult: ReturnType<typeof result.current.excelImportStock> | undefined;
+    act(() => {
+      staleResult = result.current.excelImportStock(
+        [{ sku_code: line.skuCode, warehouse_code: line.warehouseCode, on_hand: line.onHand, unsellable: line.unsellable }],
+        expected
+      );
+    });
+    expect(staleResult?.success).toBe(false);
+    expect(staleResult?.stale).toBe(true);
+    expect(JSON.stringify(result.current.inventory)).toBe(afterRelease);
+    expect(
+      result.current.auditLogs.filter(entry => entry.action === 'EXCEL_IMPORT_STOCK').length
+    ).toBe(auditBefore);
+
+    const refreshed = validateInventoryImport(
+      [line],
+      result.current.products,
+      result.current.warehouses,
+      result.current.inventory
+    );
+    expect(refreshed.rows[0]?.reserved).toBe(0);
+    act(() => {
+      expect(
+        result.current.excelImportStock(
+          [{ sku_code: line.skuCode, warehouse_code: line.warehouseCode, on_hand: line.onHand, unsellable: line.unsellable }],
+          refreshed.rows.map(row => ({
+            sku_code: row.line.skuCode,
+            warehouse_code: row.line.warehouseCode,
+            previousOnHand: row.previousOnHand ?? -1,
+            previousUnsellable: row.previousUnsellable ?? -1,
+            reserved: row.reserved,
+          }))
+        ).success
+      ).toBe(true);
+    });
+  });
+
+  it('rejects a stale preview when another stock update changes the source balance', async () => {
+    const { result } = renderHook(() => useApp(), { wrapper });
+    const line = {
+      rowNumber: 2,
+      skuCode: 'AK-9042-BLK',
+      warehouseCode: 'WH-SH',
+      onHand: 100,
+      unsellable: 5,
+    };
+    const preview = validateInventoryImport(
+      [line],
+      result.current.products,
+      result.current.warehouses,
+      result.current.inventory
+    );
+    const expected = preview.rows.map(row => ({
+      sku_code: row.line.skuCode,
+      warehouse_code: row.line.warehouseCode,
+      previousOnHand: row.previousOnHand ?? -1,
+      previousUnsellable: row.previousUnsellable ?? -1,
+      reserved: row.reserved,
+    }));
+    await act(async () => {
+      expect(
+        result.current.excelImportStock([
+          { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 90, unsellable: 0 },
+        ]).success
+      ).toBe(true);
+      await Promise.resolve();
+    });
+    const afterAnotherUpdate = JSON.stringify(result.current.inventory);
+    await act(async () => {
+      const stale = result.current.excelImportStock(
+        [{ sku_code: line.skuCode, warehouse_code: line.warehouseCode, on_hand: 100, unsellable: 5 }],
+        expected
+      );
+      expect(stale.success).toBe(false);
+      expect(stale.stale).toBe(true);
+      await Promise.resolve();
+    });
+    expect(JSON.stringify(result.current.inventory)).toBe(afterAnotherUpdate);
+  });
+
+  it('rejects mixed, duplicate, unknown and missing-balance batches atomically', async () => {
+    const { result } = renderHook(() => useApp(), { wrapper });
+    const before = JSON.stringify(result.current.inventory);
+    const beforeAudit = result.current.auditLogs.filter(
+      entry => entry.action === 'EXCEL_IMPORT_STOCK'
+    ).length;
+    const batches = [
+      [
+        { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 100, unsellable: 5 },
+        { sku_code: 'UNKNOWN-SKU', warehouse_code: 'WH-SH', on_hand: 10, unsellable: 0 },
+      ],
+      [
+        { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 100, unsellable: 5 },
+        { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 90, unsellable: 0 },
+      ],
+      [{ sku_code: 'AK-7710-BLK', warehouse_code: 'WH-SH', on_hand: 10, unsellable: 0 }],
+      [{ sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 10, unsellable: 0 }],
+      [{ sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: -1, unsellable: 0 }],
+    ];
+    for (const batch of batches) {
+      act(() => {
+        const resultValue = result.current.excelImportStock(batch);
+        expect(resultValue.success).toBe(false);
+        expect(resultValue.error).toBeTruthy();
+      });
+      expect(JSON.stringify(result.current.inventory)).toBe(before);
+      expect(
+        result.current.auditLogs.filter(entry => entry.action === 'EXCEL_IMPORT_STOCK').length
+      ).toBe(beforeAudit);
+    }
+  });
+
   it('updates only Mock inventory on commit and preserves reserved quantities', async () => {
     const { result } = renderHook(() => useApp(), { wrapper });
     const before = result.current.inventory.find(
@@ -107,6 +249,7 @@ describe('inventory file parsing and validation', () => {
       expect(
         result.current.excelImportStock([
           { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 100, unsellable: 5 },
+          { sku_code: 'AK-7710-SLV', warehouse_code: 'WH-SH', on_hand: 180, unsellable: 5 },
         ]).success
       ).toBe(true);
       await Promise.resolve();
@@ -114,9 +257,18 @@ describe('inventory file parsing and validation', () => {
     const after = result.current.inventory.find(
       entry => entry.sku_id === 'sku-9042-blk' && entry.warehouse_id === 'wh-sh'
     )!;
+    const afterSecond = result.current.inventory.find(
+      entry => entry.sku_id === 'sku-7710-slv' && entry.warehouse_id === 'wh-sh'
+    )!;
     expect(after.on_hand).toBe(100);
     expect(after.unsellable).toBe(5);
     expect(after.reserved).toBe(before.reserved);
+    expect(afterSecond.on_hand).toBe(180);
+    expect(afterSecond.unsellable).toBe(5);
+    expect(afterSecond.reserved).toBe(10);
     expect(result.current.orders).toHaveLength(3);
+    expect(
+      result.current.auditLogs.filter(entry => entry.action === 'EXCEL_IMPORT_STOCK')
+    ).toHaveLength(1);
   });
 });
