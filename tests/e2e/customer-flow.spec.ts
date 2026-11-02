@@ -85,6 +85,16 @@ test('quick add keeps the existing quantity when stock would be exceeded', async
   await expect(page.getByText('$7695.00').first()).toBeVisible();
 });
 
+test('customer catalog combines series and feature-tag filters', async ({ page }) => {
+  await openCatalog(page);
+  await page.getByRole('button', { name: 'Water-resistant', exact: true }).click();
+  await expect(page.locator('[data-testid="product-card"]')).toHaveCount(1);
+  await page.getByRole('button', { name: /Everyday Core/ }).click();
+  await expect(page.locator('[data-testid="product-card"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Travel Luggage', exact: true }).click();
+  await expect(page.locator('[data-testid="product-card"]')).toHaveCount(0);
+});
+
 test('customer membership and notification surfaces remain in English', async ({ page }) => {
   await openCatalog(page);
   await navTo(page, 'Membership');

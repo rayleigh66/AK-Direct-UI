@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import {
   Store,
   ShoppingCart,
+  Package,
   Clock,
   Award,
   ClipboardList,
@@ -77,6 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
           {
             label: '运营配置 · 管理员',
             links: [
+              { id: 'admin_products', label: '商品目录管理', icon: Package },
               { id: 'admin_companies', label: '客户与账户建档', icon: Users },
               { id: 'inventory_import', label: '多仓库存与导入', icon: Layers },
               { id: 'promo_tier', label: '促销与等级配置', icon: Settings },
@@ -97,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:sticky top-0 left-0 bottom-0 z-40 w-[248px] bg-white border-r border-[#e8e8e6] flex flex-col h-screen transition-transform duration-200 ${
+        className={`fixed lg:sticky top-0 left-0 bottom-0 z-50 w-[248px] bg-white border-r border-[#e8e8e6] flex flex-col h-screen transition-transform duration-200 ${
           isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -214,6 +216,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('customer', 'user-001a');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
@@ -230,6 +233,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('customer', 'user-001b');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
@@ -246,6 +250,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('sales');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
@@ -260,6 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('admin');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >

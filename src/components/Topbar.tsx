@@ -52,6 +52,7 @@ export const Topbar: React.FC<TopbarProps> = ({
     restock_manage: '客户补货需求',
     internal_mailbox: '业务员内部邮件中心',
     inventory_import: '多仓库存与 Excel 导入',
+    admin_products: '商品目录管理',
     admin_companies: '客户与账户建档',
     promo_tier: '促销与等级配置',
     audit_logs: '敏感操作审计日志',

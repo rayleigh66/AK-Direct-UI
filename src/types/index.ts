@@ -60,11 +60,30 @@ export interface ProductSKU {
   color_name: string;
   /** Customer-facing English label; internal IDs/SKUs remain unchanged. */
   color_name_en?: string;
-  /** Optional later per-colour image; Demo data currently uses the product image. */
+  /** Optional per-colour image; fallback is the product primary image. */
   image_url?: string;
   color_hex: string;
   base_price_usd: number;
   sellable_status: 'active' | 'discontinued';
+}
+
+export interface SeriesDefinition {
+  id: string;
+  nameZh: string;
+  nameEn: string;
+  order: number;
+  active: boolean;
+}
+
+export type FeatureTagTone = 'orange' | 'blue' | 'sky' | 'green' | 'grey' | 'purple';
+
+export interface FeatureTagDefinition {
+  code: string;
+  nameZh: string;
+  nameEn: string;
+  tone: FeatureTagTone;
+  order: number;
+  active: boolean;
 }
 
 export interface Product {
@@ -76,10 +95,16 @@ export interface Product {
   title_en?: string;
   category: 'Business Backpacks' | 'Travel Luggage' | 'Urban Commuter' | 'Executive Briefcases';
   description: string;
+  /** Customer-facing English description. */
+  description_en?: string;
   material: string;
   capacity_or_size: string;
   primary_image: string;
   gallery_images: string[];
+  /** Optional for legacy Demo products; defaults to visible. New admin drafts start hidden. */
+  active?: boolean;
+  series_id?: string;
+  tag_codes?: string[];
   skus: ProductSKU[];
 }
 

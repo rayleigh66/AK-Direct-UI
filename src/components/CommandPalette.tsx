@@ -81,6 +81,7 @@ export const CommandPalette: React.FC = () => {
     { id: 'restock_manage', title: '缺货补货需求 (Restock)', desc: '跟踪客户缺货需求与到货通知', icon: Boxes },
     { id: 'internal_mailbox', title: '业务员内部邮件中心 (Mailbox)', desc: '客户英文通知草稿与线下复制发送', icon: Mail },
     { id: 'inventory_import', title: '库存管理与 Excel 导入 (Inventory)', desc: '多仓库存监控与批量导入模拟', icon: Layers },
+    { id: 'admin_products', title: '商品目录管理 (Products)', desc: '商品、SKU、图片、系列与功能标签', icon: Package },
     { id: 'admin_companies', title: '客户公司与账号建档 (Accounts)', desc: '两步建档与一次性临时密码生成', icon: Users },
     { id: 'promo_tier', title: '促销与等级配置 (Promo & Tiers)', desc: '限时促销时间窗与等级门槛配置', icon: Settings },
   ];

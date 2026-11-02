@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   calculateSKUAvailableStock,
@@ -28,6 +28,19 @@ import {
 import { Order } from '../../types';
 import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
 
+function shippingDraftKey(companyId?: string) {
+  return `aoking-shipping-draft:${companyId ?? 'guest'}`;
+}
+
+function readShippingDraft(companyId?: string) {
+  try {
+    const raw = sessionStorage.getItem(shippingDraftKey(companyId));
+    return raw ? (JSON.parse(raw) as Record<string, string>) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const OrderListView: React.FC = () => {
   const {
     cart,
@@ -36,6 +49,8 @@ export const OrderListView: React.FC = () => {
     promotions,
     currentCompanyTierInfo,
     currentCompany,
+    currentCustomerUser,
+    brandGrants,
     updateCartQuantity,
     removeFromCart,
     clearCart,
@@ -43,16 +58,35 @@ export const OrderListView: React.FC = () => {
     setActiveTab,
   } = useApp();
 
-  const [shippingMethod, setShippingMethod] = useState<Order['shipping_method']>('Sea');
+  const initialShippingDraft = useMemo(
+    () => readShippingDraft(currentCompany?.id),
+    [currentCompany?.id]
+  );
+  const [shippingMethod, setShippingMethod] = useState<Order['shipping_method']>(
+    (initialShippingDraft?.shippingMethod as Order['shipping_method']) || 'Sea'
+  );
   const [destinationCountry, setDestinationCountry] = useState<string>(
-    currentCompany?.country_alpha3 || 'USA'
+    initialShippingDraft?.destinationCountry || currentCompany?.country_alpha3 || 'USA'
   );
   const [expectedDate, setExpectedDate] = useState<string>(
-    new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    initialShippingDraft?.expectedDate ||
+      new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10)
   );
   const [shippingRequirements, setShippingRequirements] = useState<string>(
-    'Standard export master cartons with pallet stretch wrap. AOKING barcode labels required.'
+    initialShippingDraft?.shippingRequirements ||
+      'Standard export master cartons with pallet stretch wrap. AOKING barcode labels required.'
   );
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        shippingDraftKey(currentCompany?.id),
+        JSON.stringify({ shippingMethod, destinationCountry, expectedDate, shippingRequirements })
+      );
+    } catch {
+      /* local draft is a convenience; ignore storage failures */
+    }
+  }, [currentCompany?.id, shippingMethod, destinationCountry, expectedDate, shippingRequirements]);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
@@ -119,6 +153,23 @@ export const OrderListView: React.FC = () => {
     const priceInfo = skuObj
       ? calculateEffectiveUnitPrice(skuObj.base_price_usd, skuObj.id, tierDiscount, promotions)
       : { effectivePrice: 0, isPromo: false, originalPrice: 0, isStacked: false };
+    const brandAuthorized = !!prodObj &&
+      brandGrants.some(
+        grant =>
+          grant.company_id === currentCompany?.id && grant.brand_id === prodObj.brand_id
+      );
+    const unavailableReason =
+      !currentCustomerUser || currentCustomerUser.status !== 'active'
+        ? 'Your customer account is inactive.'
+        : !currentCompany || currentCompany.status !== 'active'
+          ? 'Your customer company is inactive.'
+          : !prodObj || prodObj.active === false
+            ? 'This product is no longer available.'
+            : !skuObj || skuObj.sellable_status !== 'active'
+              ? 'This SKU is no longer available.'
+              : !brandAuthorized
+                ? 'Your company is no longer authorized for this brand.'
+                : '';
 
     return {
       skuId: item.sku_id,
@@ -129,11 +180,13 @@ export const OrderListView: React.FC = () => {
       unitPrice: priceInfo.effectivePrice,
       isPromo: priceInfo.isPromo,
       subtotal: priceInfo.effectivePrice * item.quantity,
+      unavailableReason,
     };
   });
 
   const totalAmountUsd = cartLinesDetailed.reduce((sum, item) => sum + item.subtotal, 0);
   const totalPcs = cartLinesDetailed.reduce((sum, item) => sum + item.quantity, 0);
+  const hasUnavailableLine = cartLinesDetailed.some(item => item.unavailableReason);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,6 +199,10 @@ export const OrderListView: React.FC = () => {
     }
     if (privacyCheck.hasViolation) {
       setErrorMessage(privacyCheck.message ?? 'Privacy check failed.');
+      return;
+    }
+    if (hasUnavailableLine) {
+      setErrorMessage('Remove unavailable products or restore their availability before submitting.');
       return;
     }
     if (Object.keys(lineErrors).length > 0) {
@@ -163,6 +220,11 @@ export const OrderListView: React.FC = () => {
     });
 
     if (res.success) {
+      try {
+        sessionStorage.removeItem(shippingDraftKey(currentCompany?.id));
+      } catch {
+        /* ignore */
+      }
       setSubmittedOrder(
         res.order
           ? { ...res.order, lines: res.order.lines.map((line) => ({ ...line })) }
@@ -329,6 +391,11 @@ export const OrderListView: React.FC = () => {
                           </span>
                         )}
                       </div>
+                      {item.unavailableReason && (
+                        <p role="alert" className="text-[10px] font-semibold text-rose-600 mt-1">
+                          {item.unavailableReason} Remove it before submitting.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -557,7 +624,7 @@ export const OrderListView: React.FC = () => {
             <button
               type="submit"
               data-testid="submit-order"
-              disabled={submitting || privacyCheck.hasViolation}
+              disabled={submitting || privacyCheck.hasViolation || hasUnavailableLine}
               className="w-full h-12 rounded-[11px] bg-[#ff681e] hover:bg-[#ed5610] disabled:opacity-50 text-white font-bold text-xs tracking-wide transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(255,104,30,0.25)]"
             >
               <span>{submitting ? 'Submitting order request...' : 'Submit order request'}</span>
