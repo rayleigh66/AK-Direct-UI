@@ -13,10 +13,10 @@ export const SKU_MOQ = 10;
 
 export function validateSKUQuantity(qty: number): { valid: boolean; error?: string } {
   if (!Number.isInteger(qty)) {
-    return { valid: false, error: '订购数量必须为正整数' };
+    return { valid: false, error: 'Quantity must be a whole number.' };
   }
   if (qty < SKU_MOQ) {
-    return { valid: false, error: `每个 SKU 起订量为 ${SKU_MOQ} PCS（当前输入: ${qty}）` };
+    return { valid: false, error: `Minimum ${SKU_MOQ} PCS per SKU (current: ${qty}).` };
   }
   return { valid: true };
 }
@@ -411,7 +411,7 @@ export function checkPrivacyViolations(text: string): { hasViolation: boolean; m
   if (emailRegex.test(text)) {
     return {
       hasViolation: true,
-      message: '隐私合规拦截：备注中禁止填写邮箱地址。客户联系方式由业务员在线下专门渠道对接。',
+      message: 'Privacy check: email addresses are not allowed in notes. Contact details are handled offline by sales.',
     };
   }
 
@@ -420,7 +420,7 @@ export function checkPrivacyViolations(text: string): { hasViolation: boolean; m
   if (phoneRegex.test(text)) {
     return {
       hasViolation: true,
-      message: '隐私合规拦截：备注中禁止填写电话或手机号码。请通过线下授权渠道对接联系人。',
+      message: 'Privacy check: phone numbers are not allowed in notes. Contact details are handled offline by sales.',
     };
   }
 
@@ -434,7 +434,7 @@ export function checkPrivacyViolations(text: string): { hasViolation: boolean; m
     if (lower.includes(kw)) {
       return {
         hasViolation: true,
-        message: '隐私合规拦截：备注中禁止填写详细街道地址。目的国家已选定，最终交货信息由业务员线下单据处理。',
+        message: 'Privacy check: street addresses are not allowed. The destination country is selected above; final delivery details are handled offline.',
       };
     }
   }

@@ -16,6 +16,7 @@ Open the URL printed by Vite (configured development port: 3000).
 ```bash
 npm run lint      # TypeScript check
 npm test          # Vitest unit tests
+npm run test:e2e  # Playwright customer flow and responsive checks
 npm run build     # production build
 npm run preview
 ```
@@ -35,7 +36,9 @@ The project does **not** need a Google/Gemini API key, Google AI Studio, Google 
 - The multi-warehouse reservation is an in-memory allocation mock. It plans the whole order before changing state and fails as a whole when stock is short, but it is **not an atomic database transaction** and does not guarantee isolation under concurrent users.
 - Order actions validate the current status and exact warehouse allocations. Duplicate release/payment/shipment/confirmation and repeated change approvals are rejected; approved quantity changes re-plan the entire order and leave both order and inventory unchanged on failure.
 - Whole-order payment must equal the confirmed total in integer cents; partial or excess payment is rejected and cannot enable shipment. A pending cancellation/quantity-change request also blocks payment or release until it is approved or rejected.
-- Product images are imported through Vite so production builds use hashed assets; the Demo data itself remains fictional.
+- Product images are imported through Vite so production builds use hashed assets; the Demo data itself remains fictional. The four product JPGs are resized to 1000px and recompressed for the prototype.
+- Customer-facing screens use English display fields/mappings while internal product IDs, SKU codes and sales/admin workflows remain unchanged.
+- The customer flow is verified in Playwright at 375, 390, 430, 768 and 1440 CSS pixels. This is still browser emulation, not real-device Safari/Chrome acceptance. See [Mobile Customer UX](docs/ui-review/MOBILE_CUSTOMER_UX.md).
 
 Do not deploy this UI as a publicly accessible system containing real customers, credentials, orders or inventory.
 

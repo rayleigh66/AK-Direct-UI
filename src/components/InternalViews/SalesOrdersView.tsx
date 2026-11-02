@@ -51,7 +51,7 @@ export const SalesOrdersView: React.FC = () => {
   const [actualShipDate, setActualShipDate] = useState('2026-11-02');
   const [estimatedDelivery, setEstimatedDelivery] = useState('2026-11-08');
   const [customerVisibleNote, setCustomerVisibleNote] = useState(
-    '货物已整单出库并交付承运商，预计 5-7 个工作日到达目的港。'
+    'The entire order has been dispatched with the carrier and is expected to arrive at the destination port in 5–7 business days.'
   );
   const [internalNote, setInternalNote] = useState(
     '已完成提总装车核验，外箱均贴 AOKING 麦头。'

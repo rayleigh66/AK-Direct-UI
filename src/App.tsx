@@ -33,7 +33,8 @@ import { AuditLogView } from './components/InternalViews/AuditLogView';
 import { Smartphone } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { activeTab, isMobileSimulator, toggleMobileSimulator } = useApp();
+  const { activeTab, currentRole, isMobileSimulator, toggleMobileSimulator } = useApp();
+  const customer = currentRole === 'customer';
   const [isTestMatrixOpen, setIsTestMatrixOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -83,17 +84,21 @@ const MainLayout: React.FC = () => {
           <strong className="text-[#ff843f]">AOKING Direct v0.3</strong>
           <span className="text-[#666]">·</span>
           <span className="text-slate-300">
-            高标准工业协同设计 · 严格隐私保护（不收集客户电话、邮箱与地址）· 现货订购人工审核流程
+            {customer
+              ? 'Privacy-first wholesale ordering · human-reviewed requests'
+              : '高标准工业协同设计 · 严格隐私保护（不收集客户电话、邮箱与地址）· 现货订购人工审核流程'}
           </span>
         </div>
-        <div className="flex items-center gap-2 text-[11px] ml-auto">
-          <button
-            onClick={() => setIsTestMatrixOpen(true)}
-            className="text-[#ff843f] hover:underline font-bold"
-          >
-            打开验收矩阵 (T01-T35)
-          </button>
-        </div>
+        {!customer && (
+          <div className="flex items-center gap-2 text-[11px] ml-auto">
+            <button
+              onClick={() => setIsTestMatrixOpen(true)}
+              className="text-[#ff843f] hover:underline font-bold"
+            >
+              打开验收矩阵 (T01-T35)
+            </button>
+          </div>
+        )}
       </div>
 
       {isMobileSimulator ? (
@@ -158,7 +163,7 @@ const MainLayout: React.FC = () => {
 
             {/* Quiet Footer Note matching FactoryOS */}
             <footer className="text-center py-8 text-[#b0b0ae] text-[10px] tracking-wide border-t border-[#e8e8e6] bg-white">
-              AOKING DIRECT · SPOT WHOLESALE OPERATIONS SYSTEM 2026 &nbsp; / &nbsp; 演示数据已预载 · 严格保护客户隐私
+              AOKING DIRECT · SPOT WHOLESALE OPERATIONS SYSTEM 2026 &nbsp; / &nbsp; {customer ? 'Demo data · privacy protected' : '演示数据已预载 · 严格保护客户隐私'}
             </footer>
           </div>
         </div>

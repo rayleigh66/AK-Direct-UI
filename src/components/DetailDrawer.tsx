@@ -18,9 +18,11 @@ import {
   Building,
 } from 'lucide-react';
 import { calculateSKUAvailableStock, calculateEffectiveUnitPrice, SKU_MOQ } from '../utils/rules';
+import { ProductDetailSheet } from './CustomerViews/ProductDetailSheet';
 
 export const DetailDrawer: React.FC = () => {
   const {
+    currentRole,
     activeDrawer,
     closeDrawer,
     orders,
@@ -38,6 +40,9 @@ export const DetailDrawer: React.FC = () => {
   if (!activeDrawer) return null;
 
   const { type, id } = activeDrawer;
+  if (type === 'sku' && currentRole === 'customer') {
+    return <ProductDetailSheet skuId={id} onClose={closeDrawer} />;
+  }
   const tierDiscount = currentCompanyTierInfo?.currentTier.discount_rate ?? 0;
 
   let title = '';

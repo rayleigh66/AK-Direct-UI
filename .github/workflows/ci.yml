@@ -14,7 +14,7 @@ permissions:
 jobs:
   local-prototype:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,3 +39,9 @@ jobs:
 
       - name: Verify hashed production assets
         run: npm run verify:assets
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Customer mobile E2E
+        run: npm run test:e2e
