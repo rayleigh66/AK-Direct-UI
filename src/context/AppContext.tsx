@@ -107,7 +107,7 @@ interface AppContextType {
     destinationCountryAlpha3: string;
     expectedShipDate: string;
     shippingRequirements: string;
-  }) => { success: boolean; orderId?: string; error?: string };
+  }) => { success: boolean; orderId?: string; order?: Order; error?: string };
   customerCancelOrder: (orderId: string, reason: string) => { success: boolean; message: string };
   customerRequestChange: (orderId: string, reason: string, modifiedLines?: { sku_id: string; new_qty: number }[]) => { success: boolean; message: string };
   
@@ -466,7 +466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Order submitted with ${lines.length} lines, total quote USD $${newOrder.total_quoted_usd}. No stock locked yet.`
     );
 
-    return { success: true, orderId: newOrder.id };
+    return { success: true, orderId: newOrder.id, order: newOrder };
   }, [
     currentCompany,
     currentCustomerUser,
@@ -509,6 +509,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (order.status === 'CONFIRMED') {
+      if (order.change_request?.status === 'pending') {
+        return {
+          success: false,
+          message: 'A cancellation or quantity change request is already pending review.',
+        };
+      }
       // Must submit a change request for review by sales rep
       setOrders(prev =>
         prev.map(o =>
@@ -602,6 +608,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (order.status === 'CONFIRMED') {
+      if (order.change_request?.status === 'pending') {
+        return {
+          success: false,
+          message: 'A cancellation or quantity change request is already pending review.',
+        };
+      }
       setOrders(prev =>
         prev.map(o =>
           o.id === orderId

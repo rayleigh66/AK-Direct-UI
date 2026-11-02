@@ -43,6 +43,7 @@ export const CatalogView: React.FC = () => {
     brandGrants,
     brands,
     currentCompanyTierInfo,
+    cart,
     addToCart,
     submitRestockRequest,
     setActiveTab,
@@ -145,11 +146,21 @@ export const CatalogView: React.FC = () => {
 
   const handleQuickAdd = (sku: ProductSKU, e: React.MouseEvent) => {
     e.stopPropagation();
-    const res = addToCart(sku.id, SKU_MOQ);
+    const existing = cart.find(item => item.sku_id === sku.id)?.quantity ?? 0;
+    const { totalAvailable } = calculateSKUAvailableStock(sku.id, inventory);
+    const nextQuantity = existing + SKU_MOQ;
+    if (nextQuantity > totalAvailable) {
+      addToast(
+        `Only ${totalAvailable} PCS available. Your existing ${existing} PCS were kept.`,
+        'warn'
+      );
+      return;
+    }
+    const res = addToCart(sku.id, nextQuantity);
     if (res.success) {
-      addToast(`10 PCS added to your order list (${sku.sku_code})`);
+      addToast(`10 PCS added. ${nextQuantity} PCS of ${sku.sku_code} now in your order list.`);
     } else {
-      alert(res.message);
+      addToast(res.message ?? 'Could not add this SKU.', 'warn');
     }
   };
 
@@ -189,9 +200,9 @@ export const CatalogView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:pb-20">
+    <div className="flex flex-col gap-6 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:pb-20">
       {/* FactoryOS Eyebrow + Page Head */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="order-1 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-[10px] font-bold text-[#8f9191] tracking-[1.7px] uppercase">
             <span className="w-4 h-[2px] bg-[#ff681e]" />
@@ -224,7 +235,7 @@ export const CatalogView: React.FC = () => {
       </div>
 
       {/* FactoryOS Hero Card */}
-      <div className="relative min-h-[170px] sm:min-h-[206px] py-6 sm:py-0 flex items-center justify-between bg-[#1b1b1b] rounded-[17px] text-white overflow-hidden px-6 sm:px-10 shadow-[0_8px_32px_rgba(15,15,15,0.035)]">
+      <div className="order-3 lg:order-2 relative min-h-[170px] sm:min-h-[206px] py-6 sm:py-0 flex items-center justify-between bg-[#1b1b1b] rounded-[17px] text-white overflow-hidden px-6 sm:px-10 shadow-[0_8px_32px_rgba(15,15,15,0.035)]">
         {/* Background Radial Rings */}
         <div className="absolute -right-10 -top-32 w-[440px] h-[440px] rounded-full border border-white/10 pointer-events-none shadow-[0_0_0_43px_rgba(255,255,255,0.03),0_0_0_85px_rgba(255,255,255,0.02),0_0_0_125px_rgba(255,255,255,0.015)]" />
         
@@ -258,7 +269,7 @@ export const CatalogView: React.FC = () => {
       </div>
 
       {/* 4-Metric Grid (FactoryOS .metric-grid) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="order-4 lg:order-3 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Metric 1 */}
         <div className="bg-white border border-[#eaeae7] rounded-[17px] p-4 sm:p-5 relative overflow-hidden shadow-[0_8px_32px_rgba(15,15,15,0.035)] min-h-[112px] sm:min-h-[142px]">
           <div className="flex justify-between items-center text-xs text-[#929393]">
@@ -329,7 +340,7 @@ export const CatalogView: React.FC = () => {
       </div>
 
       {/* Brand Tabs Bar + Client Context (PRD D03 & T02) */}
-      <div className="bg-white p-3.5 sm:p-4 rounded-[17px] border border-[#eaeae7] shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="order-5 lg:order-4 bg-white p-3.5 sm:p-4 rounded-[17px] border border-[#eaeae7] shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className="text-xs font-bold text-[#888]">Authorized brands:</div>
           <div className="flex flex-wrap items-center gap-1.5 p-1 bg-[#f5f5f4] rounded-[10px]">
@@ -360,7 +371,8 @@ export const CatalogView: React.FC = () => {
         </div>
       </div>
 
-      {/* Unauthorized Brand Guard (T02) */}
+      {/* Mobile-first ordering: search, filters and products appear before the dashboard panels. */}
+      <div className="order-2 lg:order-5 space-y-4">
       {!isBrandAuthorized ? (
         <div className="p-8 bg-white rounded-[17px] border border-[#ffeadb] text-center space-y-4 max-w-xl mx-auto shadow-sm">
           <div className="w-12 h-12 rounded-[14px] bg-[#fff0ed] text-[#d34f36] flex items-center justify-center mx-auto">
@@ -393,7 +405,7 @@ export const CatalogView: React.FC = () => {
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search model (AK-9042), product or SKU..."
+                  placeholder="Search products or SKU..."
                   className="w-full h-[41px] pl-10 pr-4 rounded-[9px] border border-[#e8e8e6] bg-white text-xs text-[#151515] outline-none focus:border-[#ff9e6c] transition-colors"
                 />
                 <Search className="w-4 h-4 text-[#999] absolute left-3.5 top-3" />
@@ -572,6 +584,7 @@ export const CatalogView: React.FC = () => {
           )}
         </>
       )}
+      </div>
 
       {/* Restock Request Modal (PRD D08, D09, T06) */}
       {restockSku && (

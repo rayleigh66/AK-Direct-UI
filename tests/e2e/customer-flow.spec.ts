@@ -6,7 +6,7 @@ async function navTo(page: Page, label: string) {
     await page.getByTestId('customer-bottom-nav').getByRole('button', { name: label }).click();
   } else {
     const desktopLabel = label === 'Orders' ? 'My orders' : label;
-    await page.getByRole('button', { name: desktopLabel, exact: true }).first().click();
+    await page.getByRole('button', { name: desktopLabel }).first().click();
   }
 }
 
@@ -42,13 +42,47 @@ test('customer can browse, choose a colour, edit quantity, submit and view the o
 
   await page.locator('[data-testid="submit-order"]').click();
   await expect(page.getByRole('heading', { name: 'Order request submitted' })).toBeVisible();
+  await expect(page.getByTestId('success-total-pcs')).toHaveText('14 PCS');
+  await expect(page.getByTestId('success-total-usd')).toHaveText('USD $478.80');
+  const orderNo = (await page.getByTestId('success-order-no').textContent())!.trim();
   await page.getByRole('button', { name: 'View my orders' }).click();
   await expect(page.getByRole('heading', { name: 'My orders' })).toBeVisible();
-  await expect(page.getByText('Pending confirmation').first()).toBeVisible();
-  await expect(page.getByText(/ORD-\d{8}-\d{3}/).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Expand order details' }).first().click();
-  await expect(page.getByText('Order progress')).toBeVisible();
+  const orderCard = page.locator('div.bg-white.rounded-2xl', { hasText: orderNo }).first();
+  await expect(orderCard.getByText('14 PCS')).toBeVisible();
+  await expect(orderCard.getByText('USD $478.80')).toBeVisible();
+  await orderCard.locator('div.cursor-pointer').first().click();
+  await expect(orderCard.getByText('Order progress')).toBeVisible();
   expect(await page.locator('body').innerText()).not.toMatch(/[\u4e00-\u9fff]/);
+});
+
+test('catalog quick add accumulates the existing quantity', async ({ page }) => {
+  await openCatalog(page);
+  await page.locator('[data-testid="product-card"]').first().click();
+  const detail = page.getByTestId('product-detail');
+  await detail.locator('[data-testid="quantity-input"]').fill('12');
+  await detail.locator('[data-testid="add-to-order"]').click();
+  await expect(detail.getByText('Added to your order list.')).toBeVisible();
+  await detail.getByRole('button', { name: 'Close product details' }).click();
+  await page.locator('[data-testid="quick-add"]').first().click();
+  await expect(page.getByText(/22 PCS of AK-9042-BLK now in your order list/)).toBeVisible();
+  await navTo(page, 'Order list');
+  await expect(page.locator('[data-testid="cart-quantity-sku-9042-blk"]')).toHaveValue('22');
+  await expect(page.getByText('$752.40').first()).toBeVisible();
+});
+
+test('quick add keeps the existing quantity when stock would be exceeded', async ({ page }) => {
+  await openCatalog(page);
+  await page.locator('[data-testid="product-card"]').first().click();
+  const detail = page.getByTestId('product-detail');
+  await detail.locator('[data-testid="quantity-input"]').fill('225');
+  await detail.locator('[data-testid="add-to-order"]').click();
+  await expect(detail.getByText('Added to your order list.')).toBeVisible();
+  await detail.getByRole('button', { name: 'Close product details' }).click();
+  await page.locator('[data-testid="quick-add"]').first().click();
+  await expect(page.getByText(/Only 230 PCS available\. Your existing 225 PCS were kept\./)).toBeVisible();
+  await navTo(page, 'Order list');
+  await expect(page.locator('[data-testid="cart-quantity-sku-9042-blk"]')).toHaveValue('225');
+  await expect(page.getByText('$7695.00').first()).toBeVisible();
 });
 
 test('customer membership and notification surfaces remain in English', async ({ page }) => {
@@ -138,6 +172,36 @@ test('customer can inspect shipment tracking and permitted change actions', asyn
   await confirmed.locator('div.cursor-pointer').first().click();
   await expect(confirmed.getByRole('button', { name: 'Request quantity change' })).toBeVisible();
   await expect(confirmed.getByRole('button', { name: 'Request cancellation' })).toBeVisible();
+});
+
+test('confirmed order actions return after a change request is resolved', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Role-switch lifecycle evidence runs on desktop');
+  await openCatalog(page);
+  await navTo(page, 'Orders');
+  const order = page.locator('div.bg-white.rounded-2xl', { hasText: 'ORD-20261028-001' }).first();
+  await order.locator('div.cursor-pointer').first().click();
+  await order.getByRole('button', { name: 'Request quantity change' }).click();
+  await page.getByRole('button', { name: 'Save change' }).click();
+  await expect(order.getByText(/Change under review/)).toBeVisible();
+  await expect(order.getByRole('button', { name: 'Request quantity change' })).toHaveCount(0);
+
+  const sidebar = page.locator('aside');
+  await sidebar.getByRole('button', { name: /AK000123A/ }).click();
+  await page.getByText('Sales (Tom Miller)', { exact: true }).click();
+  await page.getByRole('button', { name: '客户变更申请 (Changes)' }).click();
+  const salesCard = page.locator('div.bg-white.rounded-2xl', { hasText: 'ORD-20261028-001' }).first();
+  await salesCard.getByRole('button', { name: '同意申请 (释放/调整预占)' }).click();
+  await expect(page.getByText('变更申请已核准并完成库存调整。')).toBeVisible();
+
+  await page.locator('aside').getByRole('button', { name: /Tom Miller/ }).click();
+  await page.getByText('AK000123A (Apex buyer 1)', { exact: true }).click();
+  await navTo(page, 'Orders');
+  const returned = page.locator('div.bg-white.rounded-2xl', { hasText: 'ORD-20261028-001' }).first();
+  await returned.locator('div.cursor-pointer').first().click();
+  await expect(returned.getByRole('button', { name: 'Request quantity change' })).toBeVisible();
+  await expect(returned.getByRole('button', { name: 'Request cancellation' })).toBeVisible();
 });
 
 test.describe('reduced motion', () => {

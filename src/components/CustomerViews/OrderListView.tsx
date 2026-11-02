@@ -58,7 +58,7 @@ export const OrderListView: React.FC = () => {
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [errorMessage, setErrorMessage] = useState('');
-  const [submittedOrderNo, setSubmittedOrderNo] = useState<string | null>(null);
+  const [submittedOrder, setSubmittedOrder] = useState<Order | null>(null);
 
   useEffect(() => {
     setQuantityDrafts(
@@ -163,7 +163,11 @@ export const OrderListView: React.FC = () => {
     });
 
     if (res.success) {
-      setSubmittedOrderNo(res.orderId || 'NEW-ORDER');
+      setSubmittedOrder(
+        res.order
+          ? { ...res.order, lines: res.order.lines.map((line) => ({ ...line })) }
+          : null
+      );
     } else {
       submittingRef.current = false;
       setSubmitting(false);
@@ -171,7 +175,9 @@ export const OrderListView: React.FC = () => {
     }
   };
 
-  if (submittedOrderNo) {
+  if (submittedOrder) {
+    const submittedPcs = submittedOrder.lines.reduce((sum, line) => sum + line.quantity, 0);
+    const submittedTotal = submittedOrder.total_confirmed_usd ?? submittedOrder.total_quoted_usd;
     return (
       <div className="max-w-2xl mx-auto py-12 px-4 text-center space-y-6">
         <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
@@ -179,6 +185,9 @@ export const OrderListView: React.FC = () => {
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-900">Order request submitted</h2>
+          <p className="text-xs font-mono font-semibold text-slate-500 mt-1">
+            {submittedOrder.order_no}
+          </p>
           <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
             Your wholesale request has been sent to the assigned sales representative. They will
             verify lead time and multi-warehouse availability, then create a
@@ -188,12 +197,20 @@ export const OrderListView: React.FC = () => {
 
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-2 text-slate-600 max-w-sm mx-auto text-left">
           <div className="flex justify-between">
+            <span className="text-slate-400">Order number:</span>
+            <span data-testid="success-order-no" className="font-mono font-semibold text-slate-800">{submittedOrder.order_no}</span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-slate-400">Total quantity:</span>
-            <span className="font-mono font-semibold text-slate-800">{totalPcs} PCS</span>
+            <span data-testid="success-total-pcs" className="font-mono font-semibold text-slate-800">
+              {submittedPcs} PCS
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-slate-400">Reference total:</span>
-            <span className="font-mono font-bold text-slate-900">USD ${totalAmountUsd.toFixed(2)}</span>
+            <span data-testid="success-total-usd" className="font-mono font-bold text-slate-900">
+              USD ${submittedTotal.toFixed(2)}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-slate-400">Current status:</span>
@@ -210,7 +227,7 @@ export const OrderListView: React.FC = () => {
           </button>
           <button
             onClick={() => {
-              setSubmittedOrderNo(null);
+              setSubmittedOrder(null);
               setActiveTab('catalog');
             }}
             className="px-6 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"

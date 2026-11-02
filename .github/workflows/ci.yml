@@ -45,3 +45,6 @@ jobs:
 
       - name: Customer mobile E2E
         run: npm run test:e2e
+
+      - name: Production preview smoke
+        run: npm run test:e2e:preview

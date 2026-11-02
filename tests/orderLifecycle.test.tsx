@@ -270,6 +270,10 @@ describe('order lifecycle integration', () => {
     const spendBefore = result.current.companies.find((company) => company.id === 'comp-001')!
       .cumulative_spend_usd;
     act(() => {
+      const duplicate = result.current.customerRequestChange('ord-001', 'Overwrite attempt', [
+        { sku_id: 'sku-9042-blk', new_qty: 40 },
+      ]);
+      expect(duplicate.success).toBe(false);
       expect(result.current.salesRecordPayment('ord-001', 1269, 'WIRE-PENDING-MOD').success).toBe(
         false
       );

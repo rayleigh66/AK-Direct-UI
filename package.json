@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "verify:assets": "node scripts/verify-build-assets.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:preview": "npm run build && playwright test --config=playwright.preview.config.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

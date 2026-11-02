@@ -60,6 +60,15 @@ Base：`feat/react-foundation-p0`（`273690c`）
 - 复用现有 CSS 过渡与动效，不引入新动效框架。
 - 全局 `prefers-reduced-motion: reduce` 关闭非必要动画/过渡；Playwright 验证卡片 transition ≤ 0.01ms。
 
+## 审核修复
+
+- **下单成功页快照**：`submitOrder` 返回实际创建的 Order；成功页使用提交时的订单号、行数量与参考总额，不再从已清空购物车计算。E2E 断言 14 PCS / USD $478.80 与 My Orders 一致；生产预览断言 12 PCS / USD $410.40。
+- **快速加购累加**：`+10 PCS` 先读取现有同 SKU 数量，再累加；超出可订库存时保留原数量并提示失败。
+- **变更申请入口**：Confirmed 订单仅在存在 pending 申请时隐藏改单/取消按钮；approved/rejected 后可再次发起。pending 期间上下文拒绝覆盖。
+- **移动优先商品**：移动端/平板搜索、筛选和商品列表移到 Hero、统计卡、品牌栏之前；桌面保持原顺序。
+- **截图可靠性**：截图脚本等待可见图片 `complete && naturalWidth > 0` 后再截图。
+- **生产预览冒烟**：新增 `playwright.preview.config.ts` 与 `tests/e2e-preview/production-smoke.spec.ts`，对 `dist` + `vite preview` 验证 hashed 图片、12 PCS 提交与成功页金额。
+
 ## 验证
 
 | 检查 | 结果 |
@@ -67,10 +76,11 @@ Base：`feat/react-foundation-p0`（`273690c`）
 | `npm ci` | PASS，0 vulnerabilities |
 | `npm run lint` | PASS |
 | `npm test` | PASS — **27 / 27** |
-| `npm run test:e2e` | PASS — **32 / 32**（desktop-1440、mobile-375、mobile-390-webkit、tablet-768） |
-| `npm run build` | PASS — JS 483.07 KB / gzip 132.77 KB；CSS 61.78 KB / gzip 11.45 KB |
+| `npm run test:e2e` | PASS — **41 passed / 3 skipped（共 44）**（desktop-1440、mobile-375、mobile-390-webkit、tablet-768） |
+| `npm run test:e2e:preview` | PASS — **1 / 1** 生产预览冒烟 |
+| `npm run build` | PASS — JS 484.30 KB / gzip 132.98 KB；CSS 61.95 KB / gzip 11.50 KB |
 | `npm run verify:assets` | PASS — 4 张 hashed 图，均 <160 KB |
-| GitHub Actions | install → typecheck → unit → build → asset check → Playwright（待本次 push 运行） |
+| GitHub Actions | install → typecheck → unit → build → asset check → Playwright → production preview smoke |
 
 E2E 覆盖：
 
@@ -81,7 +91,8 @@ E2E 覆盖：
 - 客户会员/通知/展开订单无中文；
 - 已发货订单的承运商、运单号、日期；
 - Confirmed 订单的 Request quantity change / Request cancellation；
-- Reduced Motion 下卡片无过渡。
+- Reduced Motion 下卡片无过渡；
+- 生产预览 hashed 图片与 12 PCS / USD $410.40 成功页。
 
 ## 截图
 
@@ -98,6 +109,14 @@ E2E 覆盖：
 - [My Orders 390](mobile-customer-ux/orders-390.jpg)
 - [Expanded order / timeline 390](mobile-customer-ux/orders-expanded-390.jpg)
 - [Shipped tracking 390](mobile-customer-ux/orders-shipped-390.jpg)
+
+### 修复前后对比
+
+| 项目 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 移动首屏商品优先级 | [before-catalog-390.jpg](mobile-customer-ux/before-catalog-390.jpg) | [catalog-390.jpg](mobile-customer-ux/catalog-390.jpg) |
+| 商品详情图片加载 | [before-product-detail-390.jpg](mobile-customer-ux/before-product-detail-390.jpg) | [product-detail-390.jpg](mobile-customer-ux/product-detail-390.jpg) |
+| 提交成功金额/数量 | [before-order-success-390.jpg](mobile-customer-ux/before-order-success-390.jpg) | [order-success-390.jpg](mobile-customer-ux/order-success-390.jpg) |
 
 ## 未完成 / 未验证
 

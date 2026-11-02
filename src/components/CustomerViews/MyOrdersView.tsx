@@ -408,7 +408,7 @@ export const MyOrdersView: React.FC = () => {
                         )}
 
                         {/* If CONFIRMED: Must submit request for sales approval */}
-                        {order.status === 'CONFIRMED' && !order.change_request && (
+                        {order.status === 'CONFIRMED' && (!order.change_request || order.change_request.status !== 'pending') && (
                           <>
                             <button
                               onClick={() => openModifyModal(order)}
