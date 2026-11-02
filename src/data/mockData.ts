@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import businessBackpackImage from '../assets/images/aoking_business_backpack_1793546722780.jpg';
+import hardshellLuggageImage from '../assets/images/aoking_hardshell_luggage_1793546722486.jpg';
+import urbanCommuterPackImage from '../assets/images/aoking_urban_commuter_pack_1793546722814.jpg';
+import executiveBriefcaseImage from '../assets/images/aoking_executive_briefcase_1793546722874.jpg';
 import {
   Brand,
   BrandGrant,
@@ -52,10 +56,10 @@ export const INITIAL_PRODUCTS: Product[] = [
     description: '采用高强度哑光防水面料与防割防泼水涂层，内置 17.3 英寸加厚防震独立电脑舱与 USB 快速充能端口。人体工学 S 型蜂窝减压肩带与隐形防盗后袋。',
     material: '900D Matte High-Density Polyester / Water-Resistant YKK Zippers',
     capacity_or_size: '32L (48 x 33 x 18 cm)',
-    primary_image: '/src/assets/images/aoking_business_backpack_1793546722780.jpg',
+    primary_image: businessBackpackImage,
     gallery_images: [
-      '/src/assets/images/aoking_business_backpack_1793546722780.jpg',
-      '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+      businessBackpackImage,
+      urbanCommuterPackImage,
     ],
     skus: [
       {
@@ -105,9 +109,9 @@ export const INITIAL_PRODUCTS: Product[] = [
     description: '德国拜耳三层复合 PC 韧性箱壳，航空级加厚铝镁合金防撞防爆中框与四角包边。静音万向双排万向轮，内嵌式海关 TSA 双重锁。',
     material: '100% Bayer Makrolon Polycarbonate / Aviation Aluminum Alloy Frame',
     capacity_or_size: '20 Inch Cabin Size (38L, 3.4kg)',
-    primary_image: '/src/assets/images/aoking_hardshell_luggage_1793546722486.jpg',
+    primary_image: hardshellLuggageImage,
     gallery_images: [
-      '/src/assets/images/aoking_hardshell_luggage_1793546722486.jpg',
+      hardshellLuggageImage,
     ],
     skus: [
       {
@@ -148,9 +152,9 @@ export const INITIAL_PRODUCTS: Product[] = [
     description: '灵动可扩容卷顶闭合架构，模块化战术织带外挂系统，两侧深口弹性保温水壶兜，下沉式独立鞋仓/脏衣仓。',
     material: '1000D Ballistic Cordura / Duraflex High-Strength Buckles',
     capacity_or_size: '28L - 35L Expandable (50 x 30 x 16 cm)',
-    primary_image: '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+    primary_image: urbanCommuterPackImage,
     gallery_images: [
-      '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+      urbanCommuterPackImage,
     ],
     skus: [
       {
@@ -182,9 +186,9 @@ export const INITIAL_PRODUCTS: Product[] = [
     description: '甄选进口头层植鞣纳帕牛皮，细腻触感经久耐磨。定制精抛光银色金属卡扣，可拆卸真皮减压垫宽肩带，背后设有拉杆箱固定插带。',
     material: 'Full-Grain Tuscan Calfskin / Brushed Alloy Hardware',
     capacity_or_size: '15L (40 x 30 x 9 cm)',
-    primary_image: '/src/assets/images/aoking_executive_briefcase_1793546722874.jpg',
+    primary_image: executiveBriefcaseImage,
     gallery_images: [
-      '/src/assets/images/aoking_executive_briefcase_1793546722874.jpg',
+      executiveBriefcaseImage,
     ],
     skus: [
       {
@@ -216,7 +220,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     description: '非 AOKING 授权品牌测试商品，用于验证 T02 未授权品牌访问拒绝机制。',
     material: '16oz Washed Canvas & Crazy Horse Leather',
     capacity_or_size: '45L',
-    primary_image: '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+    primary_image: urbanCommuterPackImage,
     gallery_images: [],
     skus: [
       {
@@ -256,8 +260,8 @@ export const INITIAL_INVENTORY: InventoryBalance[] = [
   // AK-7710-GLD (Champagne Gold) - Total available: 120
   { warehouse_id: 'wh-sh', sku_id: 'sku-7710-gld', on_hand: 120, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
 
-  // AK-8015-NVY (Tactical Navy) - Total available: 300
-  { warehouse_id: 'wh-sh', sku_id: 'sku-8015-nvy', on_hand: 200, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
+  // AK-8015-NVY (Tactical Navy) - 100 PCS reserved for paid order ord-002; available: 200
+  { warehouse_id: 'wh-sh', sku_id: 'sku-8015-nvy', on_hand: 200, reserved: 100, unsellable: 0, updated_at: '2026-10-31' },
   { warehouse_id: 'wh-nb', sku_id: 'sku-8015-nvy', on_hand: 100, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
 
   // AK-8015-BLK (Stealth Black) - Total available: 175
@@ -441,6 +445,10 @@ export const INITIAL_ORDERS: Order[] = [
     assigned_sales_id: 'sales-1',
     reservation_expires_at: '2026-11-04T12:00:00Z',
     reservation_extended_count: 0,
+    reservation_allocations: [
+      { sku_id: 'sku-9042-blk', warehouse_id: 'wh-sh', quantity: 20 },
+      { sku_id: 'sku-7710-slv', warehouse_id: 'wh-sh', quantity: 10 },
+    ],
     customer_visible_note: '业务员 Tom 已确认订购单，并成功锁定上海主仓现货库存。库存预占有效期为 72 小时，请尽快完成线下 T/T 汇款。',
     internal_note: '客户拟拼整柜海运，订金待查。预占到期前若未见水单需邮件跟进。',
     created_at: '2026-10-28 14:22:00',
@@ -475,6 +483,9 @@ export const INITIAL_ORDERS: Order[] = [
     payment_recorded_at: '2026-10-22 10:15:00',
     payment_amount_usd: 2520.0,
     payment_reference: 'WIRE-20261021-BOA9981',
+    reservation_allocations: [
+      { sku_id: 'sku-8015-nvy', warehouse_id: 'wh-sh', quantity: 100 },
+    ],
     customer_visible_note: '全额货款 USD $2,520.00 已核对入账。仓库正在安排空运托盘分拣与打带。',
     internal_note: '招行美金账户已收到，水单齐全，已计入客户历史累计采购额。',
     created_at: '2026-10-20 09:30:00',
@@ -579,7 +590,7 @@ export const INITIAL_EMAIL_TEMPLATES: InternalEmailTemplate[] = [
 
 Your wholesale spot-order #ORD-20261028-001 has been reviewed and officially confirmed by AOKING Direct Sales Division.
 
-All items have been atomistically reserved in our Shanghai export warehouse:
+All items have been reserved for this frontend demo (not a database transaction) in our Shanghai export warehouse:
 - AK-9042-BLK (Matte Black): 20 PCS @ USD $34.20
 - AK-7710-SLV (Graphite Silver): 10 PCS @ USD $58.50
 Total Order Value: USD $1,269.00
@@ -618,7 +629,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
     actor: 'Tom Miller (Sales)',
     action: 'CONFIRM_ORDER',
     target: 'ORD-20261028-001',
-    details: 'Atomic stock reserved: 20 pcs AK-9042-BLK, 10 pcs AK-7710-SLV. Expiry 72h.',
+    details: 'Frontend mock reservation: 20 pcs AK-9042-BLK, 10 pcs AK-7710-SLV. Expiry 72h.',
   },
   {
     id: 'audit-004',

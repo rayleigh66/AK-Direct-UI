@@ -164,6 +164,8 @@ export interface Order {
   assigned_sales_id: string;
   reservation_expires_at?: string; // ISO timestamp
   reservation_extended_count?: number;
+  /** Frontend-only mock allocation; never a database transaction. */
+  reservation_allocations?: { sku_id: string; warehouse_id: string; quantity: number }[];
   
   // Payment
   payment_recorded_at?: string;

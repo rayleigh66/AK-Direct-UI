@@ -72,7 +72,7 @@ export const SalesOrdersView: React.FC = () => {
   const handleConfirm = (orderId: string) => {
     const res = salesConfirmOrder(orderId);
     if (res.success) {
-      setActionMessage('订单确认成功！已原子锁定现货库存并生成 72 小时预占期与客户邮件草稿。');
+      setActionMessage('订单确认成功！已完成整单模拟预占（Demo，非数据库事务），并生成 72 小时预占期与客户邮件草稿。');
       setTimeout(() => setActionMessage(''), 4000);
     } else {
       alert(res.error);
@@ -95,7 +95,7 @@ export const SalesOrdersView: React.FC = () => {
   const handleShipmentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!shipmentOrder) return;
-    salesUpdateShipment(shipmentOrder.id, {
+    const res = salesUpdateShipment(shipmentOrder.id, {
       carrier,
       trackingNo,
       actualShipDate,
@@ -103,9 +103,43 @@ export const SalesOrdersView: React.FC = () => {
       customerVisibleNote,
       internalNote,
     });
-    setActionMessage('整单发货记录更新成功！预占库存已正式扣减出库。');
+    if (!res.success) {
+      alert(res.error);
+      return;
+    }
+    setActionMessage('整单发货记录更新成功！原仓库预占库存已扣减出库。');
     setShipmentOrder(null);
     setTimeout(() => setActionMessage(''), 4000);
+  };
+
+  const handleRelease = (orderId: string) => {
+    const res = salesReleaseReservation(orderId, '未在期限内付款或客户协商释放');
+    if (res.success) {
+      setActionMessage('预占库存已按原仓库分配释放。');
+      setTimeout(() => setActionMessage(''), 4000);
+    } else {
+      alert(res.error);
+    }
+  };
+
+  const handleExtend = (orderId: string) => {
+    const res = salesExtendReservation(orderId, 48);
+    if (res.success) {
+      setActionMessage('预占期已延长 48 小时。');
+      setTimeout(() => setActionMessage(''), 4000);
+    } else {
+      alert(res.error);
+    }
+  };
+
+  const handleChangeRequest = (orderId: string, approve: boolean) => {
+    const res = salesHandleChangeRequest(orderId, approve);
+    if (res.success) {
+      setActionMessage(approve ? '变更申请已核准并完成库存调整。' : '变更申请已驳回，订单与库存不变。');
+      setTimeout(() => setActionMessage(''), 4000);
+    } else {
+      alert(res.error);
+    }
   };
 
   return (
@@ -258,13 +292,13 @@ export const SalesOrdersView: React.FC = () => {
                   <div className="text-amber-800">申请原因: {order.change_request.reason}</div>
                   <div className="flex gap-2 pt-1">
                     <button
-                      onClick={() => salesHandleChangeRequest(order.id, true)}
+                      onClick={() => handleChangeRequest(order.id, true)}
                       className="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700"
                     >
                       同意申请 (释放/调整预占)
                     </button>
                     <button
-                      onClick={() => salesHandleChangeRequest(order.id, false)}
+                      onClick={() => handleChangeRequest(order.id, false)}
                       className="px-3 py-1 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
                     >
                       驳回申请
@@ -311,7 +345,7 @@ export const SalesOrdersView: React.FC = () => {
                       {hasInsufficientStock ? (
                         <div className="text-xs text-rose-600 font-semibold flex items-center gap-1">
                           <AlertTriangle className="w-4 h-4" />
-                          <span>库存不足，无法原子锁库（PRD 5.2/T08）</span>
+                          <span>库存不足，无法完成整单模拟预占（PRD 5.2/T08）</span>
                         </div>
                       ) : (
                         <button
@@ -319,7 +353,7 @@ export const SalesOrdersView: React.FC = () => {
                           className="min-h-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-sm"
                         >
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>确认订单并原子预占库存 (72h)</span>
+                          <span>确认订单并整单模拟预占 (72h)</span>
                         </button>
                       )}
                     </>
@@ -329,7 +363,7 @@ export const SalesOrdersView: React.FC = () => {
                   {order.status === 'CONFIRMED' && (
                     <>
                       <button
-                        onClick={() => salesExtendReservation(order.id, 48)}
+                        onClick={() => handleExtend(order.id)}
                         className="min-h-[44px] px-3 py-2 border border-slate-300 bg-white text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50"
                         title="延长 48 小时预占期"
                       >
@@ -337,7 +371,7 @@ export const SalesOrdersView: React.FC = () => {
                       </button>
 
                       <button
-                        onClick={() => salesReleaseReservation(order.id, '未在期限内付款或客户协商释放')}
+                        onClick={() => handleRelease(order.id)}
                         className="min-h-[44px] px-3 py-2 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold hover:bg-rose-100"
                       >
                         释放预占库存
@@ -346,7 +380,7 @@ export const SalesOrdersView: React.FC = () => {
                       <button
                         onClick={() => {
                           setPaymentOrder(order);
-                          setPaymentAmount(order.total_quoted_usd);
+                          setPaymentAmount(order.total_confirmed_usd ?? order.total_quoted_usd);
                           setPaymentReference(`WIRE-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-CITI`);
                         }}
                         className="min-h-[44px] px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
@@ -392,7 +426,8 @@ export const SalesOrdersView: React.FC = () => {
             <form onSubmit={handleRecordPaymentSubmit} className="p-5 space-y-4">
               <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
                 <div>订单号: <strong className="font-mono">{paymentOrder.order_no}</strong></div>
-                <div>应收参考总额: <strong className="font-mono text-slate-900">USD ${paymentOrder.total_quoted_usd.toFixed(2)}</strong></div>
+                <div>确认应收总额: <strong className="font-mono text-slate-900">USD ${(paymentOrder.total_confirmed_usd ?? paymentOrder.total_quoted_usd).toFixed(2)}</strong></div>
+                <div className="text-amber-700">本 Demo 只接受整单全额付款，不支持部分付款。</div>
                 <div>结算方式: 线下电汇 (T/T Bank Wire Transfer)</div>
               </div>
 

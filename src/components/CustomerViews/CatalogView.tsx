@@ -224,7 +224,7 @@ export const CatalogView: React.FC = () => {
             现货精确可订，<b>人工核准锁库。</b>
           </h2>
           <p className="text-xs text-[#aaa] leading-relaxed">
-            在线提交为【订购申请】；业务员核对库存与交期后原子预占 72 小时。严格不采集客户个人联系方式与地址。
+            在线提交为【订购申请】；业务员核对库存与交期后整单模拟预占 72 小时（Demo，非数据库事务）。严格不采集客户个人联系方式与地址。
           </p>
         </div>
 
@@ -315,9 +315,9 @@ export const CatalogView: React.FC = () => {
 
       {/* Brand Tabs Bar + Client Context (PRD D03 & T02) */}
       <div className="bg-white p-4 rounded-[17px] border border-[#eaeae7] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-xs font-bold text-[#888]">授权品牌:</div>
-          <div className="flex items-center gap-1.5 p-1 bg-[#f5f5f4] rounded-[10px]">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-[#f5f5f4] rounded-[10px]">
             {brands.map(b => (
               <button
                 key={b.id}
