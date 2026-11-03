@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AccessBoundary } from '../AccessBoundary';
 import { calculateSKUAvailableStock, SKU_MOQ } from '../../utils/rules';
 import {
   BellRing,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react';
 
 export const RestockManageView: React.FC = () => {
-  const { restockRequests, inventory, companies, replenishStock, setActiveTab } = useApp();
+  const { currentRole, restockRequests, inventory, companies, replenishStock, setActiveTab } = useApp();
   const [replenishSuccessMsg, setReplenishSuccessMsg] = useState('');
 
   const handleReplenish = (skuId: string, addQty: number) => {
@@ -26,6 +27,15 @@ export const RestockManageView: React.FC = () => {
     setReplenishSuccessMsg(`已完成入库 +${addQty} PCS！库存已达起订量，系统已自动向原申请客户发出站内通知并生成业务员通知邮件草稿。`);
     setTimeout(() => setReplenishSuccessMsg(''), 4500);
   };
+
+  if (currentRole === 'customer') {
+    return (
+      <AccessBoundary
+        title="补货管理不对客户开放"
+        message="客户只能查看自己的补货请求，不能进入内部补货管理界面。这是前端视图守卫；正式权限必须在后端再次校验。"
+      />
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-24">

@@ -13,6 +13,22 @@ function setup() {
   return renderHook(() => useApp(), { wrapper });
 }
 
+const asCustomer = (result: ReturnType<typeof setup>['result']) => {
+  act(() => {
+    result.current.switchRole('customer', 'user-001a');
+  });
+};
+const asSales = (result: ReturnType<typeof setup>['result']) => {
+  act(() => {
+    result.current.switchRole('sales');
+  });
+};
+const asAdmin = (result: ReturnType<typeof setup>['result']) => {
+  act(() => {
+    result.current.switchRole('admin');
+  });
+};
+
 const orderById = (result: ReturnType<typeof setup>['result'], id: string) => {
   const order = result.current.orders.find((item) => item.id === id);
   if (!order) throw new Error(`Order ${id} not found`);
@@ -32,6 +48,7 @@ const balance = (
 };
 
 const submitNewBlackOrder = (result: ReturnType<typeof setup>['result']) => {
+  asCustomer(result);
   act(() => {
     const cart = result.current.addToCart('sku-9042-blk', 10);
     expect(cart.success).toBe(true);
@@ -57,6 +74,7 @@ describe('order lifecycle integration', () => {
     const { result } = setup();
     const orderId = submitNewBlackOrder(result);
     expect(orderById(result, orderId).status).toBe('PENDING_CONFIRMATION');
+    asSales(result);
 
     act(() => {
       expect(result.current.salesConfirmOrder(orderId).success).toBe(true);
@@ -134,6 +152,7 @@ describe('order lifecycle integration', () => {
   it('blocks two confirmations issued in the same event before React re-renders', () => {
     const { result } = setup();
     const orderId = submitNewBlackOrder(result);
+    asSales(result);
     let first: { success: boolean } | undefined;
     let second: { success: boolean; error?: string } | undefined;
     act(() => {
@@ -149,6 +168,7 @@ describe('order lifecycle integration', () => {
 
   it('rejects underpayment/overpayment and allows exact full payment before shipment', async () => {
     const { result } = setup();
+    asSales(result);
     const orderBefore = JSON.stringify(orderById(result, 'ord-001'));
     const inventoryBefore = JSON.stringify(result.current.inventory);
     const spendBefore = result.current.companies.find((company) => company.id === 'comp-001')!
@@ -229,6 +249,7 @@ describe('order lifecycle integration', () => {
 
   it('blocks payment and release while a cancellation request is pending', () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(result.current.customerCancelOrder('ord-001', 'Pending cancellation').success).toBe(
         true
@@ -239,6 +260,7 @@ describe('order lifecycle integration', () => {
     const inventoryBefore = JSON.stringify(result.current.inventory);
     const spendBefore = result.current.companies.find((company) => company.id === 'comp-001')!
       .cumulative_spend_usd;
+    asSales(result);
     act(() => {
       const payment = result.current.salesRecordPayment('ord-001', 1269, 'WIRE-PENDING');
       expect(payment.success).toBe(false);
@@ -257,6 +279,7 @@ describe('order lifecycle integration', () => {
 
   it('blocks payment and release while a modification request is pending', () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(
         result.current.customerRequestChange('ord-001', 'Pending modification', [
@@ -274,6 +297,9 @@ describe('order lifecycle integration', () => {
         { sku_id: 'sku-9042-blk', new_qty: 40 },
       ]);
       expect(duplicate.success).toBe(false);
+    });
+    asSales(result);
+    act(() => {
       expect(result.current.salesRecordPayment('ord-001', 1269, 'WIRE-PENDING-MOD').success).toBe(
         false
       );
@@ -291,6 +317,7 @@ describe('order lifecycle integration', () => {
 
   it('allows payment and shipment after a quantity change is approved', async () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(
         result.current.customerRequestChange('ord-001', 'Increase black', [
@@ -299,6 +326,7 @@ describe('order lifecycle integration', () => {
       ).toBe(true);
     });
     await Promise.resolve();
+    asSales(result);
     act(() => {
       expect(result.current.salesHandleChangeRequest('ord-001', true).success).toBe(true);
     });
@@ -339,6 +367,7 @@ describe('order lifecycle integration', () => {
   it('rejects duplicate confirmation without touching inventory', async () => {
     const { result } = setup();
     const orderId = submitNewBlackOrder(result);
+    asSales(result);
     act(() => {
       expect(result.current.salesConfirmOrder(orderId).success).toBe(true);
     });
@@ -356,6 +385,7 @@ describe('order lifecycle integration', () => {
 
   it('blocks a same-tick duplicate extension while allowing a later deliberate extension', async () => {
     const { result } = setup();
+    asSales(result);
     let first: { success: boolean } | undefined;
     let second: { success: boolean; error?: string } | undefined;
     act(() => {
@@ -375,6 +405,7 @@ describe('order lifecycle integration', () => {
 
   it('releases a confirmed order once and rejects repeated release', async () => {
     const { result } = setup();
+    asSales(result);
     expect(balance(result, 'sku-9042-blk', 'wh-sh').reserved).toBe(20);
     expect(balance(result, 'sku-7710-slv', 'wh-sh').reserved).toBe(10);
     act(() => {
@@ -399,6 +430,7 @@ describe('order lifecycle integration', () => {
 
   it('approves a quantity change, reallocates warehouses and updates line totals', async () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(
         result.current.customerRequestChange('ord-001', 'Increase black', [
@@ -408,6 +440,7 @@ describe('order lifecycle integration', () => {
     });
     expect(orderById(result, 'ord-001').change_request?.status).toBe('pending');
 
+    asSales(result);
     act(() => {
       expect(result.current.salesHandleChangeRequest('ord-001', true).success).toBe(true);
     });
@@ -443,6 +476,7 @@ describe('order lifecycle integration', () => {
 
   it('keeps the whole order unchanged when an approved quantity increase lacks stock', () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(
         result.current.customerRequestChange('ord-001', 'Too many', [
@@ -452,6 +486,7 @@ describe('order lifecycle integration', () => {
     });
     const inventory = JSON.stringify(result.current.inventory);
     const orderState = JSON.stringify(orderById(result, 'ord-001'));
+    asSales(result);
     act(() => {
       const resultValue = result.current.salesHandleChangeRequest('ord-001', true);
       expect(resultValue.success).toBe(false);
@@ -464,11 +499,13 @@ describe('order lifecycle integration', () => {
 
   it('approves a cancellation request by releasing the exact allocations', async () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(result.current.customerCancelOrder('ord-001', 'Customer cancelled').success).toBe(true);
     });
     expect(orderById(result, 'ord-001').change_request?.status).toBe('pending');
 
+    asSales(result);
     act(() => {
       expect(result.current.salesHandleChangeRequest('ord-001', true).success).toBe(true);
     });
@@ -485,6 +522,7 @@ describe('order lifecycle integration', () => {
 
   it('rejects a change request without changing order or inventory', () => {
     const { result } = setup();
+    asCustomer(result);
     act(() => {
       expect(
         result.current.customerRequestChange('ord-001', 'Try later', [
@@ -494,6 +532,7 @@ describe('order lifecycle integration', () => {
     });
     const inventory = JSON.stringify(result.current.inventory);
     const before = { ...orderById(result, 'ord-001') };
+    asSales(result);
     act(() => {
       expect(result.current.salesHandleChangeRequest('ord-001', false).success).toBe(true);
     });
@@ -506,6 +545,7 @@ describe('order lifecycle integration', () => {
 
   it('ships the paid legacy order once and rejects repeated payment/shipment', async () => {
     const { result } = setup();
+    asSales(result);
     expect(balance(result, 'sku-8015-nvy', 'wh-sh').reserved).toBe(100);
     const spend = result.current.companies.find((company) => company.id === 'comp-001')!
       .cumulative_spend_usd;
@@ -558,6 +598,7 @@ describe('order lifecycle integration', () => {
   it('fails the entire confirmation when one SKU is short', () => {
     const { result } = setup();
     const orderId = submitNewBlackOrder(result);
+    asAdmin(result);
     act(() => {
       const imported = result.current.excelImportStock([
         { sku_code: 'AK-9042-BLK', warehouse_code: 'WH-SH', on_hand: 20, unsellable: 0 },
@@ -567,6 +608,7 @@ describe('order lifecycle integration', () => {
       expect(imported.count).toBe(2);
     });
     const inventory = JSON.stringify(result.current.inventory);
+    asSales(result);
     act(() => {
       const confirmation = result.current.salesConfirmOrder(orderId);
       expect(confirmation.success).toBe(false);

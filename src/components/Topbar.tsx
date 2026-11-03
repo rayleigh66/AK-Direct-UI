@@ -155,7 +155,9 @@ export const Topbar: React.FC<TopbarProps> = ({
           </button>
         )}
 
-        {/* Notification Bell */}
+        {/* Notification Bell — customer-only to avoid leaking customer data into internal roles.
+            Internal roles keep a same-size spacer so the topbar layout does not shift. */}
+        {currentRole === 'customer' ? (
         <div className="relative">
           <button
             onClick={() => setIsNotifOpen(!isNotifOpen)}
@@ -210,6 +212,9 @@ export const Topbar: React.FC<TopbarProps> = ({
             </div>
           )}
         </div>
+        ) : (
+          <div className="w-[39px] h-[39px] shrink-0" aria-hidden="true" />
+        )}
 
         {/* Top Avatar badge */}
         <div className="w-9 h-9 bg-[#171717] text-white flex items-center justify-center rounded-[10px] font-black text-xs font-mono shadow-xs">

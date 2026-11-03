@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AccessBoundary } from '../AccessBoundary';
 import {
   Mail,
   Copy,
@@ -17,7 +18,7 @@ import {
 } from 'lucide-react';
 
 export const InternalMailboxView: React.FC = () => {
-  const { internalEmailTemplates, markEmailTemplateSent, currentSalesUser } = useApp();
+  const { currentRole, internalEmailTemplates, markEmailTemplateSent, currentSalesUser } = useApp();
   const [selectedMailId, setSelectedMailId] = useState<string | null>(
     internalEmailTemplates[0]?.id || null
   );
@@ -30,6 +31,15 @@ export const InternalMailboxView: React.FC = () => {
     setCopyToast(true);
     setTimeout(() => setCopyToast(false), 2000);
   };
+
+  if (currentRole === 'customer') {
+    return (
+      <AccessBoundary
+        title="内部邮件中心不对客户开放"
+        message="客户不能查看内部邮件模板或销售备注。这是前端视图守卫；正式权限必须在后端再次校验。"
+      />
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24">

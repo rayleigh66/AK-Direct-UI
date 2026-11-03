@@ -16,6 +16,7 @@ import {
   Users,
   Check,
   AlertCircle,
+  FastForward,
 } from 'lucide-react';
 
 export const CompanyAccountsView: React.FC = () => {
@@ -28,6 +29,7 @@ export const CompanyAccountsView: React.FC = () => {
     adminCreateCompany,
     adminCreateSecondaryAccount,
     adminToggleBrandGrant,
+    simulateTimeTravelInactivity,
   } = useApp();
 
   // Form states
@@ -46,6 +48,8 @@ export const CompanyAccountsView: React.FC = () => {
 
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [formError, setFormError] = useState('');
+  const [qaCompanyId, setQaCompanyId] = useState(companies[0]?.id ?? '');
+  const [qaMessage, setQaMessage] = useState('');
 
   // RBAC Check (PRD D24 / T27)
   const isSalesperson = currentRole === 'sales';
@@ -327,6 +331,61 @@ export const CompanyAccountsView: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* Internal QA only: inactivity simulation was removed from the customer membership page. */}
+      {currentRole === 'admin' && (
+        <div
+          className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-sm"
+          data-testid="tier-qa-panel"
+        >
+          <div className="flex items-center gap-2">
+            <FastForward className="w-4 h-4 text-indigo-600" />
+            <h2 className="text-sm font-bold text-slate-900">Demo QA：客户未采购计时模拟</h2>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+              仅内部 QA
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            前端 Mock，不是真实等级变更，不对客户展示。正式系统应由后台按最后有效采购日期计算。
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={qaCompanyId}
+              onChange={event => setQaCompanyId(event.target.value)}
+              className="h-10 px-3 rounded-lg border border-slate-300 bg-white text-xs"
+              aria-label="QA company"
+            >
+              {companies.map(company => (
+                <option key={company.id} value={company.id}>
+                  {company.customer_code} — {company.short_name}
+                </option>
+              ))}
+            </select>
+            {[6, 12, 18, 30].map(months => (
+              <button
+                key={months}
+                type="button"
+                onClick={() => {
+                  const result = simulateTimeTravelInactivity(qaCompanyId, months);
+                  setQaMessage(
+                    result.success
+                      ? `已将 ${qaCompanyId} 的未采购计时 +${months} 个月（Demo）。`
+                      : result.error ?? '模拟失败。'
+                  );
+                }}
+                className="min-h-[40px] px-3 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
+              >
+                +{months} months
+              </button>
+            ))}
+          </div>
+          {qaMessage && (
+            <div role="status" className="p-2.5 rounded-lg bg-slate-50 text-xs text-slate-700">
+              {qaMessage}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* One-Time Temporary Password Display Modal (PRD D26, T28, T29) */}
       {createdCredential && (

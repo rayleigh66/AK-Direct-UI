@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AccessBoundary } from '../AccessBoundary';
 import { calculateSKUAvailableStock } from '../../utils/rules';
 import {
   Boxes,
@@ -20,7 +21,7 @@ import {
 } from '../../utils/inventoryImport';
 
 export const InventoryImportView: React.FC = () => {
-  const { inventory, warehouses, products, excelImportStock } = useApp();
+  const { currentRole, inventory, warehouses, products, excelImportStock } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
@@ -35,6 +36,15 @@ export const InventoryImportView: React.FC = () => {
     [parseErrors, validation]
   );
   const canCommit = !!validation?.valid && previewErrors.length === 0;
+
+  if (currentRole !== 'admin') {
+    return (
+      <AccessBoundary
+        title="库存导入仅对管理员开放"
+        message="业务员不能执行库存导入。业务员查看库存的只读权限差异尚未确认，因此本 Demo 不自行扩大授权；正式权限需由后端按角色与客户范围校验。"
+      />
+    );
+  }
 
   const resetImport = () => {
     setFileName('');
@@ -140,7 +150,9 @@ export const InventoryImportView: React.FC = () => {
         );
         setValidation(refreshed);
         setImportError(
-          '库存自预览后已变化。已刷新差异，请重新检查并再次确认，不会自动覆盖。'
+          res.error
+            ? `库存自预览后已变化。已刷新差异，请重新检查并再次确认，不会自动覆盖。${res.error}`
+            : '库存自预览后已变化。已刷新差异，请重新检查并再次确认，不会自动覆盖。'
         );
         setIsPreviewOpen(true);
       } else {

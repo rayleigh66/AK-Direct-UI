@@ -28,10 +28,10 @@ The project does **not** need a Google/Gemini API key, Google AI Studio, Google 
 **This is a demonstration application, not a production ordering service.**
 
 - State, including carts, orders, stock, audit events and account flags, is stored in React memory and resets on reload.
-- Role switching is a demo feature, not authentication or server-side authorization.
+- Role switching is a demo feature, not authentication or server-side authorization. Customer, sales and admin screens now add consistent frontend route/operation guards, but these are Demo UX boundaries only; the backend must re-check every action.
 - Password generation and reset are simulated in the frontend; real password validation, secure storage, login and sessions are not implemented.
 - Stock reservation is a frontend simulation, **not an atomic database transaction** and must not be relied upon to prevent overselling.
-- The “Excel import” screen operates on preloaded sample rows; it does not parse an uploaded spreadsheet.
+- The “Excel import” screen parses local `.xlsx` / `.csv` files in the browser, but only updates in-memory Mock inventory; it is not a database transaction and has no real concurrency control.
 - Prices, promotion dates, product codes, SKU images and copy are demonstration content requiring a separate PRD consistency review before production development.
 - The multi-warehouse reservation is an in-memory allocation mock. It plans the whole order before changing state and fails as a whole when stock is short, but it is **not an atomic database transaction** and does not guarantee isolation under concurrent users.
 - Order actions validate the current status and exact warehouse allocations. Duplicate release/payment/shipment/confirmation and repeated change approvals are rejected; approved quantity changes re-plan the entire order and leave both order and inventory unchanged on failure.

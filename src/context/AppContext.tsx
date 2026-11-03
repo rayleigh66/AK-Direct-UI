@@ -47,14 +47,20 @@ import {
 import { isDemoImageUrl } from '../data/demoImageLibrary';
 import {
   inventoryImportHeaders,
+  isPreviewSnapshotStale,
   parseInventoryTable,
   validateInventoryImport,
+  type InventoryImportExpectedRow,
 } from '../utils/inventoryImport';
 import {
   calculateSKUAvailableStock,
   calculateEffectiveUnitPrice,
   evaluateCustomerTier,
+  validateDiscountRate,
+  validateOrderAmount,
   validateSKUQuantity,
+  validateTierThreshold,
+  validateUnitPrice,
   isValidCustomerCode,
   deriveUsername,
   generateTemporaryPassword,
@@ -66,6 +72,7 @@ import {
   usdToCents,
   centsToUsd,
 } from '../utils/rules';
+import { canViewSalesOperations } from '../utils/roles';
 
 interface CartLine {
   sku_id: string;
@@ -181,18 +188,12 @@ interface AppContextType {
     internalNickname?: string;
   }) => { success: boolean; companyId?: string; primaryUsername?: string; tempPassword?: string; error?: string };
   adminCreateSecondaryAccount: (companyId: string) => { success: boolean; username?: string; tempPassword?: string; error?: string };
-  adminToggleBrandGrant: (companyId: string, brandId: string) => void;
-  adminUpdateTierRule: (tierId: string, thresholdUsd: number, discountRate: number) => void;
-  adminAddOrUpdatePromotion: (promo: Omit<Promotion, 'id'>) => void;
+  adminToggleBrandGrant: (companyId: string, brandId: string) => { success: boolean; error?: string };
+  adminUpdateTierRule: (tierId: string, thresholdUsd: number, discountRate: number) => { success: boolean; error?: string };
+  adminAddOrUpdatePromotion: (promo: Omit<Promotion, 'id'>) => { success: boolean; error?: string };
   excelImportStock: (
     rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[],
-    expected?: {
-      sku_code: string;
-      warehouse_code: string;
-      previousOnHand: number;
-      previousUnsellable: number;
-      reserved: number;
-    }[]
+    expected?: InventoryImportExpectedRow[]
   ) => { success: boolean; count: number; error?: string; stale?: boolean };
 
   // Admin product catalogue
@@ -216,7 +217,7 @@ interface AppContextType {
 
   // Password & Simulation
   completePasswordReset: (newPassword: string) => void;
-  simulateTimeTravelInactivity: (companyId: string, monthsToAdd: number) => void;
+  simulateTimeTravelInactivity: (companyId: string, monthsToAdd: number) => { success: boolean; error?: string };
   markNotificationAsRead: (notificationId: string) => void;
 }
 
@@ -376,6 +377,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Cart operations
   const addToCart = useCallback((skuId: string, quantity: number) => {
+    if (currentRole !== 'customer') {
+      return {
+        success: false,
+        message: 'Customer ordering is only available in the customer demo role.',
+      };
+    }
     const check = validateSKUQuantity(quantity);
     if (!check.valid) {
       return { success: false, message: check.error };
@@ -414,9 +421,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     return { success: true };
-  }, [inventory, products, currentCustomerUser, currentCompany, brandGrants]);
+  }, [currentRole, inventory, products, currentCustomerUser, currentCompany, brandGrants]);
 
   const updateCartQuantity = useCallback((skuId: string, quantity: number) => {
+    if (currentRole !== 'customer') {
+      return {
+        success: false,
+        message: 'Customer ordering is only available in the customer demo role.',
+      };
+    }
     if (quantity === 0) {
       setCart(prev => prev.filter(i => i.sku_id !== skuId));
       return { success: true };
@@ -452,7 +465,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map(item => (item.sku_id === skuId ? { ...item, quantity } : item))
     );
     return { success: true };
-  }, [inventory, products, currentCustomerUser, currentCompany, brandGrants]);
+  }, [currentRole, inventory, products, currentCustomerUser, currentCompany, brandGrants]);
 
   const removeFromCart = useCallback((skuId: string) => {
     setCart(prev => prev.filter(i => i.sku_id !== skuId));
@@ -469,6 +482,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     expectedShipDate: string;
     shippingRequirements: string;
   }) => {
+    if (currentRole !== 'customer') {
+      return {
+        success: false,
+        error: 'Customer ordering is only available in the customer demo role.',
+      };
+    }
     if (!currentCompany || !currentCustomerUser) {
       return { success: false, error: 'Please sign in to a customer account.' };
     }
@@ -533,14 +552,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      const priceInfo = calculateEffectiveUnitPrice(
-        foundSku.base_price_usd,
-        foundSku.id,
-        tierDiscount,
-        promotions
-      );
+      let priceInfo: ReturnType<typeof calculateEffectiveUnitPrice>;
+      try {
+        priceInfo = calculateEffectiveUnitPrice(
+          foundSku.base_price_usd,
+          foundSku.id,
+          tierDiscount,
+          promotions
+        );
+      } catch (error) {
+        return {
+          success: false,
+          error: `Pricing configuration is invalid: ${(error as Error).message} Order was not submitted.`,
+        };
+      }
 
       const lineSubtotal = Number((priceInfo.effectivePrice * item.quantity).toFixed(2));
+      const lineAmountCheck = validateOrderAmount(lineSubtotal, 'Line subtotal');
+      if (!lineAmountCheck.valid) {
+        return {
+          success: false,
+          error: `${lineAmountCheck.error} Order was not submitted.`,
+        };
+      }
       totalQuoted += lineSubtotal;
 
       lines.push({
@@ -552,6 +586,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         quoted_unit_price: priceInfo.effectivePrice,
         line_subtotal: lineSubtotal,
       });
+    }
+
+    const totalAmountCheck = validateOrderAmount(totalQuoted, 'Order total');
+    if (!totalAmountCheck.valid) {
+      return {
+        success: false,
+        error: `${totalAmountCheck.error} Order was not submitted.`,
+      };
     }
 
     const orderNo = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
@@ -587,6 +629,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return { success: true, orderId: newOrder.id, order: newOrder };
   }, [
+    currentRole,
     currentCompany,
     currentCustomerUser,
     cart,
@@ -600,8 +643,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Customer Cancel Order
   const customerCancelOrder = useCallback((orderId: string, reason: string) => {
+    if (currentRole !== 'customer') {
+      return {
+        success: false,
+        message: 'Customer order actions are only available in the customer demo role.',
+      };
+    }
     const order = orders.find(o => o.id === orderId);
     if (!order) return { success: false, message: 'Order not found.' };
+    if (!currentCompany || order.company_id !== currentCompany.id) {
+      return { success: false, message: 'You can only change orders from your own company.' };
+    }
 
     if (order.status === 'PENDING_CONFIRMATION') {
       // Direct cancellation allowed before sales confirmation
@@ -673,7 +725,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       success: false,
       message: 'Paid or preparing orders cannot be cancelled here. Please contact your sales representative.',
     };
-  }, [orders, currentCustomerUser, addAuditLog]);
+  }, [currentRole, currentCompany, orders, currentCustomerUser, addAuditLog]);
 
   // Customer Request Change
   const customerRequestChange = useCallback((
@@ -681,50 +733,121 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reason: string,
     modifiedLines?: { sku_id: string; new_qty: number }[]
   ) => {
+    if (currentRole !== 'customer') {
+      return {
+        success: false,
+        message: 'Customer order actions are only available in the customer demo role.',
+      };
+    }
     const order = orders.find(o => o.id === orderId);
     if (!order) return { success: false, message: 'Order not found.' };
+    if (!currentCompany || order.company_id !== currentCompany.id) {
+      return { success: false, message: 'You can only change orders from your own company.' };
+    }
 
     if (order.status === 'PENDING_CONFIRMATION') {
-      // If pending confirmation, apply modifications directly
-      if (modifiedLines) {
-        const updatedLines = order.lines.map(l => {
-          const m = modifiedLines.find(x => x.sku_id === l.sku_id);
-          if (m) {
-            const check = validateSKUQuantity(m.new_qty);
-            if (!check.valid) throw new Error(check.error);
-            return {
-              ...l,
-              quantity: m.new_qty,
-              line_subtotal: Number((l.quoted_unit_price * m.new_qty).toFixed(2)),
-            };
-          }
-          return l;
-        });
-
-        const newTotal = updatedLines.reduce((acc, l) => acc + l.line_subtotal, 0);
-
-        setOrders(prev =>
-          prev.map(o =>
-            o.id === orderId
-              ? {
-                  ...o,
-                  lines: updatedLines,
-                  total_quoted_usd: Number(newTotal.toFixed(2)),
-                  updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
-                }
-              : o
-          )
-        );
-
-        addAuditLog(
-          order.created_by_username,
-          'MODIFY_ORDER',
-          order.order_no,
-          `Modified unconfirmed order quantities directly.`
-        );
-
-        return { success: true, message: 'Order quantities updated.' };
+      if (!modifiedLines?.length) {
+        return { success: false, message: 'No quantity changes were supplied.' };
       }
+
+      const seen = new Set<string>();
+      for (const change of modifiedLines) {
+        if (!order.lines.some(line => line.sku_id === change.sku_id)) {
+          return {
+            success: false,
+            message: `SKU ${change.sku_id} is not part of this order.`,
+          };
+        }
+        if (seen.has(change.sku_id)) {
+          return {
+            success: false,
+            message: `Quantity change contains a duplicate SKU: ${change.sku_id}.`,
+          };
+        }
+        seen.add(change.sku_id);
+      }
+
+      const updatedLines: typeof order.lines = [];
+      for (const line of order.lines) {
+        const change = modifiedLines.find(item => item.sku_id === line.sku_id);
+        if (!change) {
+          updatedLines.push({ ...line });
+          continue;
+        }
+
+        const check = validateSKUQuantity(change.new_qty);
+        if (!check.valid) {
+          return { success: false, message: check.error ?? 'Invalid quantity.' };
+        }
+
+        let foundSku: ProductSKU | undefined;
+        let foundProduct: Product | undefined;
+        for (const product of products) {
+          const sku = product.skus.find(item => item.id === line.sku_id);
+          if (sku) {
+            foundSku = sku;
+            foundProduct = product;
+            break;
+          }
+        }
+        if (!foundSku || !foundProduct) {
+          return {
+            success: false,
+            message: `SKU ${line.sku_code} is no longer available.`,
+          };
+        }
+
+        const eligibility = orderEligibilityError(foundProduct, foundSku);
+        if (eligibility) return { success: false, message: eligibility };
+
+        const { totalAvailable } = calculateSKUAvailableStock(foundSku.id, inventory);
+        if (change.new_qty > totalAvailable) {
+          return {
+            success: false,
+            message: `Requested ${change.new_qty} PCS exceeds current available stock (${totalAvailable} PCS).`,
+          };
+        }
+
+        const lineSubtotal = Number((line.quoted_unit_price * change.new_qty).toFixed(2));
+        const lineAmountCheck = validateOrderAmount(lineSubtotal, 'Line subtotal');
+        if (!lineAmountCheck.valid) {
+          return { success: false, message: lineAmountCheck.error ?? 'Invalid line amount.' };
+        }
+
+        updatedLines.push({
+          ...line,
+          quantity: change.new_qty,
+          line_subtotal: lineSubtotal,
+        });
+      }
+
+      const newTotal = updatedLines.reduce((acc, line) => acc + line.line_subtotal, 0);
+      const totalAmountCheck = validateOrderAmount(newTotal, 'Order total');
+      if (!totalAmountCheck.valid) {
+        return { success: false, message: totalAmountCheck.error ?? 'Invalid order total.' };
+      }
+
+      setOrders(prev =>
+        prev.map(o =>
+          o.id === orderId
+            ? {
+                ...o,
+                lines: updatedLines,
+                total_quoted_usd: Number(newTotal.toFixed(2)),
+                updated_at: new Date().toISOString().replace('T', ' ').substr(0, 19),
+              }
+            : o
+        )
+      );
+
+      addAuditLog(
+        order.created_by_username,
+        'MODIFY_ORDER',
+        order.order_no,
+        `Modified unconfirmed order quantities directly.`
+      );
+
+      return { success: true, message: 'Order quantities updated.' };
     }
 
     if (order.status === 'CONFIRMED') {
@@ -734,6 +857,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           message: 'A cancellation or quantity change request is already pending review.',
         };
       }
+
+      if (modifiedLines) {
+        const seen = new Set<string>();
+        for (const change of modifiedLines) {
+          if (!order.lines.some(line => line.sku_id === change.sku_id)) {
+            return {
+              success: false,
+              message: `SKU ${change.sku_id} is not part of this order.`,
+            };
+          }
+          if (seen.has(change.sku_id)) {
+            return {
+              success: false,
+              message: `Quantity change contains a duplicate SKU: ${change.sku_id}.`,
+            };
+          }
+          seen.add(change.sku_id);
+          const check = validateSKUQuantity(change.new_qty);
+          if (!check.valid) {
+            return { success: false, message: check.error ?? 'Invalid quantity.' };
+          }
+        }
+      }
+
       setOrders(prev =>
         prev.map(o =>
           o.id === orderId
@@ -754,14 +901,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         )
       );
 
+      addAuditLog(
+        currentCustomerUser?.username || 'Buyer',
+        'REQUEST_CHANGE',
+        order.order_no,
+        'Submitted quantity change approval request for confirmed order.'
+      );
+
       return { success: true, message: 'Quantity change request sent to sales.' };
     }
 
     return { success: false, message: 'This order status does not allow a change request.' };
-  }, [orders, currentCustomerUser, addAuditLog]);
+  }, [
+    currentRole,
+    currentCompany,
+    orders,
+    currentCustomerUser,
+    products,
+    inventory,
+    brandGrants,
+    addAuditLog,
+  ]);
 
   // Salesperson: Confirm Order (Atomic Stock Reservation)
   const salesConfirmOrder = useCallback((orderId: string) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return { success: false, error: 'Sales operations are only available to sales or admin demo roles.' };
+    }
     const lockKey = `confirm:${orderId}`;
     if (!beginOrderAction(lockKey)) {
       return { success: false, error: '该订单确认操作正在进行，请勿重复提交。' };
@@ -773,6 +939,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     if (order.status !== 'PENDING_CONFIRMATION') {
       return { success: false, error: '订单不在待确认状态' };
+    }
+    const totalAmountCheck = validateOrderAmount(order.total_quoted_usd, 'Order total');
+    if (!totalAmountCheck.valid) {
+      return { success: false, error: totalAmountCheck.error ?? '订单金额无效，确认已拒绝。' };
     }
 
     // Plan the whole order across warehouses first; a short SKU fails the entire reservation.
@@ -863,10 +1033,13 @@ AOKING Direct B2B Platform`,
     );
 
     return { success: true };
-  }, [orders, inventory, companies, currentSalesUser, addAuditLog]);
+  }, [currentRole, orders, inventory, companies, currentSalesUser, addAuditLog]);
 
   // Salesperson: Extend Reservation
   const salesExtendReservation = useCallback((orderId: string, additionalHours: number) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return { success: false, error: 'Sales operations are only available to sales or admin demo roles.' };
+    }
     if (!beginOrderAction(`extend:${orderId}`)) {
       return { success: false, error: '该订单延期操作正在进行，请勿重复提交。' };
     }
@@ -906,10 +1079,13 @@ AOKING Direct B2B Platform`,
     );
 
     return { success: true };
-  }, [orders, currentSalesUser, addAuditLog]);
+  }, [currentRole, orders, currentSalesUser, addAuditLog]);
 
   // Salesperson: Release Reservation
   const salesReleaseReservation = useCallback((orderId: string, reason: string) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return { success: false, error: 'Sales operations are only available to sales or admin demo roles.' };
+    }
     const lockKey = `release:${orderId}`;
     if (!beginOrderAction(lockKey)) {
       return { success: false, error: '该订单释放操作正在进行，请勿重复提交。' };
@@ -960,10 +1136,13 @@ AOKING Direct B2B Platform`,
     );
 
     return { success: true };
-  }, [orders, inventory, currentSalesUser, addAuditLog]);
+  }, [currentRole, orders, inventory, currentSalesUser, addAuditLog]);
 
   // Salesperson: Record Payment (Updates Customer Cumulative Spend & Tier)
   const salesRecordPayment = useCallback((orderId: string, amountUsd: number, reference: string) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return { success: false, error: 'Payment recording is only available to sales or admin demo roles.' };
+    }
     const lockKey = `payment:${orderId}`;
     if (!beginOrderAction(lockKey)) {
       return { success: false, error: '该订单付款操作正在进行，请勿重复提交。' };
@@ -993,6 +1172,10 @@ AOKING Direct B2B Platform`,
     }
     const amountCents = usdToCents(amountUsd);
     const expectedTotal = order.total_confirmed_usd ?? order.total_quoted_usd;
+    const expectedAmountCheck = validateOrderAmount(expectedTotal, 'Order total');
+    if (!expectedAmountCheck.valid) {
+      return { success: false, error: `${expectedAmountCheck.error} Payment was not recorded.` };
+    }
     const expectedCents = usdToCents(expectedTotal);
     if (amountCents < expectedCents) {
       return {
@@ -1098,7 +1281,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     );
 
     return { success: true };
-  }, [orders, companies, tierRules, currentSalesUser, addAuditLog]);
+  }, [currentRole, orders, companies, tierRules, currentSalesUser, addAuditLog]);
 
   // Salesperson: Update Shipment (Whole Order Fulfillment)
   const salesUpdateShipment = useCallback((
@@ -1112,6 +1295,9 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       internalNote: string;
     }
   ) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return { success: false, error: 'Shipment recording is only available to sales or admin demo roles.' };
+    }
     const lockKey = `ship:${orderId}`;
     if (!beginOrderAction(lockKey)) {
       return { success: false, error: '该订单发货操作正在进行，请勿重复提交。' };
@@ -1220,10 +1406,13 @@ AOKING Direct`,
     );
 
     return { success: true };
-  }, [orders, inventory, companies, currentSalesUser, addAuditLog]);
+  }, [currentRole, orders, inventory, companies, currentSalesUser, addAuditLog]);
 
   // Salesperson: Handle Change Request (all-or-nothing)
   const salesHandleChangeRequest = useCallback((orderId: string, approve: boolean) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return { success: false, error: 'Change approvals are only available to sales or admin demo roles.' };
+    }
     const lockKey = `change:${orderId}`;
     if (!beginOrderAction(lockKey)) {
       return { success: false, error: '该订单变更申请正在处理中，请勿重复提交。' };
@@ -1387,10 +1576,16 @@ AOKING Direct`,
       `Approved quantity change. New total USD $${newTotal.toFixed(2)}; reservation reallocated.`
     );
     return { success: true };
-  }, [orders, inventory, currentSalesUser, addAuditLog]);
+  }, [currentRole, orders, inventory, currentSalesUser, addAuditLog]);
 
   // Submit Restock Request
   const submitRestockRequest = useCallback((skuId: string, requestedQty: number) => {
+    if (currentRole !== 'customer') {
+      return {
+        success: false,
+        message: 'Restock requests are only available in the customer demo role.',
+      };
+    }
     if (!currentCompany) return { success: false, message: 'Please sign in to a customer account.' };
 
     let foundSku = null;
@@ -1427,10 +1622,13 @@ AOKING Direct`,
     );
 
     return { success: true, message: 'Restock request recorded. You will be notified when stock reaches the MOQ.' };
-  }, [currentCompany, products, addAuditLog]);
+  }, [currentRole, currentCompany, products, addAuditLog]);
 
   // Replenish stock & Notify customer if available >= 10 (PRD D09, T24)
   const replenishStock = useCallback((skuId: string, warehouseId: string, addQty: number) => {
+    if (!canViewSalesOperations(currentRole)) {
+      return;
+    }
     setInventory(prev => {
       const next = [...prev];
       const idx = next.findIndex(b => b.sku_id === skuId && b.warehouse_id === warehouseId);
@@ -1515,7 +1713,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       skuId,
       `Replenished +${addQty} PCS in warehouse ${warehouseId}. Notified ${pendingReqs.length} customers.`
     );
-  }, [restockRequests, companies, currentSalesUser, addAuditLog]);
+  }, [currentRole, restockRequests, companies, currentSalesUser, addAuditLog]);
 
   // Admin: 2-Step Company & Account Creation (PRD 9.1, D24, D25, D26)
   const adminCreateCompany = useCallback((data: {
@@ -1524,6 +1722,9 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     countryAlpha3: string;
     internalNickname?: string;
   }) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Customer account creation is only available to the admin demo role.' };
+    }
     const code = data.customerCode.trim().toUpperCase();
     if (!isValidCustomerCode(code)) {
       return { success: false, error: '内部客户编号必须为 C + 6 位数字格式（例如 C000123）' };
@@ -1593,10 +1794,13 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       primaryUsername,
       tempPassword,
     };
-  }, [companies, currentAdminUser, addAuditLog]);
+  }, [currentRole, companies, currentAdminUser, addAuditLog]);
 
   // Admin: Create secondary account for existing company (e.g. AK000123B)
   const adminCreateSecondaryAccount = useCallback((companyId: string) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Account creation is only available to the admin demo role.' };
+    }
     const comp = companies.find(c => c.id === companyId);
     if (!comp) return { success: false, error: '客户公司不存在' };
 
@@ -1640,10 +1844,13 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     );
 
     return { success: true, username, tempPassword };
-  }, [companies, customerUsers, currentAdminUser, addAuditLog]);
+  }, [currentRole, companies, customerUsers, currentAdminUser, addAuditLog]);
 
   // Admin: Toggle Brand Grant
   const adminToggleBrandGrant = useCallback((companyId: string, brandId: string) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Brand grants can only be changed by the admin demo role.' };
+    }
     setBrandGrants(prev => {
       const exists = prev.some(g => g.company_id === companyId && g.brand_id === brandId);
       if (exists) {
@@ -1659,10 +1866,22 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `${companyId} / ${brandId}`,
       `Updated brand authorization status.`
     );
-  }, [currentAdminUser, addAuditLog]);
+    return { success: true };
+  }, [currentRole, currentAdminUser, addAuditLog]);
 
   // Admin: Update Tier Rules
   const adminUpdateTierRule = useCallback((tierId: string, thresholdUsd: number, discountRate: number) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Tier configuration is only available to the admin demo role.' };
+    }
+    const thresholdCheck = validateTierThreshold(thresholdUsd);
+    if (!thresholdCheck.valid) {
+      return { success: false, error: thresholdCheck.error ?? 'Invalid tier threshold.' };
+    }
+    const discountCheck = validateDiscountRate(discountRate);
+    if (!discountCheck.valid) {
+      return { success: false, error: discountCheck.error ?? 'Invalid discount rate.' };
+    }
     setTierRules(prev =>
       prev.map(t =>
         t.id === tierId
@@ -1676,10 +1895,18 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       tierId,
       `Updated threshold to $${thresholdUsd}, discount to ${(discountRate * 100).toFixed(0)}%.`
     );
-  }, [currentAdminUser, addAuditLog]);
+    return { success: true };
+  }, [currentRole, currentAdminUser, addAuditLog]);
 
   // Admin: Add or update promotion
   const adminAddOrUpdatePromotion = useCallback((promo: Omit<Promotion, 'id'>) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Promotion configuration is only available to the admin demo role.' };
+    }
+    const priceCheck = validateUnitPrice(promo.promo_price_usd, 'Promotion price');
+    if (!priceCheck.valid) {
+      return { success: false, error: priceCheck.error ?? 'Invalid promotion price.' };
+    }
     const newPromo: Promotion = {
       id: `promo-${Date.now()}`,
       ...promo,
@@ -1692,19 +1919,21 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       promo.sku_id,
       `Created promo price $${promo.promo_price_usd}. Stack tier discount: ${promo.stack_tier_discount}.`
     );
-  }, [currentAdminUser, addAuditLog]);
+    return { success: true };
+  }, [currentRole, currentAdminUser, addAuditLog]);
 
   // Admin: Excel bulk import. Fail-closed: every row is revalidated against current state.
   const excelImportStock = useCallback((
     rows: { sku_code: string; warehouse_code: string; on_hand: number; unsellable: number }[],
-    expected?: {
-      sku_code: string;
-      warehouse_code: string;
-      previousOnHand: number;
-      previousUnsellable: number;
-      reserved: number;
-    }[]
+    expected?: InventoryImportExpectedRow[]
   ) => {
+    if (currentRole !== 'admin') {
+      return {
+        success: false as const,
+        count: 0,
+        error: 'Inventory import is only available to the admin demo role.',
+      };
+    }
     const table = [
       inventoryImportHeaders,
       ...rows.map(row => [row.sku_code, row.warehouse_code, row.on_hand, row.unsellable]),
@@ -1714,49 +1943,23 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       return { success: false as const, count: 0, error: parsed.errors.join(' ') };
     }
     const checked = validateInventoryImport(parsed.lines, products, warehouses, inventory);
+    if (expected && isPreviewSnapshotStale(expected, checked.rows)) {
+      const refreshedErrors = checked.errors.length
+        ? ` ${checked.errors.join(' ')}`
+        : '';
+      return {
+        success: false as const,
+        count: 0,
+        stale: true,
+        error: `Inventory changed since this preview. Review the refreshed differences and confirm again.${refreshedErrors}`,
+      };
+    }
     if (!checked.valid) {
       return {
         success: false as const,
         count: 0,
         error: checked.errors.join(' '),
       };
-    }
-    if (expected) {
-      if (expected.length !== checked.rows.length) {
-        return {
-          success: false as const,
-          count: 0,
-          stale: true,
-          error:
-            'The preview no longer matches this batch. Review the refreshed differences and confirm again.',
-        };
-      }
-      const expectedMap = new Map(
-        expected.map(row => [
-          `${row.sku_code.toUpperCase()}::${row.warehouse_code.toUpperCase()}`,
-          row,
-        ])
-      );
-      const stale = checked.rows.some(row => {
-        const previous = expectedMap.get(
-          `${row.line.skuCode.toUpperCase()}::${row.line.warehouseCode.toUpperCase()}`
-        );
-        return (
-          !previous ||
-          previous.previousOnHand !== row.previousOnHand ||
-          previous.previousUnsellable !== row.previousUnsellable ||
-          previous.reserved !== row.reserved
-        );
-      });
-      if (stale) {
-        return {
-          success: false as const,
-          count: 0,
-          stale: true,
-          error:
-            'Inventory changed since this preview. Review the refreshed differences and confirm again.',
-        };
-      }
     }
 
     const now = new Date().toISOString().slice(0, 10);
@@ -1782,10 +1985,13 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Imported ${checked.rows.length} balance records from a validated local Mock batch.`
     );
     return { success: true as const, count: checked.rows.length };
-  }, [warehouses, products, inventory, currentAdminUser, addAuditLog]);
+  }, [currentRole, warehouses, products, inventory, currentAdminUser, addAuditLog]);
 
   // Admin product catalogue
   const adminCreateProduct = useCallback((input: AdminProductInput) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Product management is only available to the admin demo role.' };
+    }
     const code = input.productCode.trim();
     const title = input.title.trim();
     const titleEn = input.titleEn.trim();
@@ -1836,9 +2042,12 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Created product ${titleEn} as an unlisted draft with no SKUs.`
     );
     return { success: true as const, productId };
-  }, [products, brands, series, featureTags, currentAdminUser, addAuditLog]);
+  }, [currentRole, products, brands, series, featureTags, currentAdminUser, addAuditLog]);
 
   const adminUpdateProduct = useCallback((productId: string, input: AdminProductInput) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Product management is only available to the admin demo role.' };
+    }
     const product = products.find(item => item.id === productId);
     if (!product) return { success: false, error: 'Product not found.' };
     const code = input.productCode.trim();
@@ -1901,9 +2110,12 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Updated product fields; historical order snapshots were not changed.`
     );
     return { success: true as const };
-  }, [products, brands, series, featureTags, currentAdminUser, addAuditLog]);
+  }, [currentRole, products, brands, series, featureTags, currentAdminUser, addAuditLog]);
 
   const adminSetProductActive = useCallback((productId: string, active: boolean) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Product listing is only available to the admin demo role.' };
+    }
     const product = products.find(item => item.id === productId);
     if (!product) return { success: false, error: 'Product not found.' };
     if (active) {
@@ -1928,13 +2140,16 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
         : 'Unlisted product from the customer catalog.'
     );
     return { success: true as const };
-  }, [products, currentAdminUser, addAuditLog]);
+  }, [currentRole, products, currentAdminUser, addAuditLog]);
 
   const adminCreateSku = useCallback((
     productId: string,
     input: AdminSkuInput,
     initialOnHand = 0
   ) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'SKU management is only available to the admin demo role.' };
+    }
     const product = products.find(item => item.id === productId);
     if (!product) return { success: false, error: 'Product not found.' };
     const code = input.skuCode.trim();
@@ -1993,9 +2208,12 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Created SKU for ${product.product_code} with initial on-hand ${initialOnHand}.`
     );
     return { success: true as const, skuId };
-  }, [products, orders, currentAdminUser, addAuditLog]);
+  }, [currentRole, products, orders, currentAdminUser, addAuditLog]);
 
   const adminUpdateSku = useCallback((productId: string, skuId: string, input: AdminSkuInput) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'SKU management is only available to the admin demo role.' };
+    }
     const product = products.find(item => item.id === productId);
     if (!product) return { success: false, error: 'Product not found.' };
     const sku = product.skus.find(item => item.id === skuId);
@@ -2072,9 +2290,12 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       `Updated SKU ${sku.sku_code}; order snapshots and reservation IDs were preserved.`
     );
     return { success: true as const };
-  }, [products, orders, currentAdminUser, addAuditLog]);
+  }, [currentRole, products, orders, currentAdminUser, addAuditLog]);
 
   const adminSaveSeries = useCallback((nextSeries: SeriesDefinition[]) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Series management is only available to the admin demo role.' };
+    }
     if (!nextSeries.length) return { success: false, error: 'At least one series is required.' };
     const ids = new Set<string>();
     for (const item of nextSeries) {
@@ -2097,9 +2318,12 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     setSeries([...nextSeries].sort((a, b) => a.order - b.order));
     addAuditLog(currentAdminUser.name, 'SAVE_SERIES', 'catalog', 'Updated series dictionary.');
     return { success: true as const };
-  }, [series, products, currentAdminUser, addAuditLog]);
+  }, [currentRole, series, products, currentAdminUser, addAuditLog]);
 
   const adminSaveFeatureTags = useCallback((nextTags: FeatureTagDefinition[]) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Feature tag management is only available to the admin demo role.' };
+    }
     if (!nextTags.length)
       return { success: false, error: 'At least one feature tag is required.' };
     const codes = new Set<string>();
@@ -2129,10 +2353,11 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
     setFeatureTags([...nextTags].sort((a, b) => a.order - b.order));
     addAuditLog(currentAdminUser.name, 'SAVE_FEATURE_TAGS', 'catalog', 'Updated feature tag dictionary.');
     return { success: true as const };
-  }, [featureTags, products, currentAdminUser, addAuditLog]);
+  }, [currentRole, featureTags, products, currentAdminUser, addAuditLog]);
 
   // Complete first-time password reset
   const completePasswordReset = useCallback((_newPassword: string) => {
+    if (currentRole !== 'customer') return;
     if (!currentCustomerUser) return;
     setCustomerUsers(prev =>
       prev.map(u =>
@@ -2145,10 +2370,16 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       currentCustomerUser.username,
       `User completed mandatory first-time password change.`
     );
-  }, [currentCustomerUser, addAuditLog]);
+  }, [currentRole, currentCustomerUser, addAuditLog]);
 
-  // Inactivity simulation (time-travel for T21 testing)
+  // Inactivity simulation (time-travel for internal QA only)
   const simulateTimeTravelInactivity = useCallback((companyId: string, monthsToAdd: number) => {
+    if (currentRole !== 'admin') {
+      return { success: false, error: 'Inactivity simulation is only available in the internal admin QA panel.' };
+    }
+    if (!Number.isInteger(monthsToAdd) || monthsToAdd <= 0) {
+      return { success: false, error: 'Months to add must be a positive whole number.' };
+    }
     setCompanies(prev =>
       prev.map(c => {
         if (c.id !== companyId) return c;
@@ -2168,15 +2399,22 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       companyId,
       `Advanced inactivity clock by +${monthsToAdd} months.`
     );
-  }, [tierRules, addAuditLog]);
+    return { success: true };
+  }, [currentRole, tierRules, addAuditLog]);
 
   const markNotificationAsRead = useCallback((notificationId: string) => {
+    if (currentRole !== 'customer' || !currentCompany) return;
     setNotifications(prev =>
-      prev.map(n => (n.id === notificationId ? { ...n, is_read: true } : n))
+      prev.map(n =>
+        n.id === notificationId && n.company_id === currentCompany.id
+          ? { ...n, is_read: true }
+          : n
+      )
     );
-  }, []);
+  }, [currentRole, currentCompany]);
 
   const markEmailTemplateSent = useCallback((templateId: string) => {
+    if (!canViewSalesOperations(currentRole)) return;
     setInternalEmailTemplates(prev =>
       prev.map(t =>
         t.id === templateId
@@ -2195,7 +2433,7 @@ ${currentSalesUser.name} | AOKING Direct Sales`,
       templateId,
       `Salesperson verified and marked email template as sent to client via corporate email.`
     );
-  }, [currentSalesUser, addAuditLog]);
+  }, [currentRole, currentSalesUser, addAuditLog]);
 
   return (
     <AppContext.Provider

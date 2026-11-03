@@ -28,6 +28,14 @@ export interface InventoryImportValidation {
   validLines: InventoryImportLine[];
 }
 
+export interface InventoryImportExpectedRow {
+  sku_code: string;
+  warehouse_code: string;
+  previousOnHand: number;
+  previousUnsellable: number;
+  reserved: number;
+}
+
 const HEADERS = ['sku_code', 'warehouse_code', 'on_hand', 'unsellable'] as const;
 const MAX_ROWS = 500;
 
@@ -224,6 +232,35 @@ export function validateInventoryImport(
     errors: [...globalErrors, ...rows.flatMap(row => row.errors)],
     validLines: valid ? rows.map(row => row.line) : [],
   };
+}
+
+/**
+ * Compare the preview snapshot with the latest balance state. This works even
+ * when the latest state is now invalid, so the UI can refresh instead of
+ * keeping a stale "valid" preview and an enabled confirm button.
+ */
+export function isPreviewSnapshotStale(
+  expected: InventoryImportExpectedRow[],
+  rows: InventoryImportRow[]
+): boolean {
+  if (expected.length !== rows.length) return true;
+  const expectedMap = new Map(
+    expected.map(row => [
+      `${row.sku_code.toUpperCase()}::${row.warehouse_code.toUpperCase()}`,
+      row,
+    ])
+  );
+  return rows.some(row => {
+    const previous = expectedMap.get(
+      `${row.line.skuCode.toUpperCase()}::${row.line.warehouseCode.toUpperCase()}`
+    );
+    return (
+      !previous ||
+      previous.previousOnHand !== row.previousOnHand ||
+      previous.previousUnsellable !== row.previousUnsellable ||
+      previous.reserved !== row.reserved
+    );
+  });
 }
 
 export const inventoryImportHeaders = [...HEADERS];

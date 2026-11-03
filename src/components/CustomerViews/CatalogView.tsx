@@ -12,6 +12,10 @@ import {
   SKU_MOQ,
 } from '../../utils/rules';
 import {
+  customerVisibleSkus,
+  isProductAuthorizedForCompany,
+} from '../../utils/catalogVisibility';
+import {
   customerBrandName,
   customerCategory,
   customerProductTitle,
@@ -164,29 +168,34 @@ export const CatalogView: React.FC = () => {
     { id: 'Executive Briefcases', label: 'Executive Briefcases' },
   ];
 
-  // Compute metrics for the top cards
+  // Statistics are scoped to the current company's authorised, listed catalogue.
+  const authorizedProducts = useMemo(
+    () =>
+      products.filter(
+        product =>
+          product.active !== false &&
+          isProductAuthorizedForCompany(product, currentCompany?.id, brandGrants)
+      ),
+    [products, currentCompany, brandGrants]
+  );
+  const authorizedActiveSkus = useMemo(
+    () => authorizedProducts.flatMap(product => customerVisibleSkus(product)),
+    [authorizedProducts]
+  );
+
   const totalAvailableStockUnits = useMemo(() => {
-    return products.reduce((sum, p) => {
-      return (
-        sum +
-        p.skus.reduce((skuSum, s) => {
-          const { totalAvailable } = calculateSKUAvailableStock(s.id, inventory);
-          return skuSum + totalAvailable;
-        }, 0)
-      );
+    return authorizedActiveSkus.reduce((sum, sku) => {
+      const { totalAvailable } = calculateSKUAvailableStock(sku.id, inventory);
+      return sum + totalAvailable;
     }, 0);
-  }, [products, inventory]);
+  }, [authorizedActiveSkus, inventory]);
 
   const lowOrOutCount = useMemo(() => {
-    let count = 0;
-    products.forEach(p => {
-      p.skus.forEach(s => {
-        const { totalAvailable } = calculateSKUAvailableStock(s.id, inventory);
-        if (totalAvailable < SKU_MOQ) count++;
-      });
-    });
-    return count;
-  }, [products, inventory]);
+    return authorizedActiveSkus.reduce((count, sku) => {
+      const { totalAvailable } = calculateSKUAvailableStock(sku.id, inventory);
+      return totalAvailable < SKU_MOQ ? count + 1 : count;
+    }, 0);
+  }, [authorizedActiveSkus, inventory]);
 
   const handleQuickAdd = (sku: ProductSKU, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -317,13 +326,13 @@ export const CatalogView: React.FC = () => {
         {/* Metric 1 */}
         <div className="bg-white border border-[#eaeae7] rounded-[17px] p-4 sm:p-5 relative overflow-hidden shadow-[0_8px_32px_rgba(15,15,15,0.035)] min-h-[112px] sm:min-h-[142px]">
           <div className="flex justify-between items-center text-xs text-[#929393]">
-            <span>Active in-stock SKUs</span>
+            <span>Active SKUs</span>
             <span className="w-8 h-8 rounded-[9px] bg-[#f7f7f6] flex items-center justify-center text-[#666]">
               <Store className="w-4 h-4" />
             </span>
           </div>
           <div className="text-[28px] sm:text-[32px] font-extrabold tracking-tight text-[#151515] mt-3 mb-1 font-mono leading-none">
-            {products.flatMap(p => p.skus).length} <small className="text-xs font-normal text-[#999]">SKUs</small>
+            {authorizedActiveSkus.length} <small className="text-xs font-normal text-[#999]">SKUs</small>
           </div>
           <div className="text-[10px] text-[#aaa] mt-2">
             <b className="text-[#198364] font-bold">100%</b> factory-direct stock

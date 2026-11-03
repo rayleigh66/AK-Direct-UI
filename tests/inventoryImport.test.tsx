@@ -10,6 +10,17 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
   <AppProvider>{children}</AppProvider>
 );
 
+const asSales = (result: { current: ReturnType<typeof useApp> }) => {
+  act(() => {
+    result.current.switchRole('sales');
+  });
+};
+const asAdmin = (result: { current: ReturnType<typeof useApp> }) => {
+  act(() => {
+    result.current.switchRole('admin');
+  });
+};
+
 afterEach(cleanup);
 
 describe('inventory file parsing and validation', () => {
@@ -120,10 +131,12 @@ describe('inventory file parsing and validation', () => {
       previousUnsellable: row.previousUnsellable ?? -1,
       reserved: row.reserved,
     }));
+    asSales(result);
     act(() => {
       expect(result.current.salesReleaseReservation('ord-001', 'test').success).toBe(true);
     });
     await Promise.resolve();
+    asAdmin(result);
     const afterRelease = JSON.stringify(result.current.inventory);
     const auditBefore = result.current.auditLogs.filter(
       entry => entry.action === 'EXCEL_IMPORT_STOCK'
@@ -165,6 +178,96 @@ describe('inventory file parsing and validation', () => {
     });
   });
 
+  it('marks a preview stale when reserved increases and the old import becomes invalid', async () => {
+    const { result } = renderHook(() => useApp(), { wrapper });
+
+    act(() => {
+      expect(result.current.addToCart('sku-9042-blk', 10).success).toBe(true);
+    });
+    act(() => {
+      expect(
+        result.current.submitOrder({
+          shippingMethod: 'Sea',
+          destinationCountryAlpha3: 'USA',
+          expectedShipDate: '2026-12-15',
+          shippingRequirements: 'Standard export carton.',
+        }).success
+      ).toBe(true);
+    });
+    const orderId = result.current.orders[0].id;
+
+    const line = {
+      rowNumber: 2,
+      skuCode: 'AK-9042-BLK',
+      warehouseCode: 'WH-GZ',
+      onHand: 5,
+      unsellable: 0,
+    };
+    const preview = validateInventoryImport(
+      [line],
+      result.current.products,
+      result.current.warehouses,
+      result.current.inventory
+    );
+    expect(preview.valid).toBe(true);
+    expect(preview.rows[0]?.reserved).toBe(0);
+    const expected = preview.rows.map(row => ({
+      sku_code: row.line.skuCode,
+      warehouse_code: row.line.warehouseCode,
+      previousOnHand: row.previousOnHand ?? -1,
+      previousUnsellable: row.previousUnsellable ?? -1,
+      reserved: row.reserved,
+    }));
+
+    asSales(result);
+    await act(async () => {
+      expect(result.current.salesConfirmOrder(orderId).success).toBe(true);
+      await Promise.resolve();
+    });
+    expect(
+      result.current.inventory.find(
+        entry => entry.sku_id === 'sku-9042-blk' && entry.warehouse_id === 'wh-gz'
+      )?.reserved
+    ).toBe(10);
+
+    const refreshed = validateInventoryImport(
+      [line],
+      result.current.products,
+      result.current.warehouses,
+      result.current.inventory
+    );
+    expect(refreshed.valid).toBe(false);
+    expect(refreshed.errors.join(' ')).toMatch(/reserved stock cannot be overwritten/i);
+
+    asAdmin(result);
+    const inventoryBefore = JSON.stringify(result.current.inventory);
+    const auditBefore = result.current.auditLogs.filter(
+      entry => entry.action === 'EXCEL_IMPORT_STOCK'
+    ).length;
+    let staleResult: ReturnType<typeof result.current.excelImportStock> | undefined;
+    act(() => {
+      staleResult = result.current.excelImportStock(
+        [
+          {
+            sku_code: line.skuCode,
+            warehouse_code: line.warehouseCode,
+            on_hand: line.onHand,
+            unsellable: line.unsellable,
+          },
+        ],
+        expected
+      );
+    });
+    expect(staleResult?.success).toBe(false);
+    expect(staleResult?.stale).toBe(true);
+    expect(staleResult?.error).toMatch(/reserved stock cannot be overwritten/i);
+    expect(JSON.stringify(result.current.inventory)).toBe(inventoryBefore);
+    expect(
+      result.current.auditLogs.filter(entry => entry.action === 'EXCEL_IMPORT_STOCK').length
+    ).toBe(auditBefore);
+    expect(refreshed.valid).toBe(false);
+  });
+
   it('rejects a stale preview when another stock update changes the source balance', async () => {
     const { result } = renderHook(() => useApp(), { wrapper });
     const line = {
@@ -187,6 +290,7 @@ describe('inventory file parsing and validation', () => {
       previousUnsellable: row.previousUnsellable ?? -1,
       reserved: row.reserved,
     }));
+    asAdmin(result);
     await act(async () => {
       expect(
         result.current.excelImportStock([
@@ -210,6 +314,7 @@ describe('inventory file parsing and validation', () => {
 
   it('rejects mixed, duplicate, unknown and missing-balance batches atomically', async () => {
     const { result } = renderHook(() => useApp(), { wrapper });
+    asAdmin(result);
     const before = JSON.stringify(result.current.inventory);
     const beforeAudit = result.current.auditLogs.filter(
       entry => entry.action === 'EXCEL_IMPORT_STOCK'
@@ -242,6 +347,7 @@ describe('inventory file parsing and validation', () => {
 
   it('updates only Mock inventory on commit and preserves reserved quantities', async () => {
     const { result } = renderHook(() => useApp(), { wrapper });
+    asAdmin(result);
     const before = result.current.inventory.find(
       entry => entry.sku_id === 'sku-9042-blk' && entry.warehouse_id === 'wh-sh'
     )!;

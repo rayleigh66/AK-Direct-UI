@@ -7,7 +7,6 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import {
   X,
-  Layers,
   ArrowRight,
   Copy,
   CheckCircle2,
@@ -32,7 +31,6 @@ export const DetailDrawer: React.FC = () => {
     currentCompanyTierInfo,
     companies,
     internalEmailTemplates,
-    addToCart,
     addToast,
     setActiveTab,
   } = useApp();
@@ -271,21 +269,9 @@ export const DetailDrawer: React.FC = () => {
     );
 
     footerActions = (
-      <button
-        onClick={() => {
-          if (totalAvailable >= SKU_MOQ) {
-            addToCart(targetSku.id, SKU_MOQ);
-            addToast(`已添加 10 PCS (${targetSku.sku_code}) 至订购清单`);
-            closeDrawer();
-          } else {
-            addToast('库存不足 10 PCS，请通过现货商城发起补货申请', 'warn');
-          }
-        }}
-        className="px-4 py-2 bg-[#ff681e] text-white rounded-[9px] text-xs font-bold hover:bg-[#ed5610] transition-colors flex items-center gap-1.5 shadow-[0_4px_12px_rgba(255,104,30,0.2)]"
-      >
-        <Layers className="w-3.5 h-3.5" />
-        <span>加入清单 10 PCS</span>
-      </button>
+      <div className="max-w-[240px] text-right text-[11px] leading-relaxed text-slate-500">
+        内部只读库存视图。客户加购与下单只能在客户角色完成；这是前端模拟边界，不是服务端 RBAC。
+      </div>
     );
   } else if (type === 'mail') {
     const template = internalEmailTemplates.find(t => t.id === id);

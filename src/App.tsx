@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { canAccessTab, defaultTabForRole } from './utils/roles';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { BottomNav } from './components/BottomNav';
@@ -38,13 +39,22 @@ import { AuditLogView } from './components/InternalViews/AuditLogView';
 import { Smartphone } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { activeTab, currentRole, isMobileSimulator, toggleMobileSimulator } = useApp();
+  const { activeTab, currentRole, setActiveTab, isMobileSimulator, toggleMobileSimulator } = useApp();
   const customer = currentRole === 'customer';
   const [isTestMatrixOpen, setIsTestMatrixOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const resolvedTab = canAccessTab(currentRole, activeTab)
+    ? activeTab
+    : defaultTabForRole(currentRole);
+
+  useEffect(() => {
+    if (activeTab !== resolvedTab) {
+      setActiveTab(resolvedTab);
+    }
+  }, [activeTab, resolvedTab, setActiveTab]);
 
   const renderActiveView = () => {
-    switch (activeTab) {
+    switch (resolvedTab) {
       // Customer Views
       case 'catalog':
         return <CatalogView />;

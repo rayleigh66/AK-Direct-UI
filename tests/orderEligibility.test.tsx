@@ -8,6 +8,16 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
   <AppProvider>{children}</AppProvider>
 );
 const setup = () => renderHook(() => useApp(), { wrapper });
+const asAdmin = (result: ReturnType<typeof setup>['result']) => {
+  act(() => {
+    result.current.switchRole('admin');
+  });
+};
+const asCustomer = (result: ReturnType<typeof setup>['result']) => {
+  act(() => {
+    result.current.switchRole('customer', 'user-001a');
+  });
+};
 const shipping = {
   shippingMethod: 'Sea' as const,
   destinationCountryAlpha3: 'USA',
@@ -24,9 +34,11 @@ describe('customer order eligibility', () => {
       expect(result.current.addToCart('sku-9042-blk', 10).success).toBe(true);
     });
     const orderCount = result.current.orders.length;
+    asAdmin(result);
     act(() => {
       expect(result.current.adminSetProductActive('prod-9042', false).success).toBe(true);
     });
+    asCustomer(result);
     act(() => {
       const rejected = result.current.submitOrder(shipping);
       expect(rejected.success).toBe(false);
@@ -35,9 +47,11 @@ describe('customer order eligibility', () => {
     expect(result.current.cart).toEqual([{ sku_id: 'sku-9042-blk', quantity: 10 }]);
     expect(result.current.orders).toHaveLength(orderCount);
 
+    asAdmin(result);
     act(() => {
       expect(result.current.adminSetProductActive('prod-9042', true).success).toBe(true);
     });
+    asCustomer(result);
     act(() => {
       const accepted = result.current.submitOrder(shipping);
       expect(accepted.success).toBe(true);
@@ -52,6 +66,9 @@ describe('customer order eligibility', () => {
     const sku = product.skus.find(item => item.id === 'sku-9042-blk')!;
     act(() => {
       expect(result.current.addToCart(sku.id, 10).success).toBe(true);
+    });
+    asAdmin(result);
+    act(() => {
       const stopped = result.current.adminUpdateSku('prod-9042', sku.id, {
         skuCode: sku.sku_code,
         colorName: sku.color_name,
@@ -62,6 +79,7 @@ describe('customer order eligibility', () => {
       });
       expect(stopped.success).toBe(true);
     });
+    asCustomer(result);
     act(() => {
       const rejected = result.current.submitOrder(shipping);
       expect(rejected.success).toBe(false);
@@ -70,6 +88,7 @@ describe('customer order eligibility', () => {
     expect(result.current.cart).toHaveLength(1);
     expect(result.current.orders).toHaveLength(3);
 
+    asAdmin(result);
     act(() => {
       expect(
         result.current.adminUpdateSku('prod-9042', sku.id, {
@@ -82,6 +101,7 @@ describe('customer order eligibility', () => {
         }).success
       ).toBe(true);
     });
+    asCustomer(result);
     act(() => {
       expect(result.current.submitOrder(shipping).success).toBe(true);
     });
@@ -93,14 +113,16 @@ describe('customer order eligibility', () => {
     act(() => {
       expect(result.current.addToCart('sku-9042-blk', 10).success).toBe(true);
     });
+    asAdmin(result);
     act(() => {
-      result.current.adminToggleBrandGrant('comp-001', 'brand-aoking');
+      expect(result.current.adminToggleBrandGrant('comp-001', 'brand-aoking').success).toBe(true);
     });
     expect(
       result.current.brandGrants.some(
         grant => grant.company_id === 'comp-001' && grant.brand_id === 'brand-aoking'
       )
     ).toBe(false);
+    asCustomer(result);
     act(() => {
       const rejected = result.current.submitOrder(shipping);
       expect(rejected.success).toBe(false);
@@ -109,9 +131,11 @@ describe('customer order eligibility', () => {
     expect(result.current.cart).toHaveLength(1);
     expect(result.current.orders).toHaveLength(3);
 
+    asAdmin(result);
     act(() => {
-      result.current.adminToggleBrandGrant('comp-001', 'brand-aoking');
+      expect(result.current.adminToggleBrandGrant('comp-001', 'brand-aoking').success).toBe(true);
     });
+    asCustomer(result);
     act(() => {
       expect(result.current.submitOrder(shipping).success).toBe(true);
     });
@@ -122,8 +146,12 @@ describe('customer order eligibility', () => {
     const { result } = setup();
     act(() => {
       expect(result.current.addToCart('sku-9042-gry', 10).success).toBe(true);
+    });
+    asAdmin(result);
+    act(() => {
       expect(result.current.adminSetProductActive('prod-9042', false).success).toBe(true);
     });
+    asCustomer(result);
     act(() => {
       const rejected = result.current.addToCart('sku-9042-blk', 10);
       expect(rejected.success).toBe(false);
