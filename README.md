@@ -23,6 +23,19 @@ npm run preview
 
 The project does **not** need a Google/Gemini API key, Google AI Studio, Google Cloud Run, or Google-hosted fonts to run. It uses locally available system font fallbacks.
 
+## Backend infrastructure (Phase 4B-01)
+
+Phase 4B-01 adds only the deployment and API foundation: PostgreSQL, migrations, health/readiness endpoints, Caddy reverse proxy, backups and Docker Compose. It does **not** add customer, order, inventory or login business APIs.
+
+```bash
+cp .env.example .env   # change the local password before use
+docker compose up -d --build --wait
+curl http://127.0.0.1:8080/api/health
+curl http://127.0.0.1:8080/api/ready
+```
+
+See [Phase 4B-01 Deployment](docs/PHASE_4B01_DEPLOYMENT.md) for environment, migrations, test database, backups/restore, production domain/HTTPS and upgrade steps. The React Mock remains the active UI; no business API is wired into it.
+
 ## Scope and limitations
 
 **This is a demonstration application, not a production ordering service.**

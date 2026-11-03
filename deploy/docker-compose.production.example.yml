@@ -1,0 +1,17 @@
+# Production example only. Do not use until the Owner confirms the domain and
+# DNS plan. This file is an override for docker-compose.yml.
+services:
+  web:
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in the production environment}
+    volumes:
+      - ./deploy/Caddyfile.production.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
