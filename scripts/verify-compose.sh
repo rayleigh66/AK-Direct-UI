@@ -117,12 +117,12 @@ psql_db -c "DELETE FROM system_metadata WHERE key = '$PROBE_KEY';"
 step "T08: port exposure and image secret checks"
 DB_PORT="$(docker compose port db 5432 || true)"
 case "$DB_PORT" in
-  ''|':0') ;;
+  ''|':0'|'invalid IP:0') ;;
   *) echo "PostgreSQL must not publish a host port (got $DB_PORT)." >&2; exit 1 ;;
 esac
 API_PORT="$(docker compose port api 4000 || true)"
 case "$API_PORT" in
-  ''|':0') ;;
+  ''|':0'|'invalid IP:0') ;;
   *) echo "API must not publish a host port (got $API_PORT)." >&2; exit 1 ;;
 esac
 docker compose port web 80 | grep -q '^127\.0\.0\.1:'
