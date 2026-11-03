@@ -7,17 +7,35 @@ async function openSidebarIfNeeded(page: Page) {
   }
 }
 
+async function closeMobileSidebarIfOpen(page: Page) {
+  const width = page.viewportSize()?.width ?? 1440;
+  if (width >= 1024) return;
+  const aside = page.locator('aside');
+  const inViewport = await aside.evaluate(el => {
+    const rect = el.getBoundingClientRect();
+    return rect.right > 0 && rect.left < window.innerWidth;
+  });
+  if (!inViewport) return;
+  const backdrop = page.locator('div.fixed.inset-0.bg-black\\/50');
+  if ((await backdrop.count()) > 0) {
+    await page.mouse.click(width - 20, 300);
+  }
+  await expect(aside).not.toBeInViewport();
+}
+
 async function switchRole(page: Page, profilePattern: RegExp, option: string) {
   await openSidebarIfNeeded(page);
   const sidebar = page.locator('aside');
   await sidebar.getByRole('button', { name: profilePattern }).first().click();
   await page.getByText(option, { exact: true }).click();
+  await closeMobileSidebarIfOpen(page);
 }
 
 async function openAdminProducts(page: Page) {
   const width = page.viewportSize()?.width ?? 1440;
   if (width < 1024) {
-    await page.getByRole('button', { name: '商品管理' }).last().click();
+    await openSidebarIfNeeded(page);
+    await page.locator('aside').getByRole('button', { name: /商品目录管理/ }).first().click();
   } else {
     await page.getByRole('button', { name: /商品目录管理/ }).first().click();
   }

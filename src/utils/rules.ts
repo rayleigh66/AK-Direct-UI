@@ -11,6 +11,82 @@ import { TierRule, Promotion, InventoryBalance } from '../types';
  */
 export const SKU_MOQ = 10;
 
+/**
+ * Mathematical discount boundary used to keep effective prices non-negative.
+ * This is not a new business maximum: the Owner still has to confirm the
+ * commercial discount cap. It only prevents rates that produce negative prices.
+ */
+export const MAX_DISCOUNT_RATE = 1;
+
+export function validateDiscountRate(rate: number): { valid: boolean; error?: string } {
+  if (!Number.isFinite(rate)) {
+    return { valid: false, error: 'Discount rate must be a finite number.' };
+  }
+  if (rate < 0) {
+    return { valid: false, error: 'Discount rate cannot be negative.' };
+  }
+  if (rate > MAX_DISCOUNT_RATE) {
+    return {
+      valid: false,
+      error: 'Discount rate cannot exceed 100%; a larger value would produce a negative price.',
+    };
+  }
+  return { valid: true };
+}
+
+export function validateUnitPrice(
+  value: number,
+  label = 'Price'
+): { valid: boolean; error?: string } {
+  if (!Number.isFinite(value) || value <= 0) {
+    return { valid: false, error: `${label} must be a finite number greater than 0.` };
+  }
+  return { valid: true };
+}
+
+export function validateTierThreshold(value: number): { valid: boolean; error?: string } {
+  if (!Number.isFinite(value) || value < 0) {
+    return { valid: false, error: 'Tier threshold must be a finite, non-negative number.' };
+  }
+  return { valid: true };
+}
+
+export function validateOrderAmount(value: number, label = 'Order amount'): {
+  valid: boolean;
+  error?: string;
+} {
+  if (!Number.isFinite(value) || value < 0) {
+    return { valid: false, error: `${label} must be a finite, non-negative amount.` };
+  }
+  return { valid: true };
+}
+
+/**
+ * Order confirmation is stricter than the general non-negative order rule:
+ * a zero (or sub-cent) total must not create a reservation. USD cents are
+ * rounded first, so 0.004 is rejected and 0.005 becomes one cent.
+ */
+export function validateConfirmableOrderTotal(amountUsd: number): {
+  valid: boolean;
+  error?: string;
+} {
+  if (!Number.isFinite(amountUsd)) {
+    return { valid: false, error: 'Order confirmation total must be a finite amount.' };
+  }
+  if (amountUsd < 0) {
+    return { valid: false, error: 'Order confirmation total cannot be negative.' };
+  }
+  const cents = usdToCents(amountUsd);
+  if (!Number.isSafeInteger(cents) || cents < 1) {
+    return {
+      valid: false,
+      error:
+        'Order confirmation total must be at least USD $0.01; zero-amount orders cannot be confirmed or reserved.',
+    };
+  }
+  return { valid: true };
+}
+
 export function validateSKUQuantity(qty: number): { valid: boolean; error?: string } {
   if (!Number.isInteger(qty)) {
     return { valid: false, error: 'Quantity must be a whole number.' };
@@ -137,6 +213,11 @@ export function calculateEffectiveUnitPrice(
   isStacked: boolean;
   originalPrice: number;
 } {
+  const basePriceCheck = validateUnitPrice(basePriceUsd, 'Base price');
+  if (!basePriceCheck.valid) throw new Error(basePriceCheck.error);
+  const discountCheck = validateDiscountRate(tierDiscountRate);
+  if (!discountCheck.valid) throw new Error(discountCheck.error);
+
   const activePromo = promotions.find(p => {
     return (
       p.sku_id === skuId &&
@@ -147,8 +228,12 @@ export function calculateEffectiveUnitPrice(
   });
 
   if (activePromo) {
+    const promoPriceCheck = validateUnitPrice(activePromo.promo_price_usd, 'Promotion price');
+    if (!promoPriceCheck.valid) throw new Error(promoPriceCheck.error);
     if (activePromo.stack_tier_discount) {
       const price = Number((activePromo.promo_price_usd * (1 - tierDiscountRate)).toFixed(2));
+      const amountCheck = validateOrderAmount(price, 'Effective unit price');
+      if (!amountCheck.valid) throw new Error(amountCheck.error);
       return {
         effectivePrice: price,
         isPromo: true,
@@ -168,6 +253,8 @@ export function calculateEffectiveUnitPrice(
   }
 
   const normalDiscounted = Number((basePriceUsd * (1 - tierDiscountRate)).toFixed(2));
+  const amountCheck = validateOrderAmount(normalDiscounted, 'Effective unit price');
+  if (!amountCheck.valid) throw new Error(amountCheck.error);
   return {
     effectivePrice: normalDiscounted,
     isPromo: false,

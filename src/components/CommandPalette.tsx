@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { customerProductTitle, customerSkuColor } from '../utils/customerDisplay';
+import { isSkuVisibleToCustomer } from '../utils/catalogVisibility';
+import { canAccessTab } from '../utils/roles';
 import {
   Search,
   Store,
@@ -32,6 +34,8 @@ export const CommandPalette: React.FC = () => {
     companies,
     openDrawer,
     currentRole,
+    currentCompany,
+    brandGrants,
   } = useApp();
   const customer = currentRole === 'customer';
 
@@ -72,29 +76,37 @@ export const CommandPalette: React.FC = () => {
     { id: 'orders', title: 'My orders', desc: 'Track status, shipping and changes', icon: Clock },
     { id: 'membership', title: 'Membership', desc: 'Tier, discount and inactivity status', icon: Award },
   ];
-  const internalNavItems = [
-    { id: 'catalog', title: '商城现货 (Catalog)', desc: '按 SKU 查看精确库存与下单', icon: Store },
-    { id: 'cart', title: '订购清单 (Order List)', desc: '校验起订量 10 PCS 与提交申请', icon: ShoppingCart },
-    { id: 'orders', title: '我的订单 (My Orders)', desc: '订单状态时间轴与变更申请', icon: Clock },
-    { id: 'membership', title: '会员与等级 (Membership)', desc: '历史累计采购额与未采购降级计时', icon: Award },
+  const salesNavItems = [
     { id: 'sales_orders', title: '业务员订单处理 (Sales Orders)', desc: '订单核准、整单模拟预占 72h 与付款登记', icon: ClipboardList },
     { id: 'restock_manage', title: '缺货补货需求 (Restock)', desc: '跟踪客户缺货需求与到货通知', icon: Boxes },
     { id: 'internal_mailbox', title: '业务员内部邮件中心 (Mailbox)', desc: '客户英文通知草稿与线下复制发送', icon: Mail },
+  ];
+  const adminNavItems = [
     { id: 'inventory_import', title: '库存管理与 Excel 导入 (Inventory)', desc: '多仓库存监控与批量导入模拟', icon: Layers },
     { id: 'admin_products', title: '商品目录管理 (Products)', desc: '商品、SKU、图片、系列与功能标签', icon: Package },
     { id: 'admin_companies', title: '客户公司与账号建档 (Accounts)', desc: '两步建档与一次性临时密码生成', icon: Users },
     { id: 'promo_tier', title: '促销与等级配置 (Promo & Tiers)', desc: '限时促销时间窗与等级门槛配置', icon: Settings },
+    { id: 'audit_logs', title: '敏感操作审计日志 (Audit)', desc: '审计流水与隐私合规扫描', icon: ClipboardList },
   ];
+  const internalNavItems = [...adminNavItems, ...salesNavItems].filter(item =>
+    canAccessTab(currentRole, item.id)
+  );
   const navItems = customer ? customerNavItems : internalNavItems;
 
   const matchedNav = navItems.filter(
     n => n.title.toLowerCase().includes(q) || n.desc.toLowerCase().includes(q)
   );
 
-  // Matched SKUs
+  // Matched SKUs. Customer search must respect the company's brand grants,
+  // product listing state and SKU sellable status.
   const matchedSkus = q
-    ? products.flatMap(p =>
-        p.skus
+    ? products.flatMap(p => {
+        const visibleSkus = customer
+          ? p.skus.filter(s =>
+              isSkuVisibleToCustomer(p, s, currentCompany?.id, brandGrants)
+            )
+          : p.skus;
+        return visibleSkus
           .filter(
             s =>
               s.sku_code.toLowerCase().includes(q) ||
@@ -104,8 +116,8 @@ export const CommandPalette: React.FC = () => {
               customerProductTitle(p).toLowerCase().includes(q) ||
               p.product_code.toLowerCase().includes(q)
           )
-          .map(s => ({ product: p, sku: s }))
-      ).slice(0, 4)
+          .map(s => ({ product: p, sku: s }));
+      }).slice(0, 4)
     : [];
 
   // Matched Orders

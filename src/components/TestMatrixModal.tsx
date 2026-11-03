@@ -32,7 +32,7 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
       id: 'T01',
       category: 'auth',
       title: '同公司两个账户登录',
-      expectation: 'AK000123A 与 AK000123B 凭据独立，但共享 Apex Luggage Co. 的等级、折扣与全部平台订单。',
+      expectation: 'Demo 角色切换可查看同公司 AK000123A/B 共享的等级与全部平台订单；真实凭据、登录与会话尚未实现。',
       action: () => {
         switchRole('customer', 'user-001b');
         setActiveTab('orders');
@@ -44,7 +44,7 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
       id: 'T02',
       category: 'auth',
       title: '客户访问未授权品牌 SKU 保护',
-      expectation: '客户访问未获授权的 VOYAGER 品牌时，服务端拒绝，不泄露价格和现货库存。',
+      expectation: '当前前端 Demo 在目录、全局搜索和商品详情中按公司品牌授权过滤，不展示未授权品牌的价格和现货库存；正式版必须由服务端再次强制。',
       action: () => {
         switchRole('customer', 'user-001a');
         setActiveTab('catalog');
@@ -224,13 +224,13 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
       id: 'T21',
       category: 'tier',
       title: '未采购满 18/30/42 个月逐级降级与恢复定级',
-      expectation: '距最近采购满 18 个月降 1 级，满 30 个月降 2 级；新采购入账后按累计额重新定级并重置计时。',
+      expectation: '距最近采购满 18 个月降 1 级，满 30 个月降 2 级；新采购入账后按累计额重新定级并重置计时。时间快进仅保留在内部 QA 面板，不对客户展示。',
       action: () => {
-        switchRole('customer', 'user-001a');
-        setActiveTab('membership');
+        switchRole('admin');
+        setActiveTab('admin_companies');
         onClose();
       },
-      actionLabel: '在会员中心使用【时间快进测试控制台】体验实时降级与恢复',
+      actionLabel: '在管理员客户建档页打开【Demo QA：未采购计时模拟】',
     },
     {
       id: 'T24',
@@ -248,7 +248,7 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
       id: 'T25',
       category: 'privacy',
       title: '数据库与系统日志隐私合规审查',
-      expectation: '允许公司简称/客户号/国家码；严禁存在客户姓名、电话、邮箱、物理街道地址或明文密码。',
+      expectation: '前端 Demo 扫描审计文本中的邮箱、长数字和明文密码标记；它不能替代真实日志脱敏、地址/姓名识别或不可篡改审计。',
       action: () => {
         switchRole('admin');
         setActiveTab('audit_logs');
@@ -260,19 +260,19 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
       id: 'T27',
       category: 'auth',
       title: '业务员越权创建客户/账户拦截',
-      expectation: '业务员角色无权建档或创建登录账号，界面与接口层面严格拦截。',
+      expectation: '业务员角色在前端视图与 Mock 操作入口均不能建档、修改促销/等级或执行库存导入；正式版必须由服务端 RBAC 再次强制。',
       action: () => {
         switchRole('sales');
-        setActiveTab('admin_companies');
+        setActiveTab('sales_orders');
         onClose();
       },
-      actionLabel: '在业务员角色下进入客户建档查看 RBAC 拦截提示',
+      actionLabel: '切换业务员端确认无客户建档/库存导入/促销入口',
     },
     {
       id: 'T28',
       category: 'auth',
       title: '两步建档与一次性临时密码生成',
-      expectation: '管理员输入 C000123 / 简称 / 国家代码，系统自动派生 AK000123A 并高强度生成一次性临时密码。',
+      expectation: '管理员输入 C000123 / 简称 / 国家代码，Demo 自动派生 AK000123A 并生成一次性临时密码；当前为前端模拟，不是加密安全存储。',
       action: () => {
         switchRole('admin');
         setActiveTab('admin_companies');
@@ -284,7 +284,7 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
       id: 'T31',
       category: 'auth',
       title: '首次登录强制修改正式密码',
-      expectation: '未修改临时密码的账号 (如 AK000456A) 登录后禁止访问任何业务页面，强制完成改密。',
+      expectation: 'Demo QA 通过内部测试矩阵切到未改密账号时显示强制改密弹窗；真实登录、密码存储与会话尚未实现，正式版必须由后端强制。',
       action: () => {
         switchRole('customer', 'user-002a');
         onClose();
@@ -322,7 +322,7 @@ export const TestMatrixModal: React.FC<TestMatrixModalProps> = ({ onClose }) => 
             <div>
               <h2 className="text-base font-bold">AOKING Direct PRD v0.3 核心验收场景矩阵 (T01 - T35)</h2>
               <p className="text-xs text-slate-300">
-                点击每条场景右侧按钮即可一键切换角色与视口，现场验证各项业务规则
+                点击每条场景右侧按钮即可一键切换角色与视口。这些是前端 Mock 验收，不是服务端 RBAC、真实登录或数据库证据。
               </p>
             </div>
           </div>

@@ -1,5 +1,21 @@
 import { expect, test, type Page } from '@playwright/test';
 
+async function closeMobileSidebarIfOpen(page: Page) {
+  const width = page.viewportSize()?.width ?? 1440;
+  if (width >= 1024) return;
+  const aside = page.locator('aside');
+  const inViewport = await aside.evaluate(el => {
+    const rect = el.getBoundingClientRect();
+    return rect.right > 0 && rect.left < window.innerWidth;
+  });
+  if (!inViewport) return;
+  const backdrop = page.locator('div.fixed.inset-0.bg-black\\/50');
+  if ((await backdrop.count()) > 0) {
+    await page.mouse.click(width - 20, 300);
+  }
+  await expect(aside).not.toBeInViewport();
+}
+
 async function switchRole(page: Page, profile: RegExp, option: string) {
   const width = page.viewportSize()?.width ?? 1440;
   if (width < 1024) {
@@ -7,12 +23,14 @@ async function switchRole(page: Page, profile: RegExp, option: string) {
   }
   await page.locator('aside').getByRole('button', { name: profile }).first().click();
   await page.getByText(option, { exact: true }).click();
+  await closeMobileSidebarIfOpen(page);
 }
 
 async function openInventory(page: Page) {
   const width = page.viewportSize()?.width ?? 1440;
   if (width < 1024) {
-    await page.getByRole('button', { name: 'Excel导入' }).last().click();
+    await page.getByRole('button', { name: /Open navigation|菜单/ }).first().click();
+    await page.locator('aside').getByRole('button', { name: /多仓库存与导入/ }).first().click();
   } else {
     await page.getByRole('button', { name: /多仓库存与导入/ }).first().click();
   }

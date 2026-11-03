@@ -88,7 +88,7 @@ export const BottomNav: React.FC = () => {
   if (currentRole === 'sales') {
     return (
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden">
-        <div className="grid grid-cols-4 items-center h-16 max-w-lg mx-auto px-2">
+        <div className="grid grid-cols-3 items-center h-16 max-w-lg mx-auto px-2">
           <button
             onClick={() => setActiveTab('sales_orders')}
             className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${
@@ -119,15 +119,6 @@ export const BottomNav: React.FC = () => {
             <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">内部邮件</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('inventory_import')}
-            className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${
-              activeTab === 'inventory_import' ? 'text-slate-900 font-semibold' : 'text-slate-500'
-            }`}
-          >
-            <Boxes className="w-5 h-5" />
-            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">库存监控</span>
-          </button>
         </div>
       </nav>
     );

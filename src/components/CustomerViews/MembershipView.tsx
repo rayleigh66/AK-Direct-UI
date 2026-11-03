@@ -8,14 +8,12 @@ import { useApp } from '../../context/AppContext';
 import { customerStatus, customerTierName } from '../../utils/customerDisplay';
 import {
   Award,
-  TrendingUp,
   AlertCircle,
   Clock,
   Sparkles,
   ShieldCheck,
   Building2,
   Calendar,
-  FastForward,
 } from 'lucide-react';
 
 export const MembershipView: React.FC = () => {
@@ -24,8 +22,6 @@ export const MembershipView: React.FC = () => {
     currentCompanyTierInfo,
     tierRules,
     orders,
-    simulateTimeTravelInactivity,
-    salesRecordPayment,
   } = useApp();
 
   if (!currentCompany || !currentCompanyTierInfo) {
@@ -229,53 +225,9 @@ export const MembershipView: React.FC = () => {
           </p>
         </div>
 
-        {/* Interactive Time-Travel Simulation for Scenario T21 */}
-        <div className="p-4 bg-slate-900 text-white rounded-xl space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-              <FastForward className="w-4 h-4" />
-              <span>Inactivity fast-forward (Demo)</span>
-            </div>
-            <span className="text-[10px] text-slate-400">Adjust the demo inactivity clock</span>
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-xs">
-            <button
-              onClick={() => simulateTimeTravelInactivity(currentCompany.id, 6)}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
-            >
-              +6 months
-            </button>
-            <button
-              onClick={() => simulateTimeTravelInactivity(currentCompany.id, 12)}
-              className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 transition-colors"
-            >
-              +12 months
-            </button>
-            <button
-              onClick={() => simulateTimeTravelInactivity(currentCompany.id, 18)}
-              className="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 transition-colors"
-            >
-              +18 months (first downgrade)
-            </button>
-            <button
-              onClick={() => simulateTimeTravelInactivity(currentCompany.id, 30)}
-              className="px-3 py-1.5 rounded-lg bg-rose-500/30 text-rose-300 hover:bg-rose-500/40 border border-rose-500/50 transition-colors"
-            >
-              +30 months (two downgrades)
-            </button>
-
-            <button
-              onClick={() => {
-                // simulate a $5,000 purchase to restore
-                salesRecordPayment('SIM-RESTORE', 5000, 'WIRE-SIM-RESTORE');
-              }}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-colors ml-auto flex items-center gap-1"
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span>Record $5,000 purchase · restore tier and reset timer</span>
-            </button>
-          </div>
+        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 leading-relaxed">
+          Tier and inactivity simulation is an internal QA control. It is not shown to customers and
+          is not a real tier change.
         </div>
       </div>
 

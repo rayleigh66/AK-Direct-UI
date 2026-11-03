@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AccessBoundary } from '../AccessBoundary';
 import {
   ClipboardList,
   ShieldCheck,
@@ -14,7 +15,7 @@ import {
 } from 'lucide-react';
 
 export const AuditLogView: React.FC = () => {
-  const { auditLogs } = useApp();
+  const { currentRole, auditLogs } = useApp();
   const [filterQuery, setFilterQuery] = useState('');
   const [auditScanResult, setAuditScanResult] = useState<string | null>(null);
 
@@ -51,6 +52,15 @@ export const AuditLogView: React.FC = () => {
       setAuditScanResult('发现潜在敏感数据，请复核日志字段。');
     }
   };
+
+  if (currentRole !== 'admin') {
+    return (
+      <AccessBoundary
+        title="审计日志仅对管理员开放"
+        message="客户与业务员不能查看全系统审计流水。这是前端视图守卫；正式权限必须在后端再次校验。"
+      />
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">

@@ -6,6 +6,7 @@ import {
   calculateSKUAvailableStock,
   SKU_MOQ,
 } from '../../utils/rules';
+import { isProductVisibleToCustomer } from '../../utils/catalogVisibility';
 import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
 import type { ProductSKU } from '../../types';
 
@@ -20,6 +21,8 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
     inventory,
     promotions,
     currentCompanyTierInfo,
+    currentCompany,
+    brandGrants,
     cart,
     addToCart,
     addToast,
@@ -27,8 +30,9 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
   } = useApp();
 
   const found = useMemo(() => {
+    if (!currentCompany) return null;
     for (const product of products) {
-      if (product.active === false) continue;
+      if (!isProductVisibleToCustomer(product, currentCompany.id, brandGrants)) continue;
       const sku = product.skus.find(
         (item) =>
           (item.id === skuId || item.sku_code === skuId) &&
@@ -37,7 +41,7 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
       if (sku) return { product, sku };
     }
     return null;
-  }, [products, skuId]);
+  }, [products, skuId, currentCompany, brandGrants]);
 
   const [selectedSkuId, setSelectedSkuId] = useState(found?.sku.id ?? '');
   const [quantity, setQuantity] = useState(SKU_MOQ);

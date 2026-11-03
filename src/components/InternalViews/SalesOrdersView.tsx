@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AccessBoundary } from '../AccessBoundary';
 import { Order, OrderStatus } from '../../types';
 import { calculateSKUAvailableStock } from '../../utils/rules';
 import {
@@ -24,6 +25,7 @@ import {
 
 export const SalesOrdersView: React.FC = () => {
   const {
+    currentRole,
     orders,
     inventory,
     companies,
@@ -141,6 +143,15 @@ export const SalesOrdersView: React.FC = () => {
       alert(res.error);
     }
   };
+
+  if (currentRole === 'customer') {
+    return (
+      <AccessBoundary
+        title="业务员订单处理不对客户开放"
+        message="客户只能查看自己的订单，不能进入内部订单处理界面。这是前端视图守卫；正式权限必须在后端再次校验。"
+      />
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">

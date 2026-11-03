@@ -697,7 +697,7 @@ export const ProductAdminView: React.FC = () => {
                       <div className="flex justify-end gap-2">
                         <button
                           type="submit"
-                          className="min-h-[40px] px-4 rounded-[8px] bg-[#171717] text-white text-xs font-bold"
+                          className="min-h-[40px] scroll-mt-24 px-4 rounded-[8px] bg-[#171717] text-white text-xs font-bold"
                           data-testid="admin-save-sku"
                         >
                           保存 SKU

@@ -8,7 +8,13 @@ import { DEMO_IMAGE_LIBRARY } from '../src/data/demoImageLibrary';
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <AppProvider>{children}</AppProvider>
 );
-const setup = () => renderHook(() => useApp(), { wrapper });
+const setup = () => {
+  const rendered = renderHook(() => useApp(), { wrapper });
+  act(() => {
+    rendered.result.current.switchRole('admin');
+  });
+  return rendered;
+};
 
 const baseProduct = (overrides: Partial<AdminProductInput> = {}): AdminProductInput => ({
   brandId: 'brand-aoking',
