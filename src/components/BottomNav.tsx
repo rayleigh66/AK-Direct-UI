@@ -25,7 +25,7 @@ export const BottomNav: React.FC = () => {
 
   if (currentRole === 'customer') {
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 lg:hidden pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-4 items-center h-16 max-w-lg mx-auto px-2" data-testid="customer-bottom-nav">
           <button
             onClick={() => setActiveTab('catalog')}
@@ -87,7 +87,7 @@ export const BottomNav: React.FC = () => {
 
   if (currentRole === 'sales') {
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 lg:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden">
         <div className="grid grid-cols-3 items-center h-16 max-w-lg mx-auto px-2">
           <button
             onClick={() => setActiveTab('sales_orders')}
@@ -126,7 +126,7 @@ export const BottomNav: React.FC = () => {
 
   // Admin
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 lg:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden">
       <div className="grid grid-cols-5 items-center h-16 max-w-lg mx-auto px-1">
         <button
           onClick={() => setActiveTab('admin_products')}
