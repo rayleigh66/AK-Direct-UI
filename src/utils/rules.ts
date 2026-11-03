@@ -61,6 +61,32 @@ export function validateOrderAmount(value: number, label = 'Order amount'): {
   return { valid: true };
 }
 
+/**
+ * Order confirmation is stricter than the general non-negative order rule:
+ * a zero (or sub-cent) total must not create a reservation. USD cents are
+ * rounded first, so 0.004 is rejected and 0.005 becomes one cent.
+ */
+export function validateConfirmableOrderTotal(amountUsd: number): {
+  valid: boolean;
+  error?: string;
+} {
+  if (!Number.isFinite(amountUsd)) {
+    return { valid: false, error: 'Order confirmation total must be a finite amount.' };
+  }
+  if (amountUsd < 0) {
+    return { valid: false, error: 'Order confirmation total cannot be negative.' };
+  }
+  const cents = usdToCents(amountUsd);
+  if (!Number.isSafeInteger(cents) || cents < 1) {
+    return {
+      valid: false,
+      error:
+        'Order confirmation total must be at least USD $0.01; zero-amount orders cannot be confirmed or reserved.',
+    };
+  }
+  return { valid: true };
+}
+
 export function validateSKUQuantity(qty: number): { valid: boolean; error?: string } {
   if (!Number.isInteger(qty)) {
     return { valid: false, error: 'Quantity must be a whole number.' };

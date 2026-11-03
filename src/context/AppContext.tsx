@@ -56,6 +56,7 @@ import {
   calculateSKUAvailableStock,
   calculateEffectiveUnitPrice,
   evaluateCustomerTier,
+  validateConfirmableOrderTotal,
   validateDiscountRate,
   validateOrderAmount,
   validateSKUQuantity,
@@ -940,9 +941,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (order.status !== 'PENDING_CONFIRMATION') {
       return { success: false, error: '订单不在待确认状态' };
     }
-    const totalAmountCheck = validateOrderAmount(order.total_quoted_usd, 'Order total');
-    if (!totalAmountCheck.valid) {
-      return { success: false, error: totalAmountCheck.error ?? '订单金额无效，确认已拒绝。' };
+    const confirmTotalCheck = validateConfirmableOrderTotal(order.total_quoted_usd);
+    if (!confirmTotalCheck.valid) {
+      const cents = Number.isFinite(order.total_quoted_usd)
+        ? usdToCents(order.total_quoted_usd)
+        : null;
+      if (cents === 0) {
+        return {
+          success: false,
+          error: '订单确认金额为 USD $0.00，暂不允许确认或预占库存。请先调整报价或折扣。',
+        };
+      }
+      const amountText = Number.isFinite(order.total_quoted_usd)
+        ? `USD $${order.total_quoted_usd.toFixed(2)}`
+        : '非有限金额';
+      return {
+        success: false,
+        error: `订单确认金额为 ${amountText}，暂不允许确认或预占库存。请先调整报价或折扣。`,
+      };
     }
 
     // Plan the whole order across warehouses first; a short SKU fails the entire reservation.
