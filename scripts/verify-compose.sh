@@ -49,7 +49,7 @@ wait_http() {
   local code=""
   local i=0
   while [ "$i" -lt "$attempts" ]; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)"
     if [ "$code" = "$expected" ]; then
       return 0
     fi
