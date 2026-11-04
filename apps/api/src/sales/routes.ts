@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { DbPool } from '../db/pool.js';
 import { asyncHandler } from '../http/errors.js';
+import { requireCsrfForUnsafeMethods } from '../http/csrf.js';
 import {
   requireAuth,
   requirePasswordChanged,
@@ -19,7 +20,9 @@ export function createSalesRouter(pool: DbPool, config: AuthConfig): Router {
   router.use(
     requireAuth(pool, config),
     requirePasswordChanged,
-    requireUserType('internal')
+    requireUserType('internal'),
+    // Sales writes require the double-submit CSRF check; GETs pass through.
+    requireCsrfForUnsafeMethods(config.cookieSecure)
   );
 
   router.get(

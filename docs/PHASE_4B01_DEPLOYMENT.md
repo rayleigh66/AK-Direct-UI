@@ -93,7 +93,7 @@ curl -fsS http://127.0.0.1:8080/api/ready
 curl -fsS http://127.0.0.1:8080/ >/dev/null
 ```
 
-`/api/health` is a process liveness check. `/api/ready` verifies database connectivity, the expected `schema_version` (`4b02`) and the required `002_auth_rbac.sql` migration row; it returns HTTP 503 when the database or migrations are unavailable or mismatched.
+`/api/health` is a process liveness check. `/api/ready` verifies database connectivity, the expected `schema_version` (`4b02`) and the required `003_sales_write_scope.sql` migration row; it returns HTTP 503 when the database or migrations are unavailable or mismatched.
 
 ## 4. Database and migrations
 

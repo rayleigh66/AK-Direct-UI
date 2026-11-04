@@ -9,7 +9,7 @@
 
 | Area | Result |
 | --- | --- |
-| Schema | Migration `002_auth_rbac.sql`: customer companies, customer accounts, internal users, roles, permissions, brand grants, sessions, login attempts, audit logs |
+| Schema | Migration `002_auth_rbac.sql` plus additive `003_sales_write_scope.sql`: customer companies, customer accounts, internal users, roles, permissions, brand grants, sessions, login attempts, audit logs |
 | Authentication | scrypt password hashing, real login, logout, forced first-login password change |
 | Password handling | Random one-time initial password shown once; only the hash is persisted; never written to audit logs or the API image |
 | Admin | Company creation (`C` + 6 digits), subaccounts (`AK` + 6 digits + letter), status changes, brand grants, salesperson assignment |
@@ -33,16 +33,21 @@ Constraints enforced in the database:
 - `customer_users.account_letter ~ '^[A-Z]$'`
 - session rows must reference exactly one of customer user or internal user, with the matching company for customer sessions.
 
-Seeded data is limited to the role/permission catalogue and the AOKING reference brand. No customers, customer accounts, internal users, passwords, products, inventory or orders are seeded. `system_metadata.schema_version` becomes `4b02` and readiness requires migration `002_auth_rbac.sql`.
+Seeded data is limited to the role/permission catalogue and the AOKING reference brand. No customers, customer accounts, internal users, passwords, products, inventory or orders are seeded. `system_metadata.schema_version` becomes `4b02` and readiness requires the latest migration `003_sales_write_scope.sql`.
+
+`003_sales_write_scope.sql` is additive because `002_auth_rbac.sql` may already be applied and checksum-frozen. It grants `sales.write` to the `sales` role; the assignment scope is still enforced in the API.
 
 ## 3. RBAC and data scope results
 
 | Rule | Result | Verification |
 | --- | --- | --- |
 | Customer can read only its own company | PASS | Cross-company `GET /api/companies/:id` returns 404; list contains only the session company |
+| Customer responses exclude internal fields | PASS | Customer list/detail keys are exactly `id`, `customerCode`, `shortName`, `countryAlpha3`, `status`; seeded `internalNickname` and `assignedSalesUserId` values are absent from the serialized body, while admin/sales responses retain them |
 | Sales sees only assigned companies | PASS | `GET /api/sales/companies` and `GET /api/companies` return only assigned companies |
+| Sales writes own customers | PASS | `POST /api/sales/companies/:id/acknowledge` succeeds for the assigned salesperson and audits |
+| Sales cannot write another salesperson's customer | PASS | 403 with no state change and no success audit |
 | Admin supervises sales data | PASS | `sales.read_all` grants read scope across companies |
-| Admin sales write needs extra permission | PASS | Without `sales.write`, `POST /api/sales/companies/:id/acknowledge` returns 403; with `sales.write` it succeeds and audits |
+| Admin sales write needs extra permission | PASS | Ordinary admin receives 403; an admin holding `sales_writer` succeeds and audits |
 | Audit logs limited to management | PASS | Customers and sales users receive 403; `audit.read` holders succeed |
 | Unauthenticated API access | PASS | 401 `authentication_required` on every business route |
 
@@ -56,7 +61,7 @@ All checks are enforced in the API, not by frontend visibility.
 - Enumeration resistance: unknown usernames still run a dummy scrypt verification and return the same generic error.
 - Sessions: 32-byte random token, only SHA-256 hash stored; sliding idle expiry and absolute expiry; session revoked and cookie cleared on logout, password change, user suspension or company suspension.
 - First login: session is restricted to session/change-password/logout; business routes return 403 `password_change_required`; changing the password revokes all prior sessions and issues a new one.
-- CSRF: `aoking_csrf` readable cookie + `X-CSRF-Token` header, timing-safe compare, required on login, logout, password change and all admin/sales writes.
+- CSRF: `aoking_csrf` readable cookie + `X-CSRF-Token` header, timing-safe compare. Enforced at router level for every POST/PUT/PATCH/DELETE under `/api/auth`, `/api/admin` and `/api/sales`; missing or forged tokens return 403 `csrf_failed` before any handler, database write or success audit.
 - Internal idle timeout is 2 hours. Customer idle/absolute durations are configurable (`CUSTOMER_SESSION_IDLE_HOURS`, `CUSTOMER_SESSION_ABSOLUTE_DAYS`) and are deliberately **not frozen**; Owner approval is required.
 
 ## 5. Runtime and migration database roles
@@ -89,19 +94,27 @@ Local reproduction: `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aoking_runti
 | `npm run api:lint` | PASS |
 | `npm run api:build` | PASS |
 | `npm run api:test` | 4 files, **14 passed** |
-| `npm run api:test:db` | 2 files, **17 passed** (6 infrastructure + 11 auth/RBAC) |
+| `npm run api:test:db` | 2 files, **19 passed** (6 infrastructure + 13 auth/RBAC) |
 | `npm run build` | PASS |
 | `npm run verify:assets` | PASS (4 hashed images, no `/src/assets/images`) |
 | `npm run test:e2e` | **90 passed / 18 skipped** |
 | `npm run test:e2e:preview` | **1 passed** |
 | `bash scripts/test-smoke-isolation.sh` | PASS (see §8) |
-| `docker compose up -d --build --wait` (default project) | PASS — `db`, `api`, `web` healthy; migrations 001+002 |
+| `docker compose up -d --build --wait` (default project) | PASS — `db`, `api`, `web` healthy; migrations 001+002+003 |
 | Runtime role `CREATE TABLE` (Docker) | PASS — `permission denied` |
 | Admin CLI bootstrap | PASS — created internal admin with a supplied password, no default/fixed password |
 | End-to-end through Caddy | PASS — admin login → create `C000999` → customer temp login → 403 first-change gate → change password → own-company access |
 | React real-auth Playwright | PASS |
 
-Integration suite coverage (11 auth/RBAC tests): login/session/logout, CSRF rejection, cross-company isolation, sales assignment scope, admin sales-read vs sales-write, first-login forced change, suspended user and suspended company session revocation, internal idle expiry, login rate limiting, company/subaccount/brand creation with no plaintext password persistence, and runtime-role DDL denial.
+Integration suite coverage (13 auth/RBAC tests): login/session/logout, CSRF rejection for login and for **every** admin/sales write (missing and forged token, asserting unchanged database state and audit count), the customer-safe DTO with a seeded non-null internal nickname and assignment, cross-company isolation and 404, sales assignment scope, the sales/admin sales-write matrix, first-login forced change, suspended user and suspended company session revocation, internal idle expiry, login rate limiting, company/subaccount/brand creation with no plaintext password persistence, runtime-role DDL denial, and representative read/write operations through a real provisioned runtime connection.
+
+## 7a. Review fixes (P0-01, P0-02, P0-03)
+
+| Finding | Fix | Counterexample evidence |
+| --- | --- | --- |
+| P0-01 admin/sales writes lacked CSRF | `requireCsrfForUnsafeMethods()` mounted on the `/api/admin` and `/api/sales` routers; all POST/PUT/PATCH/DELETE are checked before handlers | For company creation, subaccount creation, company status, customer status, brand grant, sales assignment, sales acknowledge: missing header and forged header each return 403 `csrf_failed`; company/account counts, statuses, assignment and brand grant are unchanged and no success audit row is added |
+| P0-02 customer DTO leaked internal fields | Separate `CustomerCompanyDto` allowlist used only for customer sessions; internal `CompanyDto` retained for sales/admin | Customer list/detail contain exactly the five allowlisted keys and no `internalNickname`, `assignedSalesUserId`, nickname value or salesperson ID; admin and assigned salesperson still receive both internal fields; cross-company 404 unchanged |
+| P0-03 sales role lacked `sales.write` | Additive migration `003_sales_write_scope.sql` grants `sales.write` to `sales`; scope check still requires assignment; admin default remains read-only | Salesperson writes own customer (200 + audit), another salesperson's customer (403, no audit), ordinary admin (403), admin with `sales_writer` (200 + audit) |
 
 Destructive database tests ran only against the isolated `aoking_direct_test` database on `127.0.0.1:55433` with the `aoking_test` user and the exact safety gate (`NODE_ENV=test`, `TEST_DATABASE_DESTRUCTIVE=yes`) validated before any connection.
 
@@ -118,17 +131,18 @@ Destructive database tests ran only against the isolated `aoking_direct_test` da
 - owner and runtime passwords absent from the API image;
 - restore now re-provisions the runtime role and waits for `/api/ready` 200.
 
-Actual result: **PASS** — `All isolated Phase 4B-01/4B-02 compose checks passed.` followed by `Smoke isolation regression PASSED: polluted parent env did not redirect the smoke; production volume, simulated backup sentinel and real backups were untouched.` The restore step printed `Migrations complete: 0 applied, 2 skipped.` and `Runtime role provisioned: aoking_runtime_smoke`, and `/api/ready` returned 200 afterwards.
+Actual result: **PASS** — `All isolated Phase 4B-01/4B-02 compose checks passed.` followed by `Smoke isolation regression PASSED: polluted parent env did not redirect the smoke; production volume, simulated backup sentinel and real backups were untouched.` The restore step printed `Migrations complete: 0 applied, 3 skipped.` and `Runtime role provisioned: aoking_runtime_smoke`, and `/api/ready` returned 200 afterwards.
 
 ## 9. Owner decisions still pending
 
 1. Final customer session idle/absolute duration (implementation is configurable; the defaults are not an approval).
 2. Final password policy (technical baseline: 12–128 characters, at least one letter and one number, must not contain the username).
 3. How `sales.write` is granted to an admin in production (currently CLI `--sales-writer` or a controlled DB grant; no approval UI).
-4. Audit retention and immutability design.
-5. Brand catalogue management beyond the AOKING reference brand.
-6. Company suspension must cancel future PENDING orders — the contract is recorded, implementation belongs to the order module.
-7. Internal user lifecycle and password reset UI.
+4. Technical audit protection: the 5-year retention duration is already frozen business policy; append-only protection, recoverability and the mechanism that enforces the retention window are still unimplemented.
+5. Trusted-proxy hop configuration before public rollout (`TRUST_PROXY=0` behind Caddy makes client IPs share the proxy address for login-attempt keys; spoofed `X-Forwarded-For` must be tested before enabling trust).
+6. Brand catalogue management beyond the AOKING reference brand.
+7. Company suspension must cancel future PENDING orders — the contract is recorded, implementation belongs to the order module.
+8. Internal user lifecycle and password reset UI.
 
 ## 10. Not run / environment-limited
 
@@ -153,4 +167,4 @@ Actual result: **PASS** — `All isolated Phase 4B-01/4B-02 compose checks passe
 
 ## 12. CI
 
-CI for this branch runs the three jobs in `.github/workflows/ci.yml`: `local-prototype`, `backend-foundation` (includes the 17 database integration tests) and `docker-smoke`. Push and PR run links are recorded in the PR body after the first push.
+CI for this branch runs the three jobs in `.github/workflows/ci.yml`: `local-prototype`, `backend-foundation` (includes the 19 database integration tests) and `docker-smoke`. Push and PR run links for the current head are recorded in the PR body.

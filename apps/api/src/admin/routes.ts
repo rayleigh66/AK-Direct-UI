@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { DbPool } from '../db/pool.js';
 import { listAuditLogs } from '../audit/audit.js';
 import { asyncHandler, HttpError } from '../http/errors.js';
+import { requireCsrfForUnsafeMethods } from '../http/csrf.js';
 import {
   requireAuth,
   requirePasswordChanged,
@@ -59,7 +60,13 @@ function stringArray(value: unknown): string[] | undefined {
 
 export function createAdminRouter(pool: DbPool, config: AuthConfig): Router {
   const router = Router();
-  router.use(requireAuth(pool, config), requirePasswordChanged);
+  // Every POST/PUT/PATCH/DELETE under /api/admin must pass the double-submit
+  // CSRF check before authentication state or data access is evaluated.
+  router.use(
+    requireAuth(pool, config),
+    requirePasswordChanged,
+    requireCsrfForUnsafeMethods(config.cookieSecure)
+  );
 
   router.get(
     '/companies',

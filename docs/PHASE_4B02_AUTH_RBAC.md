@@ -36,25 +36,31 @@ Not implemented: order lifecycle, inventory reservation, cart, WMS, product/cata
 
 The only seeded business reference data is the AOKING brand and the role/permission catalogue. No customers, customer accounts, internal users, passwords, products, inventory or orders are seeded.
 
-`system_metadata.schema_version` is `4b02`; readiness requires migration `002_auth_rbac.sql`.
+`system_metadata.schema_version` is `4b02`; readiness requires the latest migration `003_sales_write_scope.sql`. That additive migration grants `sales.write` to the `sales` role (scoped by assignment in the API) and leaves `002_auth_rbac.sql` unchanged so its checksum stays valid.
 
 ## 3. Roles and data scope
 
 | Role | Permissions |
 | --- | --- |
 | `admin` | `companies.manage`, `accounts.manage`, `brands.manage`, `catalog.manage`, `inventory.manage`, `promotions.manage`, `audit.read`, `sales.read_all` |
-| `sales` | `sales.read_assigned` |
-| `sales_writer` | `sales.write` (extra grant; not assigned to admins by default) |
+| `sales` | `sales.read_assigned`, `sales.write` — the write permission is always narrowed to companies assigned to that salesperson |
+| `sales_writer` | `sales.write` (extra grant for administrators; not assigned to the admin role by default) |
 | `auditor` | `audit.read` |
 | customer | Implicit `customer.self`; only own company |
+
+The ordinary `sales` role receives `sales.write` through the additive migration `003_sales_write_scope.sql` rather than by editing the already-applied `002_auth_rbac.sql`, so migration checksums stay valid. The API data-scope check is independent of the permission: a sales user can write only a company whose `assigned_sales_user_id` matches their account, and a denial is a 403 with no state change and no success audit.
 
 Server-side rules:
 
 - Customer company resources are limited to the session company; another company returns 404.
-- Sales users see/read only companies where `assigned_sales_user_id` matches their internal user ID.
-- Admin keeps `sales.read_all` oversight, but `POST /api/sales/companies/:id/acknowledge` (the Phase 4B-02 sales-write probe) requires the separate `sales.write` permission.
+- Sales users see/read/write only companies where `assigned_sales_user_id` matches their internal user ID.
+- Admin keeps `sales.read_all` oversight, but sales operational writes (`POST /api/sales/companies/:id/acknowledge` in this phase) require the separate `sales.write` permission, granted to an administrator only through `sales_writer`/an explicit grant.
 - Audit logs require `audit.read`; customers and sales users are rejected.
 - All checks are enforced by the API, not by frontend visibility.
+
+### Customer-safe company DTO
+
+Customers never receive the internal company projection. `GET /api/companies` and `GET /api/companies/:id` return an explicit allowlist containing only `id`, `customerCode`, `shortName`, `countryAlpha3` and `status`. Internal-only fields such as `internalNickname`, `assignedSalesUserId` and management timestamps are absent from the serialized response. Sales and admin responses keep the internal projection according to their read scope; an out-of-scope company still returns 404 for customers and 403 for internal users.
 
 ## 4. Authentication and sessions
 
@@ -62,7 +68,7 @@ Server-side rules:
 - Initial passwords are generated with `crypto.randomInt` from a 16+ character alphabet and returned once in the admin creation response. They are never persisted in plaintext or audit details.
 - Login failures return one generic message; unknown users still run a dummy hash comparison. Repeated failures are rate-limited in PostgreSQL (default 5 attempts / 15-minute window / 15-minute lock, configurable).
 - Session tokens are random 32-byte values; only their SHA-256 hash is stored. Cookie `aoking_session` is HttpOnly, SameSite=Lax, Secure when configured, and rotated on login/password change.
-- CSRF uses a readable `aoking_csrf` double-submit cookie plus `X-CSRF-Token`; login, logout, password change and all admin/sales writes require it.
+- CSRF uses a readable `aoking_csrf` double-submit cookie plus `X-CSRF-Token`. The check is applied at router level to **every** POST/PUT/PATCH/DELETE under `/api/auth`, `/api/admin` and `/api/sales`; a missing or mismatched token returns 403 `csrf_failed` before any handler, database write or success audit.
 - First-login accounts receive a session that can only call session/change-password/logout; business routes return `403 password_change_required` until the password is changed. Changing the password revokes all prior sessions and issues a new one.
 - Internal idle timeout is 2 hours (configurable within a bounded range). Customer idle/absolute durations are configurable and not frozen by the implementation:
   - `CUSTOMER_SESSION_IDLE_HOURS` default 24
@@ -116,7 +122,7 @@ The `/api/sales/companies/:id/acknowledge` route is intentionally a minimal RBAC
 - The runtime role has SELECT on reference/auth tables, limited DML on companies/users/brand grants/sessions/login attempts, INSERT on audit logs, and **no DDL**. Database connection, schema usage, table grants and role creation are explicit.
 - The API never receives the owner/migration URL.
 - Future migrations must add/update runtime grants for new tables; this is a required migration-review step.
-- Least-privilege separation is verified by an integration test and the Docker smoke test (runtime role gets `permission denied` on `CREATE TABLE`).
+- Least-privilege separation is verified by integration tests and the Docker smoke test (runtime role gets `permission denied` on `CREATE TABLE`). The integration suite runs representative customer reads and admin/sales writes (company creation, subaccount creation, brand grant, suspension/reactivation, sales acknowledge, audit read) through a real provisioned runtime connection, not only through the owner pool.
 
 ## 8. React integration
 
@@ -140,7 +146,9 @@ npm run test:e2e:preview
 bash scripts/test-smoke-isolation.sh
 ```
 
-The auth integration suite covers cross-company isolation, sales assignment, unauthorized API rejection, admin sales-write permission, first-login password change, suspended users/companies, idle session expiry, CSRF, login rate limiting, password non-leak, company/account creation, brand grants and runtime-role DDL denial.
+The auth integration suite covers cross-company isolation, the customer-safe company DTO (seeded non-null internal nickname and sales assignment must not appear in customer JSON), sales assignment, unauthorized API rejection, the sales/admin sales-write matrix, missing and forged CSRF tokens on every admin/sales write (asserting 403 with unchanged database state and no success audit), first-login password change, suspended users/companies, idle session expiry, login rate limiting, password non-leak, company/account creation, brand grants, runtime-role DDL denial and representative CRUD through a real provisioned runtime connection.
+
+Note the CSRF negative tests and the DTO tests were added after the first review round; the earlier suite supplied valid CSRF headers and therefore did not prove that a missing token is rejected.
 
 ## 10. Owner decisions still pending
 

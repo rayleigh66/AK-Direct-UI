@@ -329,6 +329,198 @@ describeDb('authentication, RBAC and session isolation', () => {
     expect((await a.agent.get('/api/admin/audit-logs')).status).toBe(403);
   });
 
+  it('returns an allowlisted customer DTO without internal management fields', async () => {
+    const nickname = 'INTERNAL-ONLY NICKNAME 7f3a';
+    await pool.query('UPDATE customer_companies SET internal_nickname = $2 WHERE id = $1', [
+      companyAId,
+      nickname,
+    ]);
+
+    const customer = await loggedInAgent('AK000101A');
+    const list = await customer.agent.get('/api/companies');
+    expect(list.status).toBe(200);
+    expect(list.body.companies).toHaveLength(1);
+    const listCompany = list.body.companies[0];
+    expect(Object.keys(listCompany).sort()).toEqual([
+      'countryAlpha3',
+      'customerCode',
+      'id',
+      'shortName',
+      'status',
+    ]);
+    expect(JSON.stringify(list.body)).not.toContain('internalNickname');
+    expect(JSON.stringify(list.body)).not.toContain('assignedSalesUserId');
+    expect(JSON.stringify(list.body)).not.toContain(nickname);
+    expect(JSON.stringify(list.body)).not.toContain(sales1Id);
+
+    const detail = await customer.agent.get(`/api/companies/${companyAId}`);
+    expect(detail.status).toBe(200);
+    expect(Object.keys(detail.body.company).sort()).toEqual([
+      'countryAlpha3',
+      'customerCode',
+      'id',
+      'shortName',
+      'status',
+    ]);
+    expect(JSON.stringify(detail.body)).not.toContain('internalNickname');
+    expect(JSON.stringify(detail.body)).not.toContain('assignedSalesUserId');
+    expect(JSON.stringify(detail.body)).not.toContain(nickname);
+    expect(JSON.stringify(detail.body)).not.toContain(sales1Id);
+
+    // Cross-company access still behaves as not found.
+    expect((await customer.agent.get(`/api/companies/${companyBId}`)).status).toBe(404);
+
+    // Authorized internal roles still receive the internal projection.
+    const sales1 = await loggedInAgent('sales.one@example.test');
+    const sales2 = await loggedInAgent('sales.two@example.test');
+    const admin = await loggedInAgent('admin.one@example.test');
+    const salesDetail = await sales1.agent.get(`/api/sales/companies/${companyAId}`);
+    expect(salesDetail.status).toBe(200);
+    expect(salesDetail.body.company.internalNickname).toBe(nickname);
+    expect(salesDetail.body.company.assignedSalesUserId).toBe(sales1Id);
+    expect((await sales2.agent.get(`/api/sales/companies/${companyAId}`)).status).toBe(403);
+    const adminDetail = await admin.agent.get(`/api/admin/companies/${companyAId}`);
+    expect(adminDetail.status).toBe(200);
+    expect(adminDetail.body.company.internalNickname).toBe(nickname);
+    expect(adminDetail.body.company.assignedSalesUserId).toBe(sales1Id);
+  });
+
+  it('rejects missing or forged CSRF tokens on admin and sales writes without side effects', async () => {
+    const admin = await loggedInAgent('admin.one@example.test');
+    const writer = await loggedInAgent('admin.writer@example.test');
+
+    const actionFilter = [
+      'CREATE_COMPANY',
+      'CREATE_CUSTOMER_USER',
+      'SUSPEND_COMPANY',
+      'REACTIVATE_COMPANY',
+      'GRANT_BRAND',
+      'REVOKE_BRAND',
+      'ASSIGN_SALES',
+      'SUSPEND_CUSTOMER',
+      'REACTIVATE_CUSTOMER',
+      'SALES_WRITE_ACKNOWLEDGED',
+    ];
+
+    const snapshot = async () => {
+      const company = await pool.query<{
+        status: string;
+        assigned_sales_user_id: string | null;
+        account_count: string;
+      }>(
+        `SELECT c.status, c.assigned_sales_user_id,
+                (SELECT count(*)::text FROM customer_users u WHERE u.company_id = c.id) AS account_count
+         FROM customer_companies c WHERE c.id = $1`,
+        [companyBId]
+      );
+      const customerB = await pool.query<{ status: string }>(
+        'SELECT status FROM customer_users WHERE id = $1',
+        [customerBId]
+      );
+      const grant = await pool.query(
+        "SELECT 1 FROM brand_grants WHERE company_id = $1 AND brand_id = 'brand-voyager'",
+        [companyBId]
+      );
+      const created = await pool.query(
+        "SELECT 1 FROM customer_companies WHERE customer_code = 'C000888'"
+      );
+      const assigned = await pool.query<{ assigned_sales_user_id: string | null }>(
+        'SELECT assigned_sales_user_id FROM customer_companies WHERE id = $1',
+        [companyAId]
+      );
+      const audit = await pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM audit_logs WHERE action = ANY($1::text[])`,
+        [actionFilter]
+      );
+      return {
+        companyStatus: company.rows[0]?.status,
+        companyAccounts: company.rows[0]?.account_count,
+        companyAssignment: company.rows[0]?.assigned_sales_user_id,
+        customerStatus: customerB.rows[0]?.status,
+        brandGranted: grant.rowCount,
+        createdCompany: created.rowCount,
+        assignedSales: assigned.rows[0]?.assigned_sales_user_id,
+        auditCount: audit.rows[0]?.count,
+      };
+    };
+
+    const before = await snapshot();
+
+    const attempts: Array<{ method: 'post' | 'patch' | 'put'; path: string; body: unknown }> = [
+      {
+        method: 'post',
+        path: '/api/admin/companies',
+        body: { customerCode: 'C000888', shortName: 'CSRF Probe', countryAlpha3: 'USA' },
+      },
+      { method: 'post', path: `/api/admin/companies/${companyBId}/accounts`, body: {} },
+      { method: 'patch', path: `/api/admin/companies/${companyBId}/status`, body: { status: 'suspended' } },
+      { method: 'patch', path: `/api/admin/customers/${customerBId}/status`, body: { status: 'suspended' } },
+      {
+        method: 'put',
+        path: `/api/admin/companies/${companyBId}/brands/brand-voyager`,
+        body: { granted: true },
+      },
+      {
+        method: 'patch',
+        path: `/api/admin/companies/${companyAId}/sales-assignment`,
+        body: { salesUserId: sales2Id },
+      },
+    ];
+
+    const sendAttempt = (
+      agent: TestAgent,
+      method: 'post' | 'patch' | 'put',
+      path: string,
+      body: unknown,
+      token?: string
+    ) => {
+      const call =
+        method === 'post' ? agent.post(path) : method === 'patch' ? agent.patch(path) : agent.put(path);
+      return (token === undefined ? call : call.set('X-CSRF-Token', token)).send(body as object);
+    };
+
+    for (const attempt of attempts) {
+      // Missing header: the double-submit cookie alone must not authorize.
+      const missing = await sendAttempt(
+        admin.agent,
+        attempt.method,
+        attempt.path,
+        attempt.body
+      );
+      expect(missing.status).toBe(403);
+      expect(missing.body.error.code).toBe('csrf_failed');
+
+      // Mismatched header: a forged token must not authorize either.
+      const forged = await sendAttempt(
+        admin.agent,
+        attempt.method,
+        attempt.path,
+        attempt.body,
+        'forged-token'
+      );
+      expect(forged.status).toBe(403);
+      expect(forged.body.error.code).toBe('csrf_failed');
+    }
+
+    // Sales write without CSRF, even with the extra admin grant and read-all.
+    for (const agent of [admin.agent, writer.agent]) {
+      const token = agent === admin.agent ? admin.csrfToken : writer.csrfToken;
+      const missing = await agent
+        .post(`/api/sales/companies/${companyAId}/acknowledge`)
+        .send({});
+      expect(missing.status).toBe(403);
+      expect(missing.body.error.code).toBe('csrf_failed');
+      const forged = await agent
+        .post(`/api/sales/companies/${companyAId}/acknowledge`)
+        .set('X-CSRF-Token', `${token}-forged`)
+        .send({});
+      expect(forged.status).toBe(403);
+      expect(forged.body.error.code).toBe('csrf_failed');
+    }
+
+    expect(await snapshot()).toEqual(before);
+  });
+
   it('scopes sales to assigned companies and lets admins read all', async () => {
     const sales1 = await loggedInAgent('sales.one@example.test');
     const sales2 = await loggedInAgent('sales.two@example.test');
@@ -374,30 +566,77 @@ describeDb('authentication, RBAC and session isolation', () => {
     );
   });
 
-  it('requires an extra sales.write grant for admin sales writes', async () => {
+  it('lets sales write only their own customers and requires an extra grant for admins', async () => {
     const admin = await loggedInAgent('admin.one@example.test');
     const writer = await loggedInAgent('admin.writer@example.test');
-    const sales = await loggedInAgent('sales.one@example.test');
+    const sales1 = await loggedInAgent('sales.one@example.test');
+    const sales2 = await loggedInAgent('sales.two@example.test');
 
+    const auditCount = async () =>
+      (
+        await pool.query<{ count: string }>(
+          "SELECT count(*)::text AS count FROM audit_logs WHERE action = 'SALES_WRITE_ACKNOWLEDGED'"
+        )
+      ).rows[0].count;
+
+    const before = await auditCount();
+
+    // Ordinary admin: supervision only, no sales operational write.
     expect(
-      (await post(admin.agent, `/api/sales/companies/${companyAId}/acknowledge`, {}, admin.csrfToken))
-        .status
+      (
+        await post(
+          admin.agent,
+          `/api/sales/companies/${companyAId}/acknowledge`,
+          {},
+          admin.csrfToken
+        )
+      ).status
     ).toBe(403);
+    // Sales user writing another salesperson's customer is still denied.
     expect(
-      (await post(sales.agent, `/api/sales/companies/${companyAId}/acknowledge`, {}, sales.csrfToken))
-        .status
+      (
+        await post(
+          sales2.agent,
+          `/api/sales/companies/${companyAId}/acknowledge`,
+          {},
+          sales2.csrfToken
+        )
+      ).status
     ).toBe(403);
+    expect(await auditCount()).toBe(before);
+
+    // Sales role can write its own assigned customer without an extra grant.
     expect(
-      (await post(writer.agent, `/api/sales/companies/${companyAId}/acknowledge`, {}, writer.csrfToken))
-        .status
+      (
+        await post(
+          sales1.agent,
+          `/api/sales/companies/${companyAId}/acknowledge`,
+          {},
+          sales1.csrfToken
+        )
+      ).status
     ).toBe(200);
+    expect(Number(await auditCount())).toBe(Number(before) + 1);
+
+    // A separately authorized admin may perform the sales write.
+    expect(
+      (
+        await post(
+          writer.agent,
+          `/api/sales/companies/${companyAId}/acknowledge`,
+          {},
+          writer.csrfToken
+        )
+      ).status
+    ).toBe(200);
+    expect(Number(await auditCount())).toBe(Number(before) + 2);
 
     const audit = await admin.agent.get('/api/admin/audit-logs');
     expect(audit.status).toBe(200);
-    expect(audit.body.logs.some((log: { action: string }) => log.action === 'SALES_WRITE_ACKNOWLEDGED')).toBe(
-      true
-    );
-    expect((await sales.agent.get('/api/admin/audit-logs')).status).toBe(403);
+    expect(
+      audit.body.logs.some((log: { action: string }) => log.action === 'SALES_WRITE_ACKNOWLEDGED')
+    ).toBe(true);
+    expect((await sales1.agent.get('/api/admin/audit-logs')).status).toBe(403);
   });
 
   it('forces first-login password change before business access', async () => {
@@ -619,10 +858,97 @@ describeDb('authentication, RBAC and session isolation', () => {
         checkReadiness: () => checkReadiness(runtimePool),
         auth: { pool: runtimePool, config },
       });
+      // Customer session and read path through the restricted role.
       const runtimeAgent = request.agent(runtimeApp);
       const runtimeLogin = await login(runtimeAgent, 'AK000101A', PASSWORD);
       expect(runtimeLogin.response.status).toBe(200);
-      expect((await runtimeAgent.get('/api/companies')).status).toBe(200);
+      const runtimeCompanies = await runtimeAgent.get('/api/companies');
+      expect(runtimeCompanies.status).toBe(200);
+      expect(JSON.stringify(runtimeCompanies.body)).not.toContain('internalNickname');
+
+      // Internal admin write path through the restricted role: company,
+      // subaccount, brand grant, suspension and reactivation.
+      const runtimeAdmin = request.agent(runtimeApp);
+      const adminLogin = await login(runtimeAdmin, 'admin.one@example.test', PASSWORD);
+      expect(adminLogin.response.status).toBe(200);
+      const adminToken = adminLogin.csrfToken;
+
+      const created = await post(
+        runtimeAdmin,
+        '/api/admin/companies',
+        {
+          customerCode: 'C000778',
+          shortName: 'Runtime Company',
+          countryAlpha3: 'USA',
+          assignedSalesUserId: sales1Id,
+          brandIds: ['brand-aoking'],
+        },
+        adminToken
+      );
+      expect(created.status).toBe(201);
+      const runtimeCompanyId = (
+        await pool.query<{ id: string }>(
+          "SELECT id FROM customer_companies WHERE customer_code = 'C000778'"
+        )
+      ).rows[0].id;
+
+      const runtimeAccount = await post(
+        runtimeAdmin,
+        `/api/admin/companies/${runtimeCompanyId}/accounts`,
+        {},
+        adminToken
+      );
+      expect(runtimeAccount.status).toBe(201);
+      expect(runtimeAccount.body.username).toBe('AK000778B');
+
+      expect(
+        (
+          await put(
+            runtimeAdmin,
+            `/api/admin/companies/${runtimeCompanyId}/brands/brand-voyager`,
+            { granted: true },
+            adminToken
+          )
+        ).status
+      ).toBe(200);
+
+      expect(
+        (
+          await patch(
+            runtimeAdmin,
+            `/api/admin/companies/${runtimeCompanyId}/status`,
+            { status: 'suspended' },
+            adminToken
+          )
+        ).status
+      ).toBe(200);
+      expect(
+        (
+          await patch(
+            runtimeAdmin,
+            `/api/admin/companies/${runtimeCompanyId}/status`,
+            { status: 'active' },
+            adminToken
+          )
+        ).status
+      ).toBe(200);
+
+      expect((await runtimeAdmin.get('/api/admin/audit-logs')).status).toBe(200);
+
+      // Sales write for the assigned customer through the restricted role.
+      const runtimeSales = request.agent(runtimeApp);
+      const salesLogin = await login(runtimeSales, 'sales.one@example.test', PASSWORD);
+      expect(salesLogin.response.status).toBe(200);
+      expect(
+        (
+          await post(
+            runtimeSales,
+            `/api/sales/companies/${companyAId}/acknowledge`,
+            {},
+            salesLogin.csrfToken
+          )
+        ).status
+      ).toBe(200);
     } finally {
       await runtimePool.end();
       const owner = new Client({ connectionString: databaseUrl() });

@@ -48,12 +48,20 @@ describeDb('PostgreSQL migrations and readiness', () => {
 
   it('applies migrations once and is idempotent on a second run', async () => {
     const first = await runMigrations(databaseUrl());
-    expect(first.applied).toEqual(['001_infrastructure.sql', '002_auth_rbac.sql']);
+    expect(first.applied).toEqual([
+      '001_infrastructure.sql',
+      '002_auth_rbac.sql',
+      '003_sales_write_scope.sql',
+    ]);
     expect(first.skipped).toEqual([]);
 
     const second = await runMigrations(databaseUrl());
     expect(second.applied).toEqual([]);
-    expect(second.skipped).toEqual(['001_infrastructure.sql', '002_auth_rbac.sql']);
+    expect(second.skipped).toEqual([
+      '001_infrastructure.sql',
+      '002_auth_rbac.sql',
+      '003_sales_write_scope.sql',
+    ]);
 
     const client = new Client({ connectionString: databaseUrl() });
     await client.connect();
@@ -65,7 +73,7 @@ describeDb('PostgreSQL migrations and readiness', () => {
     );
     await client.end();
 
-    expect(migrations.rowCount).toBe(2);
+    expect(migrations.rowCount).toBe(3);
     expect(migrations.rows[0]?.checksum).toMatch(/^[a-f0-9]{64}$/);
     expect(metadata.rows[0]?.value).toBe('4b02');
   }, 20_000);
@@ -80,6 +88,10 @@ describeDb('PostgreSQL migrations and readiness', () => {
       await copyFile(
         join(realMigrationsDir, '002_auth_rbac.sql'),
         join(tempDir, '002_auth_rbac.sql')
+      );
+      await copyFile(
+        join(realMigrationsDir, '003_sales_write_scope.sql'),
+        join(tempDir, '003_sales_write_scope.sql')
       );
       const probe = join(tempDir, '999_checksum_probe.sql');
       await writeFile(probe, 'CREATE TABLE checksum_probe (id integer PRIMARY KEY);');

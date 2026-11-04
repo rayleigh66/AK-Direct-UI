@@ -18,6 +18,7 @@ export interface CompanyRow {
   updated_at: Date;
 }
 
+/** Internal management DTO. Never return this shape to a customer session. */
 export interface CompanyDto {
   id: string;
   customerCode: string;
@@ -29,6 +30,20 @@ export interface CompanyDto {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Customer-safe projection. This is an explicit allowlist: internal nickname,
+ * salesperson assignment, timestamps and any future internal field are absent.
+ */
+export interface CustomerCompanyDto {
+  id: string;
+  customerCode: string;
+  shortName: string;
+  countryAlpha3: string;
+  status: 'active' | 'suspended';
+}
+
+export type CompanyViewDto = CompanyDto | CustomerCompanyDto;
 
 const CUSTOMER_CODE = /^C[0-9]{6}$/;
 const COUNTRY_CODE = /^[A-Z]{3}$/;
@@ -45,6 +60,16 @@ function companyDto(row: CompanyRow): CompanyDto {
     status: row.status,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+function customerCompanyDto(row: CompanyRow): CustomerCompanyDto {
+  return {
+    id: row.id,
+    customerCode: row.customer_code,
+    shortName: row.short_name,
+    countryAlpha3: row.country_alpha3,
+    status: row.status,
   };
 }
 
@@ -274,12 +299,12 @@ export async function listAllCompanies(pool: DbPool): Promise<CompanyDto[]> {
 export async function listCompaniesForAuth(
   pool: DbPool,
   auth: AuthContext
-): Promise<CompanyDto[]> {
+): Promise<CompanyViewDto[]> {
   if (auth.user.type === 'customer' && auth.user.companyId) {
     const result = await pool.query<CompanyRow>('SELECT * FROM customer_companies WHERE id = $1', [
       auth.user.companyId,
     ]);
-    return result.rows.map(companyDto);
+    return result.rows.map(customerCompanyDto);
   }
   if (auth.user.permissions.includes('sales.read_all')) {
     return listAllCompanies(pool);
@@ -298,7 +323,7 @@ export async function getCompanyForAuth(
   pool: DbPool,
   auth: AuthContext,
   companyId: string
-): Promise<CompanyDto> {
+): Promise<CompanyViewDto> {
   const result = await pool.query<CompanyRow>('SELECT * FROM customer_companies WHERE id = $1', [
     companyId,
   ]);
@@ -309,7 +334,7 @@ export async function getCompanyForAuth(
     if (company.id !== auth.user.companyId) {
       throw new HttpError(404, 'company_not_found', 'Company not found.');
     }
-    return companyDto(company);
+    return customerCompanyDto(company);
   }
 
   if (auth.user.permissions.includes('sales.read_all')) return companyDto(company);

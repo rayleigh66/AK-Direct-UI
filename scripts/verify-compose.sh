@@ -244,13 +244,13 @@ wait_http "$BASE_URL/api/ready" 200 60
 
 step "T05: migrations are idempotent"
 MIGRATION_COUNT="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT" = "2" ] || {
-  echo "Expected 2 migration rows, got $MIGRATION_COUNT" >&2
+[ "$MIGRATION_COUNT" = "3" ] || {
+  echo "Expected 3 migration rows, got $MIGRATION_COUNT" >&2
   exit 1
 }
 compose run --rm migrate
 MIGRATION_COUNT_AGAIN="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT_AGAIN" = "2" ] || {
+[ "$MIGRATION_COUNT_AGAIN" = "3" ] || {
   echo "Migration count changed after second run: $MIGRATION_COUNT_AGAIN" >&2
   exit 1
 }
@@ -292,7 +292,7 @@ if compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0
   exit 1
 fi
 RUNTIME_MIGRATION_COUNT="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME"   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RUNTIME_MIGRATION_COUNT" = "2" ] || {
+[ "$RUNTIME_MIGRATION_COUNT" = "3" ] || {
   echo "Runtime role cannot read the expected migration metadata (got $RUNTIME_MIGRATION_COUNT)." >&2
   exit 1
 }
@@ -351,7 +351,7 @@ wait_http "$BASE_URL/api/ready" 200 60
 RESTORED_RUNTIME_CHECK="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql \
   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME" \
   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RESTORED_RUNTIME_CHECK" = "2" ]
+[ "$RESTORED_RUNTIME_CHECK" = "3" ]
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
 
 step "T12: isolated local smoke completed without cloud/production credentials"

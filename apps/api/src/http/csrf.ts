@@ -49,3 +49,20 @@ export function requireCsrf(cookieSecure: boolean) {
     next();
   };
 }
+
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Applies the double-submit check to every state-changing method so a router
+ * cannot forget it on an individual route. Safe methods pass through.
+ */
+export function requireCsrfForUnsafeMethods(cookieSecure: boolean) {
+  const check = requireCsrf(cookieSecure);
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!UNSAFE_METHODS.has(req.method.toUpperCase())) {
+      next();
+      return;
+    }
+    check(req, res, next);
+  };
+}
