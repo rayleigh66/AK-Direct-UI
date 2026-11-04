@@ -98,3 +98,9 @@ Base：`feat/react-admin-catalog`（`131b56e`）
 - 真实 iPhone Safari / Android Chrome、软键盘、系统导航与低端机性能未验收；Playwright 为浏览器模拟。
 - 主 JS 仍有约 516 KB 的 Vite chunk 警告；Excel 解析与商品管理已按需分包。
 - 角色切换只是前端模拟，不是真实账户/权限系统。
+
+## Phase 4B-03 real inventory import
+
+With `VITE_REAL_AUTH=true`, the Import tab parses CSV/XLSX locally and sends the rows to `/api/admin/inventory/import/preview`. The API re-validates every row, stores a database snapshot of old/new quantities and versions, and returns the preview. Confirming calls the commit endpoint, which locks the target rows, rejects the whole batch if anything changed (`stale_preview`), and applies all rows, movements and audit in one transaction. Repeating the confirmation returns `alreadyCommitted` without changing stock again.
+
+The Mock import described above remains the default when `VITE_REAL_AUTH=false`.

@@ -15,6 +15,7 @@ async function main() {
   const app = createApp({
     checkReadiness: () => checkReadiness(pool),
     auth: { pool, config: env },
+    mediaRoot: env.mediaRoot,
   });
   const server = app.listen(env.port, '0.0.0.0', () => {
     console.log(`AOKING Direct API listening on port ${env.port}.`);

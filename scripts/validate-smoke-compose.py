@@ -173,6 +173,27 @@ def main() -> None:
         "db data volume is not project-scoped",
     )
 
+    media_api = [
+        volume
+        for volume in (api.get("volumes") or [])
+        if str(volume.get("target", "")).rstrip("/") == "/app/media"
+    ]
+    require(len(media_api) == 1, "api must mount exactly one media volume")
+    require(media_api[0].get("type") == "volume", "api media mount must be a named volume")
+    media_source = str(media_api[0].get("source", ""))
+    resolved_media = str((volume_defs.get(media_source) or {}).get("name", media_source))
+    require(
+        args.project in resolved_media or resolved_media.startswith(args.project),
+        "media volume is not project-scoped",
+    )
+    media_backup = [
+        volume
+        for volume in (backup.get("volumes") or [])
+        if str(volume.get("target", "")).rstrip("/") == "/media"
+    ]
+    require(len(media_backup) == 1, "backup must mount the media volume")
+    require(media_backup[0].get("read_only") is True, "backup media mount must be read-only")
+
     web_ports = web.get("ports") or []
     port_80 = [port for port in web_ports if str(port.get("target")) == "80"]
     require(len(port_80) == 1, "web must publish exactly port 80")

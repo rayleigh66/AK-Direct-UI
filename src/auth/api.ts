@@ -50,28 +50,75 @@ async function fetchCsrf(force = false): Promise<string> {
   return csrfToken;
 }
 
-async function mutate<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  const send = async (token: string) =>
-    fetch(path, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': token,
-      },
-      body: JSON.stringify(body),
-    });
-
-  let response = await send(await fetchCsrf());
+async function sendWithCsrf(
+  method: string,
+  path: string,
+  build: (token: string) => RequestInit
+): Promise<Response> {
+  let response = await fetch(path, build(await fetchCsrf()));
   if (response.status === 403) {
     const parsed = (await response.clone().json().catch(() => ({}))) as {
       error?: { code?: string };
     };
     if (parsed.error?.code === 'csrf_failed') {
-      response = await send(await fetchCsrf(true));
+      response = await fetch(path, build(await fetchCsrf(true)));
     }
   }
+  return response;
+}
+
+async function mutate<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await sendWithCsrf('POST', path, token => ({
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': token,
+    },
+    body: JSON.stringify(body),
+  }));
+  return readJson<T>(response);
+}
+
+/** JSON request helper for authenticated business APIs (cookie + CSRF). */
+export async function apiJson<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown
+): Promise<T> {
+  if (method === 'GET') {
+    const response = await fetch(path, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    return readJson<T>(response);
+  }
+  const response = await sendWithCsrf(method, path, token => ({
+    method,
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': token,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }));
+  return readJson<T>(response);
+}
+
+/** Raw image upload with the same CSRF handling. */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const response = await sendWithCsrf('POST', path, token => ({
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-CSRF-Token': token,
+    },
+    body: file,
+  }));
   return readJson<T>(response);
 }
 

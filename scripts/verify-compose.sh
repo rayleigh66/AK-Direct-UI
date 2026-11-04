@@ -244,13 +244,13 @@ wait_http "$BASE_URL/api/ready" 200 60
 
 step "T05: migrations are idempotent"
 MIGRATION_COUNT="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT" = "3" ] || {
-  echo "Expected 3 migration rows, got $MIGRATION_COUNT" >&2
+[ "$MIGRATION_COUNT" = "4" ] || {
+  echo "Expected 4 migration rows, got $MIGRATION_COUNT" >&2
   exit 1
 }
 compose run --rm migrate
 MIGRATION_COUNT_AGAIN="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT_AGAIN" = "3" ] || {
+[ "$MIGRATION_COUNT_AGAIN" = "4" ] || {
   echo "Migration count changed after second run: $MIGRATION_COUNT_AGAIN" >&2
   exit 1
 }
@@ -292,7 +292,7 @@ if compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0
   exit 1
 fi
 RUNTIME_MIGRATION_COUNT="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME"   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RUNTIME_MIGRATION_COUNT" = "3" ] || {
+[ "$RUNTIME_MIGRATION_COUNT" = "4" ] || {
   echo "Runtime role cannot read the expected migration metadata (got $RUNTIME_MIGRATION_COUNT)." >&2
   exit 1
 }
@@ -315,6 +315,8 @@ compose_fail down -v >/dev/null 2>&1 || true
 step "Backup and restore test (isolated backup directory)"
 BACKUP_PROBE="restore_probe_$(date +%s)_$$"
 psql_db -c "INSERT INTO system_metadata (key, value) VALUES ('$BACKUP_PROBE', 'restored') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
+MEDIA_MARKER="smoke-media-$(date +%s)-$$"
+compose exec -T api sh -c "printf '%s' '$MEDIA_MARKER' > /app/media/smoke-media-marker.txt"
 compose exec -T backup /bin/sh /scripts/backup-container.sh
 LATEST_BACKUP="$(ls -1t "$SMOKE_BACKUP_DIR"/*.dump 2>/dev/null | head -n 1 || true)"
 [ -n "$LATEST_BACKUP" ] || {
@@ -323,6 +325,15 @@ LATEST_BACKUP="$(ls -1t "$SMOKE_BACKUP_DIR"/*.dump 2>/dev/null | head -n 1 || tr
 }
 [ "$(stat -c '%a' "$LATEST_BACKUP" 2>/dev/null || stat -f '%Lp' "$LATEST_BACKUP")" = "600" ] || {
   echo "Backup file permissions are not 600." >&2
+  exit 1
+}
+LATEST_MEDIA_BACKUP="$(ls -1t "$SMOKE_BACKUP_DIR"/*_media_*.tar.gz 2>/dev/null | head -n 1 || true)"
+[ -n "$LATEST_MEDIA_BACKUP" ] || {
+  echo "No media backup archive was created in the isolated backup directory." >&2
+  exit 1
+}
+[ "$(stat -c '%a' "$LATEST_MEDIA_BACKUP" 2>/dev/null || stat -f '%Lp' "$LATEST_MEDIA_BACKUP")" = "600" ] || {
+  echo "Media backup file permissions are not 600." >&2
   exit 1
 }
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
@@ -351,12 +362,25 @@ wait_http "$BASE_URL/api/ready" 200 60
 RESTORED_RUNTIME_CHECK="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql \
   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME" \
   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RESTORED_RUNTIME_CHECK" = "3" ]
+[ "$RESTORED_RUNTIME_CHECK" = "4" ]
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
+
+# Media files are backed up separately from PostgreSQL. Prove the archive can
+# restore an image file into the media volume.
+compose exec -T api sh -c 'rm -f /app/media/smoke-media-marker.txt'
+compose run --rm --no-deps \
+  -v "$SMOKE_BACKUP_DIR:/restore:ro" \
+  --entrypoint sh api \
+  -c "tar -xzf '/restore/$(basename "$LATEST_MEDIA_BACKUP")' -C /app/media; chown -R node:node /app/media"
+[ "$(compose exec -T api cat /app/media/smoke-media-marker.txt | tr -d '[:space:]')" = "$MEDIA_MARKER" ] || {
+  echo "Media restore did not restore the marker file." >&2
+  exit 1
+}
+compose exec -T api rm -f /app/media/smoke-media-marker.txt
 
 step "T12: isolated local smoke completed without cloud/production credentials"
 echo "Smoke project: $SMOKE_PROJECT"
 echo "Isolated backup directory: $SMOKE_BACKUP_DIR"
 
 echo
-echo "All isolated Phase 4B-01/4B-02 compose checks passed."
+echo "All isolated Phase 4B-01/4B-02/4B-03 compose checks passed."

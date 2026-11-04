@@ -122,3 +122,9 @@ Base：`feat/react-mobile-customer-ux`（`147661a`）
 - 未实现物理删除；这是有意保护历史订单/库存引用。
 - 主 JS 仍有约 500 KB 的 Vite chunk 警告；管理视图已拆分，进一步路由级拆分属于后续性能工作。
 - 真机 iPhone Safari / Android Chrome 未验收；Playwright 是浏览器模拟。
+
+## Phase 4B-03 real mode
+
+The Mock interactions above remain the default (`VITE_REAL_AUTH=false`). With `VITE_REAL_AUTH=true`, the real-auth workspace provides equivalent administration against PostgreSQL: product creation/editing/publishing, SKU management, image upload (primary/order/removal), series/tag dictionaries, warehouses, stock registration/adjustment and server-validated inventory import.
+
+Real-mode screenshots (mobile 390 / desktop 1440): `docs/ui-review/real-catalog/`. API contract and business rules: [Phase 4B-03 Catalogue & Inventory](../PHASE_4B03_CATALOG_INVENTORY.md).

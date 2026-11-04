@@ -50,7 +50,8 @@ fi
 if [ -d "$PRODUCTION_BACKUP_DIR" ]; then
   while IFS= read -r -d '' file; do
     printf '%s  %s\n' "$(hash_file "$file")" "$file"
-  done < <(find "$PRODUCTION_BACKUP_DIR" -maxdepth 1 -type f -name '*.dump' -print0) > "$MANIFEST"
+  done < <(find "$PRODUCTION_BACKUP_DIR" -maxdepth 1 -type f \
+    \( -name '*.dump' -o -name '*_media_*.tar.gz' \) -print0) > "$MANIFEST"
 else
   : > "$MANIFEST"
 fi

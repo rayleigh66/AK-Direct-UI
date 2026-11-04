@@ -8,6 +8,7 @@ export default defineConfig({
       '**/apps/api/dist/**',
       'tests/e2e/**',
       'tests/e2e-preview/**',
+      'tests/e2e-real/**',
       'apps/api/tests/integration/**',
     ],
   },

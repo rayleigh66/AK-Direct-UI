@@ -28,5 +28,23 @@ else
   exit 1
 fi
 
+# Product images live outside PostgreSQL. Back them up explicitly as a tar
+# archive so a database-only restore cannot silently lose image files.
+MEDIA_DIR="${MEDIA_DIR:-/media}"
+MEDIA_FILE="/backups/${PGDATABASE}_media_${STAMP}_$$.tar.gz"
+if [ -d "$MEDIA_DIR" ]; then
+  if tar -czf "$MEDIA_FILE" -C "$MEDIA_DIR" .; then
+    chmod 600 "$MEDIA_FILE"
+    echo "Media backup written: $MEDIA_FILE"
+  else
+    echo "Media backup failed for $MEDIA_DIR." >&2
+    rm -f "$MEDIA_FILE"
+    exit 1
+  fi
+else
+  echo "Media directory $MEDIA_DIR is not mounted; skipping media backup." >&2
+fi
+
 # Retention applies only to this backup directory; no offsite copy is claimed.
 find /backups -type f -name '*.dump' -mtime +"$RETENTION_DAYS" -delete
+find /backups -type f -name '*_media_*.tar.gz' -mtime +"$RETENTION_DAYS" -delete

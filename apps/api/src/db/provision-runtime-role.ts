@@ -98,6 +98,38 @@ export async function provisionRuntimeRole(
     await client.query(`GRANT INSERT, UPDATE, DELETE ON auth_sessions TO ${role}`);
     await client.query(`GRANT INSERT, UPDATE, DELETE ON login_attempts TO ${role}`);
     await client.query(`GRANT INSERT ON audit_logs TO ${role}`);
+
+    // Phase 4B-03 catalogue and inventory. There is deliberately no DELETE on
+    // products, SKUs, images, series, tags or warehouses: the API only
+    // publishes/unpublishes, deactivates or soft-removes. Inventory reserved
+    // stock is not writable by the API at all (column-level grants).
+    await client.query(
+      `GRANT SELECT ON series_definitions, feature_tags, products, product_images,
+        product_skus, product_feature_tags, warehouses, inventory_balances,
+        inventory_movements, inventory_import_batches, inventory_import_rows TO ${role}`
+    );
+    await client.query(
+      `GRANT INSERT, UPDATE ON series_definitions, feature_tags, products,
+        product_images, product_skus, warehouses TO ${role}`
+    );
+    await client.query(`GRANT INSERT, DELETE ON product_feature_tags TO ${role}`);
+    await client.query(
+      `GRANT INSERT (sku_id, warehouse_id, on_hand, unsellable, version, updated_at, updated_by)
+        ON inventory_balances TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (on_hand, unsellable, version, updated_at, updated_by)
+        ON inventory_balances TO ${role}`
+    );
+    await client.query(`GRANT INSERT ON inventory_movements TO ${role}`);
+    await client.query(
+      `GRANT INSERT, UPDATE (status, committed_at) ON inventory_import_batches TO ${role}`
+    );
+    await client.query(
+      `GRANT INSERT (batch_id, row_number, sku_id, warehouse_id, on_hand_new,
+        unsellable_new, on_hand_before, unsellable_before, reserved_before,
+        version_before) ON inventory_import_rows TO ${role}`
+    );
     await client.query('COMMIT');
 
     return { runtimeUser: input.runtimeUser, databaseName };

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { DbPool } from '../db/pool.js';
 import { writeAudit } from '../audit/audit.js';
+import { withTransaction } from '../db/transaction.js';
 import { HttpError } from '../http/errors.js';
 import { generateInitialPassword, hashPassword } from '../auth/password.js';
 import type { AuthContext } from '../auth/types.js';
@@ -83,21 +84,6 @@ function actor(auth: AuthContext) {
 
 export function deriveCustomerUsername(customerCode: string, letter: string): string {
   return `AK${customerCode.slice(1)}${letter}`;
-}
-
-async function withTransaction<T>(pool: DbPool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 async function validateAssignedSales(

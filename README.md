@@ -53,16 +53,33 @@ VITE_REAL_AUTH=true docker compose up -d --no-deps web
 
 The default `VITE_REAL_AUTH=false` preserves the existing Mock app and Playwright suite. See [Phase 4B-02 Authentication & RBAC](docs/PHASE_4B02_AUTH_RBAC.md) for roles, data scopes, session policy, APIs, runtime-role separation and pending Owner decisions.
 
+## Catalogue, media and inventory (Phase 4B-03)
+
+Phase 4B-03 persists products, SKUs, image metadata, series, tags, warehouses and stock in PostgreSQL, with real uploads, publishing rules, a versioned inventory ledger and an all-or-nothing CSV/XLSX import. It does **not** add orders, cart submission, order reservation, payment, shipment, WMS or promotions.
+
+- Product and SKU codes are entered manually and are unique; new products start unpublished.
+- `reserved` stock is never writable by the API until the order module exists.
+- Image files live in the `media_data` Docker volume. Database dumps **do not** contain them: the backup service also writes `*_media_*.tar.gz`, and `scripts/media-restore.sh` restores it.
+- With `VITE_REAL_AUTH=true` the app shows the real admin catalogue/inventory/import/setup workspace, the read-only sales inventory view and the customer catalogue. The default Mock UI is unchanged.
+
+```bash
+# Real-auth catalogue flow against a running stack (creates a fresh admin and customers)
+VITE_REAL_AUTH=true docker compose build web && docker compose up -d --no-deps web
+bash scripts/real-auth-e2e.sh
+```
+
+See [Phase 4B-03 Catalogue & Inventory](docs/PHASE_4B03_CATALOG_INVENTORY.md) for the API contract, media backup/restore and inventory transaction rules, and [Phase 4B-03 Acceptance](docs/PHASE_4B03_ACCEPTANCE.md) for results and pending decisions.
+
 ## Scope and limitations
 
 **This is a demonstration application, not a production ordering service.**
 
-- State, including carts, orders, stock, audit events and account flags, is stored in React memory and resets on reload.
+- In the default Mock UI, state (carts, orders, stock, audit events and account flags) is stored in React memory and resets on reload. With `VITE_REAL_AUTH=true`, products, SKUs, images, warehouses and stock are stored in PostgreSQL and survive reloads, container restarts and normal updates.
 - Role switching is a demo feature in the default Mock UI, not authentication or server-side authorization. Phase 4B-02 adds a separate real-auth gate with PostgreSQL sessions, but the Mock role switcher remains a demo-only surface; the backend enforces real authorization for its APIs.
 - Phase 4B-02 implements real password hashing, login, sessions and first-login password change in the API. The default Mock UI still simulates password reset; use `VITE_REAL_AUTH=true` to see the real auth gate. Business screens remain Mock data.
 - Stock reservation is a frontend simulation, **not an atomic database transaction** and must not be relied upon to prevent overselling.
-- The “Excel import” screen parses local `.xlsx` / `.csv` files in the browser, but only updates in-memory Mock inventory; it is not a database transaction and has no real concurrency control.
-- Prices, promotion dates, product codes, SKU images and copy are demonstration content requiring a separate PRD consistency review before production development.
+- The Mock “Excel import” screen updates in-memory Mock inventory. The real-mode import sends parsed rows to the API, which re-validates them, stores a database preview and commits all-or-nothing inside a transaction; the browser preview is never trusted.
+- Prices, promotion dates, product codes, SKU images and copy in the Mock data are demonstration content requiring a separate PRD consistency review before production development. Real-mode product/SKU data is entered by administrators.
 - The multi-warehouse reservation is an in-memory allocation mock. It plans the whole order before changing state and fails as a whole when stock is short, but it is **not an atomic database transaction** and does not guarantee isolation under concurrent users.
 - Order actions validate the current status and exact warehouse allocations. Duplicate release/payment/shipment/confirmation and repeated change approvals are rejected; approved quantity changes re-plan the entire order and leave both order and inventory unchanged on failure.
 - Whole-order payment must equal the confirmed total in integer cents; partial or excess payment is rejected and cannot enable shipment. A pending cancellation/quantity-change request also blocks payment or release until it is approved or rejected.
@@ -78,7 +95,7 @@ Do not deploy this UI as a publicly accessible system containing real customers,
 2. English-only customer-facing copy; bilingual internal-facing copy.
 3. Product management: create/edit products and SKUs, series, category, feature tags, per-color pictures, visibility.
 4. Confirm business rules against the approved AOKING Direct PRD before changing MOQ, account, promotion or order behavior.
-5. Backend authentication, permission checks and persistent sessions are introduced in Phase 4B-02; persistent business storage and safe inventory reservation remain future work.
+5. Backend authentication, permissions, sessions, catalogue, media and inventory persistence are implemented through Phase 4B-03; order-time reservation and atomic order transactions remain future work.
 6. Unit tests, CI and the reproducible npm lockfile are in place; true end-to-end mobile tests and real-device validation remain planned.
 
 ## Branch policy

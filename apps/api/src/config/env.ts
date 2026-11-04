@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 export type NodeEnvironment = 'development' | 'test' | 'production';
 
 export interface ApiEnv {
@@ -13,6 +15,7 @@ export interface ApiEnv {
   loginWindowMinutes: number;
   loginLockMinutes: number;
   trustProxy: boolean | number;
+  mediaRoot: string;
 }
 
 const NODE_ENVIRONMENTS: NodeEnvironment[] = ['development', 'test', 'production'];
@@ -87,6 +90,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
     loginWindowMinutes: positiveNumber('LOGIN_WINDOW_MINUTES', 15, 24 * 60),
     loginLockMinutes: positiveNumber('LOGIN_LOCK_MINUTES', 15, 24 * 60),
     trustProxy,
+    mediaRoot: path.resolve((source.MEDIA_ROOT ?? './media').trim() || './media'),
   };
 }
 
