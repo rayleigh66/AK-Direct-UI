@@ -3,7 +3,7 @@
 **Branch:** `feat/backend-foundation-4b01`  
 **Base:** `fix/react-mock-integrity` (PR #6)  
 **PR:** https://github.com/rayleigh66/AK-Direct-UI/pull/7 (Draft)  
-**Verification Head:** `7031f63fed77ab262d39ef65776d80cc088eab69` (P0 safety fix; the final documentation commit and exact PR Head are reported in PR #7)  
+**Verification Head:** `bca8b80491803237a00c3def158e6e0542e0d818` (P0-03 environment isolation fix; the final documentation commit and exact PR Head are reported in PR #7)
 **Scope:** backend infrastructure only. No business modules, WMS, authentication or Phase 3C rule changes.
 
 ## 1. Delivered infrastructure
@@ -78,6 +78,27 @@ Runtime negative evidence:
 - missing `TEST_DATABASE_DESTRUCTIVE=yes` exited 1 before connection;
 - a `safety_marker` table inserted before both attempts still had count **1** afterward, proving no destructive SQL executed.
 
+### P0-03 — smoke Compose environment isolation
+
+Docker Compose gives exported shell variables precedence over `--env-file`. The smoke harness now closes that leak:
+
+- every smoke Compose command runs through `compose_env`, which invokes `env -i` with only Docker runtime variables (`PATH`, `HOME`, Docker socket/context/config/TLS variables, SSH agent, temp/runtime dirs);
+- parent `DATABASE_URL`, `POSTGRES_*`, `BACKUP_*`, `API_IMAGE`, `MIGRATE_IMAGE`, `WEB_IMAGE`, `WEB_PORT`, `DOMAIN` and related values cannot reach Compose interpolation;
+- the generated smoke env file remains the sole source for DB URL/user/password, backup path, image tags and web port;
+- `scripts/validate-smoke-compose.py` validates the fully resolved Compose model **before any up/run/migration/backup/restore**:
+  - project name;
+  - db POSTGRES_DB/USER/PASSWORD;
+  - migrate and api DATABASE_URL host/user/password/database;
+  - backup PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD/retention;
+  - backup `/backups` bind source;
+  - project-scoped db data volume (not `aoking-direct_postgres_data`);
+  - API/migrate/web image tags and loopback web port.
+- `migrate` uses a dedicated `MIGRATE_IMAGE` tag to avoid concurrent BuildKit tag collisions with `api`.
+
+`scripts/test-smoke-isolation.sh` now exports production-style conflicting values in a child shell, proves an **unsanitized control Compose config** resolves those polluted values, then runs the sanitized smoke and asserts the generated smoke values win. It uses a temporary simulated production backup directory with a sentinel, read-only hashes real `*.dump` files, and verifies the production-named volume and backups remain untouched.
+
+Actual result: **PASS** — “polluted parent env did not redirect the smoke; production volume, simulated backup sentinel and real backups were untouched.”
+
 ### P1 follow-ups addressed
 
 - Migration runner stores SHA-256 checksums, rejects edited historical migrations, rejects applied migrations missing from the directory, and backfills legacy null checksums.
@@ -98,7 +119,7 @@ Runtime negative evidence:
 | T07 | **PASS** | Recreating api/web did not remove the isolated smoke PostgreSQL volume; production-named volume identity sentinel unchanged. |
 | T08 | **PASS** | db/api have no host ports (`:0` / `invalid IP:0`); web publishes loopback only; DB password absent from the smoke API image; `docker compose config --quiet` passed. |
 | T09 | **PASS** | `npm run lint`; `npm test` **87 passed / 6 skipped**; `npm run build`; `npm run verify:assets`; Playwright **90 passed / 18 skipped**; preview smoke **1/1**. API unit **14/14**, DB integration **6/6**. |
-| T10 | **PASS** | Push run `41833381169` and PR run `41833388574`: `local-prototype`, `backend-foundation`, `docker-smoke` all success. |
+| T10 | **PASS** | Push run `41837856057` and PR run `41837865321`: `local-prototype`, `backend-foundation`, `docker-smoke` all success. |
 | T11 | **PASS** | Invalid migration exits 1. Failed deployment project: `up` exit 1, `migrate` exit 1, `api`/`web` created but not running; API never ready. |
 | T12 | **PASS** | Local unit/integration tests and isolated smoke use local-only credentials; no cloud/production credentials required. Real target server not used. |
 
@@ -194,8 +215,8 @@ Total limits are about 1.5 GB on the approved 4 GB host. Target 2 vCPU / 4 GB bu
 
 ## 8. CI links
 
-- Push run: https://github.com/rayleigh66/AK-Direct-UI/actions/runs/41833381169
-- PR run: https://github.com/rayleigh66/AK-Direct-UI/actions/runs/41833388574
+- Push run: https://github.com/rayleigh66/AK-Direct-UI/actions/runs/41837856057
+- PR run: https://github.com/rayleigh66/AK-Direct-UI/actions/runs/41837865321
 - All three jobs passed: `local-prototype`, `backend-foundation`, `docker-smoke`.
 
 ## 9. Next step
