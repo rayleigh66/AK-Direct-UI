@@ -6,6 +6,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY index.html vite.config.ts tsconfig.json ./
 COPY src ./src
+ARG VITE_REAL_AUTH=false
+ENV VITE_REAL_AUTH=${VITE_REAL_AUTH}
 RUN npm run build
 
 FROM caddy:2.9.1-alpine

@@ -14,6 +14,7 @@ import { TestMatrixModal } from './components/TestMatrixModal';
 import { DetailDrawer } from './components/DetailDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { ToastStack } from './components/ToastStack';
+import { RealAuthGate } from './auth/RealAuthGate';
 
 // Customer Views
 import { CatalogView } from './components/CustomerViews/CatalogView';
@@ -217,7 +218,12 @@ const MainLayout: React.FC = () => {
   );
 };
 
+const REAL_AUTH_ENABLED = import.meta.env.VITE_REAL_AUTH === 'true';
+
 export default function App() {
+  if (REAL_AUTH_ENABLED) {
+    return <RealAuthGate />;
+  }
   return (
     <AppProvider>
       <MainLayout />

@@ -67,6 +67,17 @@ PY
 
 SMOKE_WEB_PORT="${SMOKE_WEB_PORT:-$(free_port)}"
 FAIL_WEB_PORT="${FAIL_WEB_PORT:-$(free_port)}"
+SMOKE_RUNTIME_DB_USER="aoking_runtime_smoke"
+SMOKE_RUNTIME_DB_PASSWORD="${SMOKE_RUNTIME_DB_PASSWORD:-}"
+if [ -z "$SMOKE_RUNTIME_DB_PASSWORD" ]; then
+  if command -v openssl >/dev/null 2>&1; then
+    SMOKE_RUNTIME_DB_PASSWORD="$(openssl rand -hex 16)"
+  elif command -v python3 >/dev/null 2>&1; then
+    SMOKE_RUNTIME_DB_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+  else
+    SMOKE_RUNTIME_DB_PASSWORD="smoke-runtime-$(date +%s)-$$"
+  fi
+fi
 SMOKE_API_IMAGE="aoking-direct-api-smoke:${RUN_ID}"
 SMOKE_MIGRATE_IMAGE="aoking-direct-migrate-smoke:${RUN_ID}"
 SMOKE_WEB_IMAGE="aoking-direct-web-smoke:${RUN_ID}"
@@ -78,11 +89,24 @@ cat > "$SMOKE_ENV_FILE" <<EOF
 POSTGRES_DB=${SMOKE_DB_NAME}
 POSTGRES_USER=${SMOKE_DB_USER}
 POSTGRES_PASSWORD=${SMOKE_DB_PASSWORD}
-DATABASE_URL=postgres://${SMOKE_DB_USER}:${SMOKE_DB_PASSWORD}@db:5432/${SMOKE_DB_NAME}
+MIGRATION_DATABASE_URL=postgres://${SMOKE_DB_USER}:${SMOKE_DB_PASSWORD}@db:5432/${SMOKE_DB_NAME}
+RUNTIME_DB_USER=${SMOKE_RUNTIME_DB_USER}
+RUNTIME_DB_PASSWORD=${SMOKE_RUNTIME_DB_PASSWORD}
+DATABASE_URL=postgres://${SMOKE_RUNTIME_DB_USER}:${SMOKE_RUNTIME_DB_PASSWORD}@db:5432/${SMOKE_DB_NAME}
 WEB_PORT=${SMOKE_WEB_PORT}
 BACKUP_HOST_DIR=${SMOKE_BACKUP_DIR}
 BACKUP_RETENTION_DAYS=30
 DOMAIN=
+COOKIE_SECURE=false
+CUSTOMER_SESSION_IDLE_HOURS=24
+CUSTOMER_SESSION_ABSOLUTE_DAYS=30
+INTERNAL_SESSION_IDLE_HOURS=2
+INTERNAL_SESSION_ABSOLUTE_HOURS=12
+LOGIN_MAX_ATTEMPTS=5
+LOGIN_WINDOW_MINUTES=15
+LOGIN_LOCK_MINUTES=15
+TRUST_PROXY=0
+VITE_REAL_AUTH=false
 API_IMAGE=${SMOKE_API_IMAGE}
 MIGRATE_IMAGE=${SMOKE_MIGRATE_IMAGE}
 WEB_IMAGE=${SMOKE_WEB_IMAGE}
@@ -90,8 +114,9 @@ EOF
 
 # The failure-injection project gets its own authoritative env file; passing
 # shell overrides through the sanitizer would otherwise discard them.
-grep -v -E '^(DATABASE_URL|WEB_PORT)=' "$SMOKE_ENV_FILE" > "$FAIL_ENV_FILE"
+grep -v -E '^(DATABASE_URL|MIGRATION_DATABASE_URL|WEB_PORT)=' "$SMOKE_ENV_FILE" > "$FAIL_ENV_FILE"
 cat >> "$FAIL_ENV_FILE" <<EOF
+MIGRATION_DATABASE_URL=postgres://invalid:invalid@db:5432/does_not_exist
 DATABASE_URL=postgres://invalid:invalid@db:5432/does_not_exist
 WEB_PORT=${FAIL_WEB_PORT}
 EOF
@@ -219,13 +244,13 @@ wait_http "$BASE_URL/api/ready" 200 60
 
 step "T05: migrations are idempotent"
 MIGRATION_COUNT="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT" = "1" ] || {
-  echo "Expected 1 migration row, got $MIGRATION_COUNT" >&2
+[ "$MIGRATION_COUNT" = "2" ] || {
+  echo "Expected 2 migration rows, got $MIGRATION_COUNT" >&2
   exit 1
 }
 compose run --rm migrate
 MIGRATION_COUNT_AGAIN="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT_AGAIN" = "1" ] || {
+[ "$MIGRATION_COUNT_AGAIN" = "2" ] || {
   echo "Migration count changed after second run: $MIGRATION_COUNT_AGAIN" >&2
   exit 1
 }
@@ -255,13 +280,26 @@ case "$API_PORT" in
 esac
 compose port web 80 | grep -q "^127\\.0\\.0\\.1:${SMOKE_WEB_PORT}$"
 if docker run --rm "$SMOKE_API_IMAGE" sh -c "grep -R -- '$SMOKE_DB_PASSWORD' /app >/dev/null 2>&1"; then
-  echo "Database password was found inside the smoke API image." >&2
+  echo "Owner database password was found inside the smoke API image." >&2
   exit 1
 fi
+if docker run --rm "$SMOKE_API_IMAGE" sh -c "grep -R -- '$SMOKE_RUNTIME_DB_PASSWORD' /app >/dev/null 2>&1"; then
+  echo "Runtime database password was found inside the smoke API image." >&2
+  exit 1
+fi
+if compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME"   -c 'CREATE TABLE smoke_runtime_should_fail (id integer)' >/dev/null 2>&1; then
+  echo "Runtime role unexpectedly has DDL privileges." >&2
+  exit 1
+fi
+RUNTIME_MIGRATION_COUNT="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME"   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
+[ "$RUNTIME_MIGRATION_COUNT" = "2" ] || {
+  echo "Runtime role cannot read the expected migration metadata (got $RUNTIME_MIGRATION_COUNT)." >&2
+  exit 1
+}
 compose config --quiet
 
 step "T11: migration failure is not masked as ready"
-if compose run --rm -e DATABASE_URL='postgres://invalid:invalid@db:5432/does_not_exist' migrate; then
+if compose run --rm -e MIGRATION_DATABASE_URL='postgres://invalid:invalid@db:5432/does_not_exist' migrate; then
   echo "Expected migration to fail with an invalid database." >&2
   exit 1
 fi
@@ -304,8 +342,16 @@ if ! compose run --rm --no-deps \
   echo "Restore failed inside the isolated smoke project." >&2
   exit 1
 fi
+# pg_restore --no-privileges drops the runtime role's table grants. Re-run the
+# migrate service so the runtime role is re-provisioned before API readiness.
+compose run --rm --no-deps migrate
 compose up -d --wait api web
+wait_http "$BASE_URL/api/ready" 200 60
 [ "$(psql_db -tAc "SELECT value FROM system_metadata WHERE key = '$BACKUP_PROBE'" | tr -d '[:space:]')" = "restored" ]
+RESTORED_RUNTIME_CHECK="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql \
+  -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME" \
+  -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
+[ "$RESTORED_RUNTIME_CHECK" = "2" ]
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
 
 step "T12: isolated local smoke completed without cloud/production credentials"
@@ -313,4 +359,4 @@ echo "Smoke project: $SMOKE_PROJECT"
 echo "Isolated backup directory: $SMOKE_BACKUP_DIR"
 
 echo
-echo "All Phase 4B-01 isolated compose checks passed."
+echo "All isolated Phase 4B-01/4B-02 compose checks passed."

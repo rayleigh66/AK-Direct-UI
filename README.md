@@ -34,15 +34,32 @@ curl http://127.0.0.1:8080/api/health
 curl http://127.0.0.1:8080/api/ready
 ```
 
-See [Phase 4B-01 Deployment](docs/PHASE_4B01_DEPLOYMENT.md) for environment, migrations, test database, backups/restore, production domain/HTTPS and upgrade steps. The React Mock remains the active UI; no business API is wired into it.
+See [Phase 4B-01 Deployment](docs/PHASE_4B01_DEPLOYMENT.md) for environment, migrations, test database, backups/restore, production domain/HTTPS and upgrade steps.
+
+## Authentication and RBAC (Phase 4B-02)
+
+Phase 4B-02 adds real PostgreSQL-backed customer/internal authentication, roles, permissions, persistent sessions, CSRF protection, login rate limiting, audit events and least-privilege runtime database credentials. It does **not** add orders, inventory, cart, WMS or business APIs.
+
+```bash
+# Create the first internal admin without a fixed/default password
+printf '%s\n' 'A-strong-password' | \
+  docker compose exec -T -e MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" api \
+  node apps/api/dist/auth/create-admin.js --email admin@example.com --name "Admin" --password-stdin --no-must-change
+
+# Build the real login/session client (default is still the Mock UI)
+VITE_REAL_AUTH=true docker compose build web
+VITE_REAL_AUTH=true docker compose up -d --no-deps web
+```
+
+The default `VITE_REAL_AUTH=false` preserves the existing Mock app and Playwright suite. See [Phase 4B-02 Authentication & RBAC](docs/PHASE_4B02_AUTH_RBAC.md) for roles, data scopes, session policy, APIs, runtime-role separation and pending Owner decisions.
 
 ## Scope and limitations
 
 **This is a demonstration application, not a production ordering service.**
 
 - State, including carts, orders, stock, audit events and account flags, is stored in React memory and resets on reload.
-- Role switching is a demo feature, not authentication or server-side authorization. Customer, sales and admin screens now add consistent frontend route/operation guards, but these are Demo UX boundaries only; the backend must re-check every action.
-- Password generation and reset are simulated in the frontend; real password validation, secure storage, login and sessions are not implemented.
+- Role switching is a demo feature in the default Mock UI, not authentication or server-side authorization. Phase 4B-02 adds a separate real-auth gate with PostgreSQL sessions, but the Mock role switcher remains a demo-only surface; the backend enforces real authorization for its APIs.
+- Phase 4B-02 implements real password hashing, login, sessions and first-login password change in the API. The default Mock UI still simulates password reset; use `VITE_REAL_AUTH=true` to see the real auth gate. Business screens remain Mock data.
 - Stock reservation is a frontend simulation, **not an atomic database transaction** and must not be relied upon to prevent overselling.
 - The “Excel import” screen parses local `.xlsx` / `.csv` files in the browser, but only updates in-memory Mock inventory; it is not a database transaction and has no real concurrency control.
 - Prices, promotion dates, product codes, SKU images and copy are demonstration content requiring a separate PRD consistency review before production development.
@@ -61,7 +78,7 @@ Do not deploy this UI as a publicly accessible system containing real customers,
 2. English-only customer-facing copy; bilingual internal-facing copy.
 3. Product management: create/edit products and SKUs, series, category, feature tags, per-color pictures, visibility.
 4. Confirm business rules against the approved AOKING Direct PRD before changing MOQ, account, promotion or order behavior.
-5. Introduce backend authentication, permission checks, persistent storage and safe inventory reservation before production use.
+5. Backend authentication, permission checks and persistent sessions are introduced in Phase 4B-02; persistent business storage and safe inventory reservation remain future work.
 6. Unit tests, CI and the reproducible npm lockfile are in place; true end-to-end mobile tests and real-device validation remain planned.
 
 ## Branch policy
