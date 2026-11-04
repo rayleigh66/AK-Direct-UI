@@ -19,8 +19,10 @@
     "api:start": "node apps/api/dist/index.js",
     "api:migrate": "tsx apps/api/src/db/migrate.ts",
     "api:test": "vitest run apps/api/tests/unit",
-    "api:test:db": "vitest run apps/api/tests/integration",
-    "api:seed:dev": "tsx apps/api/src/db/seed-dev.ts"
+    "api:test:db": "vitest run --config vitest.integration.config.ts",
+    "api:seed:dev": "tsx apps/api/src/db/seed-dev.ts",
+    "api:provision:roles": "tsx apps/api/src/db/provision-runtime-role.ts",
+    "api:create-admin": "tsx apps/api/src/auth/create-admin.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

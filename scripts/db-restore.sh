@@ -56,5 +56,14 @@ if ! docker compose run --rm --no-deps \
   exit 1
 fi
 
+# pg_restore --no-privileges drops the runtime role's table grants, so the API
+# would get "permission denied" after a restore. Re-run the one-shot migrate
+# service (migrate + provision-runtime-role) before restarting the API.
+echo "Re-provisioning the runtime database role after restore..."
+if ! docker compose run --rm --no-deps migrate; then
+  echo "Restore completed but runtime role provisioning failed. API and web remain stopped." >&2
+  exit 1
+fi
+
 restore_stack
 echo "Restore completed from $BACKUP_FILE."

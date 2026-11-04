@@ -4,7 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { loadEnv } from '../config/env.js';
+import { loadMigrationDatabaseUrl } from '../config/env.js';
 
 const { Client } = pg;
 
@@ -129,8 +129,7 @@ const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   (async () => {
     try {
-      const env = loadEnv();
-      const result = await runMigrations(env.databaseUrl);
+      const result = await runMigrations(loadMigrationDatabaseUrl());
       console.log(
         `Migrations complete: ${result.applied.length} applied, ${result.skipped.length} skipped.`
       );

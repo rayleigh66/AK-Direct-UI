@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadEnv } from '../config/env.js';
+import { loadEnv, loadMigrationDatabaseUrl } from '../config/env.js';
 import { createPool } from './pool.js';
 
 /**
@@ -16,11 +16,11 @@ async function main() {
     throw new Error('Set SEED_DEV_DATA=yes to run the development seed.');
   }
 
-  const pool = createPool(env.databaseUrl);
+  const pool = createPool(loadMigrationDatabaseUrl());
   try {
     await pool.query(
       `INSERT INTO system_metadata (key, value)
-       VALUES ('dev_seed_marker', '4b01-dev')
+       VALUES ('dev_seed_marker', '4b02-dev')
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`
     );
     console.log('Development seed marker recorded. No business data was inserted.');

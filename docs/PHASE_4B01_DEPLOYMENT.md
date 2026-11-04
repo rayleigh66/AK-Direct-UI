@@ -1,6 +1,6 @@
 # Phase 4B-01 — Backend Infrastructure Deployment
 
-Status: infrastructure only. No customer, order, inventory, pricing, WMS or authentication business modules are implemented in this phase.
+Status: infrastructure. Phase 4B-01 added deployment/DB/API foundation; Phase 4B-02 adds authentication/RBAC. No order, inventory, product, pricing or WMS business modules are implemented here.
 
 ## 1. Architecture
 
@@ -93,7 +93,7 @@ curl -fsS http://127.0.0.1:8080/api/ready
 curl -fsS http://127.0.0.1:8080/ >/dev/null
 ```
 
-`/api/health` is a process liveness check. `/api/ready` verifies database connectivity, the expected `schema_version` (`4b01`) and the required `001_infrastructure.sql` migration row; it returns HTTP 503 when the database or migrations are unavailable or mismatched.
+`/api/health` is a process liveness check. `/api/ready` verifies database connectivity, the expected `schema_version` (`4b02`) and the required `003_sales_write_scope.sql` migration row; it returns HTTP 503 when the database or migrations are unavailable or mismatched.
 
 ## 4. Database and migrations
 
@@ -108,7 +108,7 @@ Migrations live in `apps/api/migrations/` as numbered `.sql` files. The runner:
 - skips already-applied files with matching checksums;
 - exits non-zero on failure.
 
-The only Phase 4B-01 table is `system_metadata`, used for technical schema/deployment metadata and readiness verification. It is not a customer, order, inventory or pricing table.
+Phase 4B-01 creates only `system_metadata` for technical schema/deployment metadata. Phase 4B-02 adds the authentication/RBAC tables described in [Phase 4B-02](PHASE_4B02_AUTH_RBAC.md); no orders, products, inventory or customers are seeded.
 
 Production starts with an empty business database. No Mock customer, product, inventory or order data is imported.
 
@@ -149,10 +149,7 @@ It fails before any connection or `DROP SCHEMA` when any check fails. A database
 
 ## 5. API
 
-Phase 4B-01 exposes only:
-
-- `GET /api/health` — process liveness, no database dependency;
-- `GET /api/ready` — database and migration readiness.
+Phase 4B-01 exposes `GET /api/health` and `GET /api/ready`. Phase 4B-02 adds the authentication/company/sales/admin APIs documented in [Phase 4B-02](PHASE_4B02_AUTH_RBAC.md).
 
 The API has JSON error handling, security headers, no `X-Powered-By`, no stack traces or connection strings in responses, and graceful shutdown on SIGTERM/SIGINT. Business APIs are intentionally absent.
 
@@ -261,12 +258,12 @@ Do not invoke destructive smoke commands against a deployed production stack.
 
 ## 10. Security and scope limits
 
-- The React Mock portal is still a demonstration UI; it has no real authentication or server-side authorization.
-- Phase 4B-01 exposes only health/readiness endpoints. Do not publish the web port publicly until authentication and authorization are implemented.
+- The React Mock portal remains a demonstration UI by default. Phase 4B-02 provides a real PostgreSQL-backed auth gate (`VITE_REAL_AUTH=true`) and server-side RBAC for its APIs; business modules remain Mock.
+- Do not publish the web port publicly until the Phase 4B-02 auth/session policy and remaining Owner decisions are accepted, and do not expose the default Mock UI as a real system.
 - PostgreSQL and the API have no host port mapping in the default stack.
 - `.env`, backups and build output are excluded from Git and Docker build context.
-- The API image does not contain the database password.
-- No WMS, order, inventory, customer, pricing, payment or login business APIs exist yet.
+- The API image does not contain the owner/migration password or the runtime database password; the API receives only the least-privilege runtime URL at runtime.
+- Authentication and RBAC are implemented; no WMS, order, inventory, product, pricing or payment business APIs exist yet.
 - No Redis, message queue or monitoring service is added.
 - Offsite disaster recovery is not implemented; local backups alone are not disaster recovery.
 - Ubuntu 24.04/2 vCPU/4 GB is the approved target; Docker builds may need swap or should be run on CI if memory pressure is observed.

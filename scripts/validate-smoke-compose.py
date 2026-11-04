@@ -77,6 +77,9 @@ def main() -> None:
         "POSTGRES_DB",
         "POSTGRES_USER",
         "POSTGRES_PASSWORD",
+        "MIGRATION_DATABASE_URL",
+        "RUNTIME_DB_USER",
+        "RUNTIME_DB_PASSWORD",
         "DATABASE_URL",
         "WEB_PORT",
         "BACKUP_HOST_DIR",
@@ -106,8 +109,22 @@ def main() -> None:
         "db POSTGRES_PASSWORD mismatch",
     )
 
-    for label, service in (("migrate", migrate), ("api", api)):
-        check_database_url(service_env(service).get("DATABASE_URL", ""), expected["DATABASE_URL"], label)
+    require(
+        expected["MIGRATION_DATABASE_URL"] != expected["DATABASE_URL"],
+        "migration and runtime database URLs must be separate",
+    )
+    migrate_env = service_env(migrate)
+    check_database_url(
+        migrate_env.get("MIGRATION_DATABASE_URL", ""),
+        expected["MIGRATION_DATABASE_URL"],
+        "migrate",
+    )
+    require(migrate_env.get("RUNTIME_DB_USER") == expected["RUNTIME_DB_USER"], "migrate runtime user mismatch")
+    require(
+        migrate_env.get("RUNTIME_DB_PASSWORD") == expected["RUNTIME_DB_PASSWORD"],
+        "migrate runtime password mismatch",
+    )
+    check_database_url(service_env(api).get("DATABASE_URL", ""), expected["DATABASE_URL"], "api")
 
     backup_env = service_env(backup)
     require(backup_env.get("PGHOST") == "db", "backup PGHOST must be db")
