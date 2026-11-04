@@ -1,5 +1,8 @@
 import type { DbPool } from './pool.js';
 
+export const EXPECTED_SCHEMA_VERSION = '4b01';
+export const REQUIRED_MIGRATION = '001_infrastructure.sql';
+
 export interface ReadinessResult {
   ok: boolean;
   checks: Record<string, string>;
@@ -22,13 +25,23 @@ export async function checkReadiness(pool: DbPool): Promise<ReadinessResult> {
   }
 
   try {
-    const result = await pool.query(
-      "SELECT 1 FROM system_metadata WHERE key = 'schema_version' LIMIT 1"
+    const metadata = await pool.query<{ value: string }>(
+      "SELECT value FROM system_metadata WHERE key = 'schema_version' LIMIT 1"
     );
-    if (result.rowCount !== 1) {
+    if (metadata.rows[0]?.value !== EXPECTED_SCHEMA_VERSION) {
+      checks.migrations = 'version_mismatch';
+      return { ok: false, checks, error: 'unexpected_schema_version' };
+    }
+
+    const applied = await pool.query(
+      'SELECT 1 FROM schema_migrations WHERE version = $1 LIMIT 1',
+      [REQUIRED_MIGRATION]
+    );
+    if (applied.rowCount !== 1) {
       checks.migrations = 'missing';
       return { ok: false, checks, error: 'migrations_not_applied' };
     }
+
     checks.migrations = 'ok';
     return { ok: true, checks };
   } catch {

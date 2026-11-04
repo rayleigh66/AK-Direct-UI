@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: aoking-direct-api:4b01
+    image: ${API_IMAGE:-aoking-direct-api:4b01}
     command: ["node", "apps/api/dist/db/migrate.js"]
     environment:
       NODE_ENV: production
@@ -39,7 +39,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: aoking-direct-api:4b01
+    image: ${API_IMAGE:-aoking-direct-api:4b01}
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -70,7 +70,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
-    image: aoking-direct-web:4b01
+    image: ${WEB_IMAGE:-aoking-direct-web:4b01}
     ports:
       - "127.0.0.1:${WEB_PORT:-8080}:80"
     depends_on:
@@ -108,7 +108,7 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
     volumes:
       - ./scripts/backup-container.sh:/scripts/backup-container.sh:ro
-      - ./backups:/backups
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
     depends_on:
       db:
         condition: service_healthy

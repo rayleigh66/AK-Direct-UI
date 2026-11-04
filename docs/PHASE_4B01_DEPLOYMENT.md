@@ -93,17 +93,19 @@ curl -fsS http://127.0.0.1:8080/api/ready
 curl -fsS http://127.0.0.1:8080/ >/dev/null
 ```
 
-`/api/health` is a process liveness check. `/api/ready` verifies database connectivity and the presence of the migration metadata row; it returns HTTP 503 when the database or migrations are unavailable.
+`/api/health` is a process liveness check. `/api/ready` verifies database connectivity, the expected `schema_version` (`4b01`) and the required `001_infrastructure.sql` migration row; it returns HTTP 503 when the database or migrations are unavailable or mismatched.
 
 ## 4. Database and migrations
 
 Migrations live in `apps/api/migrations/` as numbered `.sql` files. The runner:
 
 - acquires a PostgreSQL advisory lock;
-- creates `schema_migrations` if missing;
+- creates `schema_migrations` if missing (including legacy `checksum` column migration);
+- stores a SHA-256 checksum per migration and refuses to continue if an applied file is edited;
+- refuses to continue if an applied migration file is missing from the migrations directory;
 - applies each unapplied file once in its own transaction;
-- records the filename in `schema_migrations`;
-- skips already-applied files;
+- records the filename and checksum in `schema_migrations`;
+- skips already-applied files with matching checksums;
 - exits non-zero on failure.
 
 The only Phase 4B-01 table is `system_metadata`, used for technical schema/deployment metadata and readiness verification. It is not a customer, order, inventory or pricing table.
@@ -128,12 +130,22 @@ The Phase 4B-01 seed only writes an infrastructure marker; it does not create bu
 
 ```bash
 bash scripts/test-db-up.sh
+export NODE_ENV=test
+export TEST_DATABASE_DESTRUCTIVE=yes
 export TEST_DATABASE_URL='postgres://aoking_test:aoking_test_password@127.0.0.1:55433/aoking_direct_test'
 npm run api:test:db
 bash scripts/test-db-down.sh
 ```
 
-The integration test refuses to run unless the database name contains `test`; it drops and recreates the test schema. The test Compose project has its own volume and never uses the production database.
+The destructive integration test refuses to connect unless **all** of these are true:
+
+- `NODE_ENV=test`;
+- `TEST_DATABASE_DESTRUCTIVE=yes` is explicitly set;
+- the URL host is loopback (`127.0.0.1`, `localhost` or `::1`);
+- the database name is exactly `aoking_direct_test`;
+- the user is exactly `aoking_test`.
+
+It fails before any connection or `DROP SCHEMA` when any check fails. A database name merely containing `test` is not accepted. The test Compose project has its own volume and never uses the production database.
 
 ## 5. API
 
@@ -146,9 +158,9 @@ The API has JSON error handling, security headers, no `X-Powered-By`, no stack t
 
 ## 6. Backups and restore
 
-The `backup` service runs `scripts/backup-container.sh` immediately after startup and then every 24 hours. It uses `pg_dump -Fc`, writes files with mode `600` to `./backups`, and prunes files older than `BACKUP_RETENTION_DAYS` (default 30 days).
+The `backup` service runs `scripts/backup-container.sh` immediately after startup and then every 24 hours. It uses `pg_dump -Fc`, writes files with mode `600` to `BACKUP_HOST_DIR` (default `./backups`), and prunes files older than `BACKUP_RETENTION_DAYS` (default 30 days).
 
-Backups are local only. **Offsite copies are not configured or claimed.** The `./backups` directory is a copy point for a future Owner-approved offsite destination.
+Backups are local only. **Offsite copies are not configured or claimed.** The backup directory is a copy point for a future Owner-approved offsite destination.
 
 Manual backup:
 
@@ -226,6 +238,23 @@ npm run api:build
 ```
 
 Frontend Mock remains unchanged and does not depend on business API endpoints. The Vite dev server proxies `/api` to `http://127.0.0.1:4000` for future infrastructure calls; the production build uses the Caddy `/api` reverse proxy. The existing Vite/Playwright workflows remain available. API unit tests do not require a database; database integration tests require the independent test database described above.
+
+### Destructive Docker smoke tests
+
+Docker smoke tests stop/restart databases, mutate metadata, and restore a backup. Run them only through:
+
+```bash
+bash scripts/test-smoke-isolation.sh
+```
+
+The smoke harness:
+
+- refuses the production project name and the production `./backups` directory;
+- creates a unique `aoking-direct-smoke-*` Compose project, project-scoped PostgreSQL volume, independent `aoking_smoke`/`aoking_direct_smoke` credentials, unique image tags and a temporary backup directory;
+- never sources the application `.env` and never drops the production `aoking-direct_postgres_data` volume;
+- includes a regression test that inspects an existing production-named volume and existing backup files before/after the smoke run and fails if they changed.
+
+Do not invoke destructive smoke commands against a deployed production stack.
 
 ## 10. Security and scope limits
 

@@ -91,6 +91,7 @@ jobs:
       - name: Database integration tests
         env:
           NODE_ENV: test
+          TEST_DATABASE_DESTRUCTIVE: 'yes'
           TEST_DATABASE_URL: postgres://aoking_test:aoking_test_password@127.0.0.1:5432/aoking_direct_test
         run: npm run api:test:db
 
@@ -107,5 +108,5 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Docker Compose smoke and persistence checks
-        run: bash scripts/verify-compose.sh
+      - name: Isolated Docker Compose smoke and persistence checks
+        run: bash scripts/test-smoke-isolation.sh

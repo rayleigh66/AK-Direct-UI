@@ -1,49 +1,44 @@
 import pg from 'pg';
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../src/db/migrate.js';
 import { createPool } from '../../src/db/pool.js';
 import { checkReadiness } from '../../src/db/readiness.js';
+import { assertSafeTestDatabase, type SafeTestDatabase } from '../support/testDatabaseSafety.js';
 
 const { Client } = pg;
-const databaseUrl = process.env.TEST_DATABASE_URL;
 
-function assertSafeTestDatabase(url: string) {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error('TEST_DATABASE_URL is not a valid URL.');
-  }
-  const databaseName = parsed.pathname.replace(/^\//, '');
-  if (!/test/i.test(databaseName)) {
-    throw new Error(
-      'Refusing to run destructive integration tests: TEST_DATABASE_URL database name must contain "test".'
-    );
-  }
-}
-
-const describeDb = databaseUrl ? describe : describe.skip;
+// Fail closed at module load if TEST_DATABASE_URL is present but unsafe.
+// This happens before any Client connection or destructive SQL.
+const safeDatabase: SafeTestDatabase | null = process.env.TEST_DATABASE_URL
+  ? assertSafeTestDatabase(process.env.TEST_DATABASE_URL)
+  : null;
+const describeDb = safeDatabase ? describe : describe.skip;
+const databaseUrl = () => safeDatabase!.databaseUrl;
+const realMigrationsDir = fileURLToPath(new URL('../../migrations', import.meta.url));
 
 describeDb('PostgreSQL migrations and readiness', () => {
   beforeAll(async () => {
-    if (!databaseUrl) return;
-    assertSafeTestDatabase(databaseUrl);
-    const client = new Client({ connectionString: databaseUrl });
+    if (!safeDatabase) return;
+    const client = new Client({ connectionString: databaseUrl() });
     await client.connect();
     await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await client.end();
   }, 20_000);
 
   afterAll(async () => {
-    if (!databaseUrl) return;
-    const client = new Client({ connectionString: databaseUrl });
+    if (!safeDatabase) return;
+    const client = new Client({ connectionString: databaseUrl() });
     await client.connect();
     await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await client.end();
   }, 20_000);
 
   it('fails readiness before migrations are applied', async () => {
-    const pool = createPool(databaseUrl!);
+    const pool = createPool(databaseUrl());
     const result = await checkReadiness(pool);
     await pool.end();
 
@@ -52,28 +47,53 @@ describeDb('PostgreSQL migrations and readiness', () => {
   }, 20_000);
 
   it('applies migrations once and is idempotent on a second run', async () => {
-    const first = await runMigrations(databaseUrl!);
+    const first = await runMigrations(databaseUrl());
     expect(first.applied).toEqual(['001_infrastructure.sql']);
     expect(first.skipped).toEqual([]);
 
-    const second = await runMigrations(databaseUrl!);
+    const second = await runMigrations(databaseUrl());
     expect(second.applied).toEqual([]);
     expect(second.skipped).toEqual(['001_infrastructure.sql']);
 
-    const client = new Client({ connectionString: databaseUrl! });
+    const client = new Client({ connectionString: databaseUrl() });
     await client.connect();
-    const migrations = await client.query('SELECT version FROM schema_migrations');
+    const migrations = await client.query(
+      'SELECT version, checksum FROM schema_migrations ORDER BY version'
+    );
     const metadata = await client.query(
       "SELECT value FROM system_metadata WHERE key = 'schema_version'"
     );
     await client.end();
 
     expect(migrations.rowCount).toBe(1);
+    expect(migrations.rows[0]?.checksum).toMatch(/^[a-f0-9]{64}$/);
     expect(metadata.rows[0]?.value).toBe('4b01');
   }, 20_000);
 
-  it('reports ready when the database and migrations are available', async () => {
-    const pool = createPool(databaseUrl!);
+  it('detects drift if an applied migration file is edited', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'aoking-migrations-'));
+    try {
+      await copyFile(
+        join(realMigrationsDir, '001_infrastructure.sql'),
+        join(tempDir, '001_infrastructure.sql')
+      );
+      const probe = join(tempDir, '999_checksum_probe.sql');
+      await writeFile(probe, 'CREATE TABLE checksum_probe (id integer PRIMARY KEY);');
+      const first = await runMigrations(databaseUrl(), tempDir);
+      expect(first.applied).toEqual(['999_checksum_probe.sql']);
+
+      await writeFile(
+        probe,
+        'CREATE TABLE checksum_probe (id integer PRIMARY KEY, note text);'
+      );
+      await expect(runMigrations(databaseUrl(), tempDir)).rejects.toThrow(/drift/i);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it('reports ready when the database, migrations and expected version are available', async () => {
+    const pool = createPool(databaseUrl());
     const result = await checkReadiness(pool);
     await pool.end();
 
@@ -83,16 +103,26 @@ describeDb('PostgreSQL migrations and readiness', () => {
     });
   }, 20_000);
 
+  it('fails readiness when the expected schema_version does not match', async () => {
+    const pool = createPool(databaseUrl());
+    await pool.query("UPDATE system_metadata SET value = 'stale' WHERE key = 'schema_version'");
+    const stale = await checkReadiness(pool);
+    expect(stale.ok).toBe(false);
+    expect(stale.checks.migrations).toBe('version_mismatch');
+    await pool.query("UPDATE system_metadata SET value = '4b01' WHERE key = 'schema_version'");
+    await pool.end();
+  }, 20_000);
+
   it('persists an infrastructure record across a new connection', async () => {
     const key = `integration_probe_${Date.now()}`;
-    const firstPool = createPool(databaseUrl!);
+    const firstPool = createPool(databaseUrl());
     await firstPool.query(
       'INSERT INTO system_metadata (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
       [key, 'persisted']
     );
     await firstPool.end();
 
-    const secondPool = createPool(databaseUrl!);
+    const secondPool = createPool(databaseUrl());
     const result = await secondPool.query(
       'SELECT value FROM system_metadata WHERE key = $1',
       [key]

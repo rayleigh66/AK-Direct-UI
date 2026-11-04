@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -16,6 +17,10 @@ const MIGRATION_FILE = /^\d{3}_[a-zA-Z0-9_-]+\.sql$/;
 export interface MigrationResult {
   applied: string[];
   skipped: string[];
+}
+
+function checksumFor(sql: string): string {
+  return createHash('sha256').update(sql, 'utf8').digest('hex');
 }
 
 export async function runMigrations(
@@ -48,29 +53,62 @@ export async function runMigrations(
     await client.query(
       `CREATE TABLE IF NOT EXISTS schema_migrations (
         version text PRIMARY KEY,
+        checksum text,
         applied_at timestamptz NOT NULL DEFAULT now()
       )`
     );
+    await client.query('ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum text');
 
-    const existing = await client.query<{ version: string }>(
-      'SELECT version FROM schema_migrations ORDER BY version'
+    const existing = await client.query<{ version: string; checksum: string | null }>(
+      'SELECT version, checksum FROM schema_migrations ORDER BY version'
     );
     const appliedVersions = new Set(existing.rows.map(row => row.version));
+    const appliedChecksums = new Map(
+      existing.rows.map(row => [row.version, row.checksum])
+    );
+
+    for (const version of appliedVersions) {
+      if (!files.includes(version)) {
+        throw new Error(
+          `Applied migration ${version} is missing from ${migrationsDir}; refusing to continue.`
+        );
+      }
+    }
 
     for (const file of files) {
+      const sql = await readFile(path.join(migrationsDir, file), 'utf8');
+      const checksum = checksumFor(sql);
+
       if (appliedVersions.has(file)) {
+        const storedChecksum = appliedChecksums.get(file);
+        if (storedChecksum && storedChecksum !== checksum) {
+          throw new Error(
+            `Migration drift detected for ${file}; refusing to run mutated historical migrations.`
+          );
+        }
+        if (!storedChecksum) {
+          // Backfill legacy rows created before checksum tracking. New rows are
+          // always written with a checksum below.
+          await client.query(
+            'UPDATE schema_migrations SET checksum = $1 WHERE version = $2 AND checksum IS NULL',
+            [checksum, file]
+          );
+        }
         skipped.push(file);
         continue;
       }
 
-      const sql = await readFile(path.join(migrationsDir, file), 'utf8');
       await client.query('BEGIN');
       try {
         await client.query(sql);
-        await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [file]);
+        await client.query(
+          'INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)',
+          [file, checksum]
+        );
         await client.query('COMMIT');
         applied.push(file);
         appliedVersions.add(file);
+        appliedChecksums.set(file, checksum);
       } catch (error) {
         await client.query('ROLLBACK');
         const message = error instanceof Error ? error.message : 'unknown database error';
