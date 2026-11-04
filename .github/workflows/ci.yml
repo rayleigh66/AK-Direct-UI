@@ -109,4 +109,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Isolated Docker Compose smoke and persistence checks
-        run: bash scripts/test-smoke-isolation.sh
+        run: |
+          mkdir -p backups
+          bash scripts/test-smoke-isolation.sh

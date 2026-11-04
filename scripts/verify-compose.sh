@@ -68,9 +68,11 @@ PY
 SMOKE_WEB_PORT="${SMOKE_WEB_PORT:-$(free_port)}"
 FAIL_WEB_PORT="${FAIL_WEB_PORT:-$(free_port)}"
 SMOKE_API_IMAGE="aoking-direct-api-smoke:${RUN_ID}"
+SMOKE_MIGRATE_IMAGE="aoking-direct-migrate-smoke:${RUN_ID}"
 SMOKE_WEB_IMAGE="aoking-direct-web-smoke:${RUN_ID}"
 SMOKE_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/aoking-direct-smoke-env.XXXXXX")"
-chmod 600 "$SMOKE_ENV_FILE"
+FAIL_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/aoking-direct-smoke-fail-env.XXXXXX")"
+chmod 600 "$SMOKE_ENV_FILE" "$FAIL_ENV_FILE"
 
 cat > "$SMOKE_ENV_FILE" <<EOF
 POSTGRES_DB=${SMOKE_DB_NAME}
@@ -82,14 +84,41 @@ BACKUP_HOST_DIR=${SMOKE_BACKUP_DIR}
 BACKUP_RETENTION_DAYS=30
 DOMAIN=
 API_IMAGE=${SMOKE_API_IMAGE}
+MIGRATE_IMAGE=${SMOKE_MIGRATE_IMAGE}
 WEB_IMAGE=${SMOKE_WEB_IMAGE}
 EOF
 
+# The failure-injection project gets its own authoritative env file; passing
+# shell overrides through the sanitizer would otherwise discard them.
+grep -v -E '^(DATABASE_URL|WEB_PORT)=' "$SMOKE_ENV_FILE" > "$FAIL_ENV_FILE"
+cat >> "$FAIL_ENV_FILE" <<EOF
+DATABASE_URL=postgres://invalid:invalid@db:5432/does_not_exist
+WEB_PORT=${FAIL_WEB_PORT}
+EOF
+
+# Every Compose invocation runs with a minimal environment. Docker Compose
+# gives exported shell variables precedence over --env-file, so parent
+# DATABASE_URL/POSTGRES_*/BACKUP_*/IMAGE/PORT values must not leak in.
+compose_env() {
+  local -a env_args=(env -i "PATH=${PATH:-/usr/local/bin:/usr/bin:/bin}" "HOME=${HOME:-/tmp}" "PWD=${PWD:-$ROOT_DIR}")
+  local name
+  for name in \
+    USER LOGNAME TMPDIR \
+    DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_TLS_VERIFY DOCKER_CERT_PATH \
+    DOCKER_DEFAULT_PLATFORM XDG_RUNTIME_DIR SSH_AUTH_SOCK \
+    LANG LC_ALL; do
+    if [ -n "${!name:-}" ]; then
+      env_args+=("$name=${!name}")
+    fi
+  done
+  "${env_args[@]}" "$@"
+}
+
 compose() {
-  docker compose -p "$SMOKE_PROJECT" --env-file "$SMOKE_ENV_FILE" -f "$ROOT_DIR/docker-compose.yml" "$@"
+  compose_env docker compose -p "$SMOKE_PROJECT" --env-file "$SMOKE_ENV_FILE" -f "$ROOT_DIR/docker-compose.yml" "$@"
 }
 compose_fail() {
-  docker compose -p "$FAIL_PROJECT" --env-file "$SMOKE_ENV_FILE" -f "$ROOT_DIR/docker-compose.yml" "$@"
+  compose_env docker compose -p "$FAIL_PROJECT" --env-file "$FAIL_ENV_FILE" -f "$ROOT_DIR/docker-compose.yml" "$@"
 }
 
 cleanup() {
@@ -105,26 +134,30 @@ cleanup() {
   else
     compose down -v >/dev/null 2>&1 || true
     compose_fail down -v >/dev/null 2>&1 || true
-    docker image rm "$SMOKE_API_IMAGE" "$SMOKE_WEB_IMAGE" >/dev/null 2>&1 || true
+    docker image rm "$SMOKE_API_IMAGE" "$SMOKE_MIGRATE_IMAGE" "$SMOKE_WEB_IMAGE" >/dev/null 2>&1 || true
     if [ "$BACKUP_DIR_CREATED" = "1" ]; then
       rm -rf "$SMOKE_BACKUP_DIR"
     fi
     rm -f "$SMOKE_ENV_FILE"
   fi
+  rm -f "$FAIL_ENV_FILE"
   exit "$status"
 }
 trap cleanup EXIT
 
-# Fail closed if Compose resolved anything other than the unique smoke project.
+# Validate the fully resolved Compose model before any container start, run,
+# migration, backup or restore. This catches both project and env leaks.
 if ! CONFIG_JSON="$(compose config --format json)"; then
   echo "Refusing to run: Compose configuration could not be resolved." >&2
   exit 1
 fi
-CONFIG_NAME="$(printf '%s' "$CONFIG_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
-[ "$CONFIG_NAME" = "$SMOKE_PROJECT" ] || {
-  echo "Refusing to run: Compose resolved project '$CONFIG_NAME', expected '$SMOKE_PROJECT'." >&2
+if ! printf '%s' "$CONFIG_JSON" | python3 "$ROOT_DIR/scripts/validate-smoke-compose.py" \
+  --project "$SMOKE_PROJECT" \
+  --env-file "$SMOKE_ENV_FILE" \
+  --production-backup-dir "$REAL_BACKUP_DIR" \
+  --production-volume "aoking-direct_postgres_data"; then
   exit 1
-}
+fi
 
 BASE_URL="http://127.0.0.1:${SMOKE_WEB_PORT}"
 
@@ -232,8 +265,7 @@ if compose run --rm -e DATABASE_URL='postgres://invalid:invalid@db:5432/does_not
   echo "Expected migration to fail with an invalid database." >&2
   exit 1
 fi
-if WEB_PORT="$FAIL_WEB_PORT" DATABASE_URL='postgres://invalid:invalid@db:5432/does_not_exist' \
-  compose_fail up -d --build >/dev/null 2>&1; then
+if compose_fail up -d --build >/dev/null 2>&1; then
   sleep 5
   API_STATE="$(compose_fail ps -a --format '{{.Service}} {{.State}}' | grep '^api ' || true)"
   case "$API_STATE" in

@@ -11,7 +11,7 @@ The deployment is a modular monolith consisting of:
 | `web` | `Dockerfile.web` (React build + Caddy `2.9.1`) | `127.0.0.1:${WEB_PORT:-8080}` by default |
 | `api` | `apps/api/Dockerfile` (Node.js 22 + Express 4) | Internal `api:4000`; no host port |
 | `db` | `postgres:16.4-alpine` | Internal `db:5432`; no host port |
-| `migrate` | Same API image, one-shot command | Runs once after `db` is healthy |
+| `migrate` | Same API Dockerfile, dedicated migrate image tag, one-shot command | Runs once after `db` is healthy |
 | `backup` | `postgres:16.4-alpine` + `scripts/backup-container.sh` | Internal only; writes to `./backups` |
 
 Caddy serves the React SPA and proxies `/api/*` to `api:4000`. The API is never published directly to the host. PostgreSQL has a named persistent volume (`aoking-direct_postgres_data`) and no public port mapping.
@@ -250,9 +250,12 @@ bash scripts/test-smoke-isolation.sh
 The smoke harness:
 
 - refuses the production project name and the production `./backups` directory;
-- creates a unique `aoking-direct-smoke-*` Compose project, project-scoped PostgreSQL volume, independent `aoking_smoke`/`aoking_direct_smoke` credentials, unique image tags and a temporary backup directory;
+- creates a unique `aoking-direct-smoke-*` Compose project, project-scoped PostgreSQL volume, independent `aoking_smoke`/`aoking_direct_smoke` credentials, unique API/migrate/web image tags and a temporary backup directory;
+- runs **every** Compose command with a sanitized child environment (`env -i` allowlist for Docker runtime variables), so exported parent `DATABASE_URL`, `POSTGRES_*`, `BACKUP_*`, image or port values cannot override `--env-file`;
+- validates the fully resolved Compose model before any `up`, `run`, migration, backup or restore: project, DB URL/name/user/host, API/migrate/web images, backup bind mount, database volume and web port must all be smoke-specific; any production path/volume/endpoint is rejected;
 - never sources the application `.env` and never drops the production `aoking-direct_postgres_data` volume;
-- includes a regression test that inspects an existing production-named volume and existing backup files before/after the smoke run and fails if they changed.
+- includes negative guards and a P0-03 regression that exports production-style variables in the parent shell and proves the control Compose config would be polluted while the sanitized smoke still uses only generated values;
+- uses a temporary simulated backup directory with a sentinel, verifies real `*.dump` files by read-only hashing, and fails if any production-named volume or backup changes.
 
 Do not invoke destructive smoke commands against a deployed production stack.
 

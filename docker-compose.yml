@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: ${API_IMAGE:-aoking-direct-api:4b01}
+    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b01}
     command: ["node", "apps/api/dist/db/migrate.js"]
     environment:
       NODE_ENV: production
