@@ -1,0 +1,120 @@
+name: aoking-direct
+
+services:
+  db:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aoking_direct}
+      POSTGRES_USER: ${POSTGRES_USER:-aoking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    mem_limit: 768m
+    cpus: 1.0
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b01}
+    command: ["node", "apps/api/dist/db/migrate.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${API_IMAGE:-aoking-direct-api:4b01}
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      NODE_OPTIONS: "--max-old-space-size=192"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: ${WEB_IMAGE:-aoking-direct-web:4b01}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16.4-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        while true; do
+          if ! /bin/sh /scripts/backup-container.sh; then
+            echo "Backup attempt failed; retrying in 1 hour." >&2;
+            sleep 3600;
+            continue;
+          fi;
+          sleep 86400;
+        done
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-aoking_direct}
+      PGUSER: ${POSTGRES_USER:-aoking}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - ./scripts/backup-container.sh:/scripts/backup-container.sh:ro
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
