@@ -114,26 +114,81 @@ restore_from_volume() {
     'rm -rf /to/* /to/.[!.]* /to/..?* 2>/dev/null; cd /from && tar -cf - . | tar -xf - -C /to && chown -R 1000:1000 /to'
 }
 
-rollback() {
-  echo "Rolling back the media volume from the pre-restore snapshot..." >&2
-  if restore_from_volume "$PREVIOUS_VOLUME"; then
-    echo "Rollback completed. The previous media content is restored." >&2
-  else
-    KEEP_PREVIOUS=1
-    echo "Rollback FAILED. The original media remains in volume $PREVIOUS_VOLUME; restore it manually." >&2
+API_ID=""
+
+api_container_id() {
+  docker compose -p "$PROJECT" ps -q api 2>/dev/null | head -n1 || true
+}
+
+wait_for_api_healthy() {
+  local timeout="${API_HEALTH_TIMEOUT_SECONDS:-120}"
+  local waited=0
+  local status=""
+  local id
+  id="$(api_container_id)"
+  if [ -z "$id" ]; then
+    echo "API container was not created after restart." >&2
+    return 1
   fi
+  while [ "$waited" -lt "$timeout" ]; do
+    status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || echo missing)"
+    case "$status" in
+      healthy) return 0 ;;
+      exited|dead|missing)
+        echo "API state is $status after restart." >&2
+        return 1
+        ;;
+    esac
+    sleep 2
+    waited=$((waited + 2))
+  done
+  echo "API did not become healthy within ${timeout}s (last status: $status)." >&2
+  return 1
 }
 
 start_api() {
-  if [ "$MANAGE_API" = "1" ] && [ "$API_STOPPED" = "1" ]; then
-    docker compose -p "$PROJECT" up -d api >/dev/null 2>&1 || true
+  if [ "$MANAGE_API" != "1" ] || [ "$API_STOPPED" != "1" ]; then
+    return 0
   fi
+  echo "Restarting the API..."
+  if ! docker compose -p "$PROJECT" up -d --no-deps api; then
+    echo "API restart command failed." >&2
+    return 1
+  fi
+  if ! wait_for_api_healthy; then
+    echo "API restart or health check failed." >&2
+    return 1
+  fi
+  API_STOPPED=0
+  return 0
+}
+
+rollback() {
+  echo "Rolling back the media volume from the pre-restore snapshot..." >&2
+  if ! restore_from_volume "$PREVIOUS_VOLUME"; then
+    KEEP_PREVIOUS=1
+    echo "Rollback FAILED. The original media remains in volume $PREVIOUS_VOLUME; restore it manually." >&2
+    return 1
+  fi
+  if [ "$(volume_manifest "$TARGET_VOLUME")" != "$PREVIOUS_MANIFEST" ]; then
+    KEEP_PREVIOUS=1
+    echo "Rollback verification FAILED. The original media remains in volume $PREVIOUS_VOLUME; restore it manually." >&2
+    return 1
+  fi
+  echo "Rollback completed. The previous media content is restored." >&2
+  return 0
 }
 
 fail_restore() {
   echo "$1" >&2
-  rollback
-  start_api
+  if ! rollback; then
+    echo "Writers remain stopped. Do NOT restart the API until the media volume is repaired from $PREVIOUS_VOLUME." >&2
+    exit 1
+  fi
+  if ! start_api; then
+    echo "Rollback succeeded, but the API did not restart healthy; writers remain stopped." >&2
+    exit 1
+  fi
   exit 1
 }
 
@@ -150,22 +205,44 @@ if ! docker run --rm \
 fi
 STAGED_MANIFEST="$(volume_manifest "$STAGING_VOLUME")"
 
-# 2. Snapshot the current media so a failed promotion can be rolled back.
+# 2. Stop writes BEFORE taking the pre-restore snapshot. The API is the only
+#    writer of the media volume (the backup service mounts it read-only).
+if [ "$MANAGE_API" = "1" ]; then
+  echo "Stopping the API before the pre-restore snapshot..."
+  if ! docker compose -p "$PROJECT" stop api; then
+    echo "Refusing to restore: docker compose stop api failed. The target media volume was not modified." >&2
+    exit 1
+  fi
+  API_ID="$(api_container_id)"
+  if [ -n "$API_ID" ]; then
+    RUNNING="$(docker inspect -f '{{.State.Running}}' "$API_ID" 2>/dev/null || echo true)"
+    if [ "$RUNNING" = "true" ]; then
+      echo "Refusing to restore: the API is still running after stop. The target media volume was not modified." >&2
+      exit 1
+    fi
+  fi
+  API_STOPPED=1
+  echo "API writes are stopped."
+else
+  echo "WARNING: RESTORE_MANAGE_API=0 skips API quiescing; use this only in isolated tests." >&2
+fi
+
+# 3. Snapshot the (now quiescent) media so a failed promotion can be rolled back.
 echo "Snapshotting the current media volume..."
 docker volume create "$PREVIOUS_VOLUME" >/dev/null
 if ! docker run --rm -v "$TARGET_VOLUME:/from:ro" -v "$PREVIOUS_VOLUME:/to" "$ALPINE_IMAGE" sh -c \
   'cd /from && tar -cf - . | tar -xf - -C /to'; then
   echo "Refusing to restore: could not snapshot the current media. The target was not modified." >&2
+  if [ "$API_STOPPED" = "1" ]; then
+    if ! start_api; then
+      echo "The API could not be restarted; writers remain stopped." >&2
+    fi
+  fi
   exit 1
 fi
+PREVIOUS_MANIFEST="$(volume_manifest "$PREVIOUS_VOLUME")"
 
-# 3. Stop the API, promote staging to the target, and verify the result.
-if [ "$MANAGE_API" = "1" ]; then
-  if docker compose -p "$PROJECT" stop api >/dev/null 2>&1; then
-    API_STOPPED=1
-  fi
-fi
-
+# 4. Promote staging to the target and verify the result.
 if ! restore_from_volume "$STAGING_VOLUME"; then
   fail_restore "Promotion into the media volume failed."
 fi
@@ -179,5 +256,10 @@ if [ "$RESTORED_MANIFEST" != "$STAGED_MANIFEST" ]; then
   fail_restore "Post-restore verification failed: the media volume does not match the archive."
 fi
 
-start_api
+# 5. Only reopen writers after a verified restore.
+if ! start_api; then
+  KEEP_PREVIOUS=1
+  echo "Media was restored and verified, but the API did not restart healthy. Writers remain stopped; the previous media snapshot is kept in volume $PREVIOUS_VOLUME." >&2
+  exit 1
+fi
 echo "Media restore completed from $BACKUP_FILE (project $PROJECT, volume $TARGET_VOLUME)."

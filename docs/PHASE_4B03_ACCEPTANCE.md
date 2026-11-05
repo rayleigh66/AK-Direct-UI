@@ -58,7 +58,7 @@ The default Mock application is unchanged and still passes its suite.
 - Concurrent test: two adjustments with the same version produce exactly one 200 and one 409, version increments once, final value equals the winner, and exactly one movement exists.
 - Import test: one invalid row (unknown SKU, duplicate pair, unsellable > on hand, negative) aborts the whole preview with no batch, audit or stock change.
 
-## 6a. Review fixes (P0-01, P0-02)
+## 6a. Review fixes (P0-01, P0-02, P0-03)
 
 ### P0-01 — concurrent SKU discontinuation
 
@@ -77,10 +77,22 @@ Regression tests (PostgreSQL, separate HTTP sessions through the real app):
 - explicit `COMPOSE_PROJECT` and `CONFIRM_MEDIA_VOLUME` plus Compose label verification on the target volume;
 - gzip integrity, relative-path/`..`/backslash checks, and rejection of non-regular entries before extraction;
 - extraction into a temporary staging volume with a SHA-256 manifest;
-- recoverable snapshot of the current media before promotion;
-- promotion only after successful staging, then manifest verification; any failure restores the snapshot and keeps it if rollback itself fails.
+- **API stop and stop verification before the snapshot**; a failed/ineffective stop rejects the restore with the target untouched;
+- recoverable snapshot of the quiescent media before promotion;
+- promotion only after successful staging, then manifest verification; any failure restores the snapshot and verifies the rollback, keeping the snapshot if rollback fails;
+- API restart after success or completed rollback only, with a health check; restart/health failure exits non-zero, keeps the previous snapshot and never prints success.
 
-`scripts/test-media-restore.sh` runs the real script against an isolated Compose project (created via `docker compose create`) and asserts the target manifest is byte-identical after: wrong target confirmation, missing volume, corrupt archive, truncated archive, path traversal, extraction failure, and forced post-promotion verification failure (rollback path). A valid restore is verified against the archive checksum and must remove pre-restore files. The production-named media volume is hashed read-only before/after and must not change. All cases PASS locally; the same script runs in CI.
+### P0-03 — live restore ordering and restart handling
+
+`scripts/test-media-restore.sh` now starts a real isolated API (`docker compose up -d --wait db` then `up -d --no-deps --wait api`) and runs `RESTORE_MANAGE_API=1`:
+
+1. normal restore: log proves the API stop precedes the snapshot; media matches the archive; API healthy afterwards;
+2. simulated `docker compose stop api` failure (PATH wrapper returning non-zero): restore rejected, target SHA-256 manifest unchanged byte-for-byte, API still running;
+3. forced post-promotion verification failure with the live API: rollback restores the exact pre-restore manifest, API is restarted only after the successful rollback and is healthy;
+4. simulated `docker compose up -d --no-deps api` failure: restore exits non-zero, does not print success, verified media is preserved and the previous snapshot is kept;
+5. simulated health-check failure (`docker inspect` reports `starting`, 3-second timeout): restore exits non-zero, no success message, previous snapshot kept.
+
+The earlier negative tests (wrong target, missing volume, corrupt/truncated/unsafe/extraction-failure archives, forced rollback) still run with `RESTORE_MANAGE_API=0`; the script prints an explicit warning for that test-only mode and it is not used as evidence for production ordering. The production-named media volume is hashed read-only before/after and must not change. All cases PASS locally; the same script runs in CI.
 
 ## 7. Local test results
 
@@ -95,7 +107,7 @@ Regression tests (PostgreSQL, separate HTTP sessions through the real app):
 | `npm run test:e2e` | **90 passed / 18 skipped** |
 | `npm run test:e2e:preview` | **1 passed** |
 | `bash scripts/test-smoke-isolation.sh` | PASS (DB + media backup/restore, 4 migrations, runtime role) |
-| `bash scripts/test-media-restore.sh` | PASS (wrong target, missing volume, corrupt/truncated/unsafe/extraction-failure archives, forced rollback, valid restore with checksums) |
+| `bash scripts/test-media-restore.sh` | PASS (archive negatives + live API: stop-before-snapshot, stop failure, rollback with restart, restart failure, health failure, checksum-verified restore) |
 | `bash scripts/real-auth-e2e.sh` | **2 passed** (desktop 1440 + mobile 390) |
 | Docker default stack (001–004) | `/api/ready` 200 |
 | Container restart persistence | PASS — product/image/stock counts unchanged after `docker compose restart db api`; the media file was served again with HTTP 200 `image/png` |

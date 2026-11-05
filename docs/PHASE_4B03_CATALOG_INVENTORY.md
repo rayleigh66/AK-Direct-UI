@@ -103,11 +103,13 @@ Notable error codes: `duplicate_product_code`, `duplicate_sku_code`, `publish_re
   1. requires `COMPOSE_PROJECT`, `CONFIRM_RESTORE=yes` and `CONFIRM_MEDIA_VOLUME=<project>_media_data`, and verifies the Compose project/volume labels on the target volume;
   2. checks the gzip integrity and every member path (`./` relative, no `..`, no backslash) and rejects symlink/hardlink/device entries;
   3. extracts into a temporary volume, computes a SHA-256 manifest and verifies the extraction;
-  4. snapshots the current media into a recoverable previous volume;
-  5. promotes the staging volume and compares the target manifest with the staged manifest;
-  6. on any promotion/verification failure, restores the previous volume and keeps it for manual recovery if rollback itself fails.
-  The API is stopped only after validation and the snapshot exist.
-- `scripts/test-media-restore.sh` exercises the actual script against an isolated Compose project/volume: wrong target confirmation, missing volume, corrupt/truncated archives, path traversal, extraction failure, forced post-promotion failure with rollback, and a valid restore with content/checksum verification. It also hashes the production-named volume read-only before/after and fails if it changed.
+  4. **stops the API and verifies it is stopped before any snapshot**; if the stop command fails or the container is still running, the restore is rejected with the target untouched (the API is the only media writer; the backup service mounts the volume read-only);
+  5. snapshots the now-quiescent media into a recoverable previous volume;
+  6. promotes the staging volume and compares the target manifest with the staged manifest;
+  7. on any promotion/verification failure, restores the previous volume while writers remain stopped, verifies the rollback manifest, and only then restarts the API;
+  8. after a successful restore, restarts the API and requires its health check to pass; a restart or health failure exits non-zero, keeps the previous snapshot and never prints success.
+  `RESTORE_MANAGE_API=0` exists for isolated negative tests only and prints a warning; it is not evidence of production ordering.
+- `scripts/test-media-restore.sh` exercises the actual script against an isolated Compose project/volume: wrong target confirmation, missing volume, corrupt/truncated archives, path traversal, extraction failure, forced post-promotion failure with rollback, and a valid restore with content/checksum verification. It also starts a real isolated API and tests `RESTORE_MANAGE_API=1`: stop-before-snapshot ordering, stop failure (target hashes unchanged), rollback after promotion/verification failure with the API restarted only afterwards, restart-command failure and health-check failure (both non-zero and the previous snapshot preserved). It hashes the production-named volume read-only before/after and fails if it changed.
 - Restoring only the database leaves images untouched; restoring only media leaves metadata untouched. Both archives must be kept together.
 
 ## 5. Inventory transactions
