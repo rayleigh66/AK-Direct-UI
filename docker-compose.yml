@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b02}
+    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b03}
     command:
       - sh
       - -c
@@ -44,11 +44,12 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: ${API_IMAGE:-aoking-direct-api:4b02}
+    image: ${API_IMAGE:-aoking-direct-api:4b03}
     environment:
       NODE_ENV: production
       PORT: "4000"
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      MEDIA_ROOT: /app/media
       NODE_OPTIONS: "--max-old-space-size=192"
       # Fail secure: production is deployed behind Caddy HTTPS. Local HTTP
       # development sets COOKIE_SECURE=false explicitly in .env.
@@ -78,6 +79,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+    volumes:
+      - media_data:/app/media
     mem_limit: 256m
     cpus: 0.5
     restart: unless-stopped
@@ -88,7 +91,7 @@ services:
       dockerfile: Dockerfile.web
       args:
         VITE_REAL_AUTH: ${VITE_REAL_AUTH:-false}
-    image: ${WEB_IMAGE:-aoking-direct-web:4b02}
+    image: ${WEB_IMAGE:-aoking-direct-web:4b03}
     ports:
       - "127.0.0.1:${WEB_PORT:-8080}:80"
     depends_on:
@@ -127,8 +130,13 @@ services:
     volumes:
       - ./scripts/backup-container.sh:/scripts/backup-container.sh:ro
       - ${BACKUP_HOST_DIR:-./backups}:/backups
+      - media_data:/media:ro
     depends_on:
       db:
+        condition: service_healthy
+      # The API mounts the media volume first so Docker initialises it with
+      # the node-owned directory from the API image (not root-owned).
+      api:
         condition: service_healthy
     mem_limit: 128m
     cpus: 0.25
@@ -136,3 +144,4 @@ services:
 
 volumes:
   postgres_data:
+  media_data:

@@ -8,6 +8,7 @@ import {
   logout,
   type AuthUserDto,
 } from './api';
+import { RealWorkspace } from '../real/RealWorkspace';
 
 function errorMessage(error: unknown): string {
   if (error instanceof AuthApiError) return error.message;
@@ -105,6 +106,10 @@ export const RealAuthGate: React.FC = () => {
   }
 
   const internal = user?.type === 'internal';
+
+  if (user && !user.mustChangePassword) {
+    return <RealWorkspace user={user} onSignOut={handleLogout} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#f8f8f6] text-[#151515] flex flex-col">
@@ -258,69 +263,6 @@ export const RealAuthGate: React.FC = () => {
           </section>
         )}
 
-        {user && !user.mustChangePassword && (
-          <section
-            data-testid="real-auth-session"
-            className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-lg font-bold">
-                  {internal ? 'Signed in / 已登录' : 'Signed in'}
-                </h1>
-                <p className="text-xs text-slate-500 mt-1">
-                  {user.displayName} · <span className="font-mono">{user.username}</span>
-                </p>
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {user.type}
-              </span>
-            </div>
-
-            {user.type === 'customer' && (
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
-                <div className="text-slate-400">Company / 公司</div>
-                <div className="font-semibold text-slate-900">
-                  {user.companyName} ({user.companyCode})
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Customer sessions can only access their own company.
-                </div>
-              </div>
-            )}
-
-            {internal && (
-              <div className="grid sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-                  <div className="text-slate-400">Roles / 角色</div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {user.roles.map(role => (
-                      <span key={role} className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[10px]">
-                        {role}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-                  <div className="text-slate-400">Permissions / 权限</div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {user.permissions.map(permission => (
-                      <span key={permission} className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[10px]">
-                        {permission}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="p-4 rounded-xl bg-[#fff7f2] border border-[#ffeadb] text-xs text-[#8a4d2c] leading-relaxed">
-              The account session is stored in PostgreSQL with secure cookies and CSRF
-              protection. Catalogue, cart, order and inventory screens remain the Phase 4B
-              Mock and are not connected to this session yet.
-            </div>
-          </section>
-        )}
       </main>
 
       <footer className="text-center py-6 text-[10px] text-slate-400 border-t border-slate-200 bg-white">

@@ -1,0 +1,218 @@
+import React, { useRef, useState } from 'react';
+import { CheckCircle2, FileSpreadsheet, Upload, X } from 'lucide-react';
+import { parseCsv, parseInventoryTable, type InventoryImportLine } from '../../utils/inventoryImport';
+import { commitImport, previewImport } from '../api';
+import type { CommitImportResultDto, ImportPreviewDto } from '../types';
+import { ErrorBlock } from '../RealWorkspace';
+
+const MAX_FILE_BYTES = 1024 * 1024;
+
+export const ImportView: React.FC = () => {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState('');
+  const [lines, setLines] = useState<InventoryImportLine[]>([]);
+  const [preview, setPreview] = useState<ImportPreviewDto | null>(null);
+  const [result, setResult] = useState<CommitImportResultDto | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => {
+    setFileName('');
+    setLines([]);
+    setPreview(null);
+    setResult(null);
+    setError('');
+    if (fileInput.current) fileInput.current.value = '';
+  };
+
+  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError('');
+    setPreview(null);
+    setResult(null);
+    setFileName(file.name);
+    if (file.size > MAX_FILE_BYTES) {
+      setError('File is larger than the 1 MB limit. / 文件超过 1 MB。');
+      return;
+    }
+    if (!/\.(csv|xlsx)$/i.test(file.name)) {
+      setError('Choose a .csv or .xlsx file. / 请选择 CSV 或 XLSX 文件。');
+      return;
+    }
+    setBusy(true);
+    try {
+      let table: unknown[][];
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        table = parseCsv(await file.text());
+      } else {
+        const module = await import('read-excel-file/browser');
+        table = (await module.readSheet(file)) as unknown[][];
+      }
+      const parsed = parseInventoryTable(table);
+      if (parsed.errors.length) {
+        setError(parsed.errors.join(' '));
+        return;
+      }
+      setLines(parsed.lines);
+      const response = await previewImport({
+        sourceName: file.name,
+        idempotencyKey: crypto.randomUUID(),
+        rows: parsed.lines.map(line => ({
+          rowNumber: line.rowNumber,
+          skuCode: line.skuCode,
+          warehouseCode: line.warehouseCode,
+          onHand: line.onHand,
+          unsellable: line.unsellable,
+        })),
+      });
+      setPreview(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import preview failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const commit = async () => {
+    if (!preview) return;
+    setBusy(true);
+    setError('');
+    try {
+      const committed = await commitImport(preview.batchId);
+      setResult(committed);
+      setPreview(current => (current ? { ...current, status: 'committed' } : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import commit failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && <ErrorBlock message={error} />}
+
+      <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
+        <div className="flex items-start gap-3">
+          <div className="w-11 h-11 rounded-xl bg-[#fff1e8] text-[#ff681e] grid place-items-center shrink-0">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold">Stock import / 库存导入</h2>
+            <p className="text-[11px] text-slate-500">
+              CSV or XLSX with sku_code, warehouse_code, on_hand, unsellable. Maximum 500 rows and
+              1 MB. The server re-validates every row and commits all-or-nothing.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="h-10 px-4 rounded-xl bg-[#ff681e] text-white text-sm font-bold flex items-center gap-1.5 cursor-pointer">
+            <Upload className="w-4 h-4" />
+            {busy && !preview ? 'Reading…' : 'Choose file / 选择文件'}
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".csv,.xlsx"
+              className="hidden"
+              data-testid="import-file"
+              onChange={handleFile}
+            />
+          </label>
+          {fileName && (
+            <span className="text-xs text-slate-500 flex items-center gap-1">
+              {fileName} · {lines.length} rows
+              <button type="button" onClick={reset} aria-label="Clear file">
+                <X className="w-4 h-4" />
+              </button>
+            </span>
+          )}
+        </div>
+
+        <details className="text-[11px] text-slate-500">
+          <summary className="cursor-pointer font-semibold">Download template / 下载模板</summary>
+          <pre className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-200 overflow-x-auto">
+{`sku_code,warehouse_code,on_hand,unsellable
+AKT-0001-BLK,WH-SH,120,0`}
+          </pre>
+        </details>
+      </section>
+
+      {preview && !result && (
+        <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold">Server preview / 服务端预览</h3>
+              <p className="text-[11px] text-slate-500">
+                Values below come from PostgreSQL. Confirming locks each row and rejects the whole
+                batch if anything changed.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={commit}
+              disabled={busy || preview.status !== 'previewed'}
+              data-testid="import-commit"
+              className="h-10 px-4 rounded-xl bg-emerald-600 text-white text-sm font-bold disabled:opacity-50"
+            >
+              {busy ? 'Committing…' : 'Confirm import / 确认导入'}
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[680px]">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="text-left px-3 py-2">Row</th>
+                  <th className="text-left px-3 py-2">SKU</th>
+                  <th className="text-left px-3 py-2">Warehouse</th>
+                  <th className="text-right px-3 py-2">On hand (old → new)</th>
+                  <th className="text-right px-3 py-2">Unsellable (old → new)</th>
+                  <th className="text-right px-3 py-2">Reserved</th>
+                  <th className="text-right px-3 py-2">Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map(row => (
+                  <tr key={row.rowNumber} className="border-t border-slate-100" data-testid="import-row">
+                    <td className="px-3 py-2">{row.rowNumber}</td>
+                    <td className="px-3 py-2 font-mono">{row.skuCode}</td>
+                    <td className="px-3 py-2">{row.warehouseCode}</td>
+                    <td className="px-3 py-2 text-right">
+                      {row.onHandBefore} → <strong>{row.onHandNew}</strong>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {row.unsellableBefore} → <strong>{row.unsellableNew}</strong>
+                    </td>
+                    <td className="px-3 py-2 text-right">{row.reserved}</td>
+                    <td className="px-3 py-2 text-right text-slate-400">{row.versionBefore}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {result && (
+        <section className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-900 space-y-2">
+          <div className="flex items-center gap-2 font-bold">
+            <CheckCircle2 className="w-4 h-4" />
+            {result.alreadyCommitted ? 'Already imported (idempotent)' : 'Import committed'}
+          </div>
+          <p>
+            {result.rows.length} rows applied at {new Date(result.committedAt).toLocaleString()}.
+            Repeated confirmation with the same preview does not change stock again.
+          </p>
+          <button
+            type="button"
+            onClick={reset}
+            className="h-9 px-3 rounded-xl border border-emerald-300 bg-white font-semibold"
+          >
+            Import another file
+          </button>
+        </section>
+      )}
+    </div>
+  );
+};

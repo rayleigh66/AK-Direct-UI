@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import type { DbPool } from './db/pool.js';
 import type { AuthConfig } from './auth/types.js';
@@ -6,6 +7,9 @@ import { createAuthRouter } from './auth/routes.js';
 import { createCompanyRouter } from './companies/routes.js';
 import { createSalesRouter } from './sales/routes.js';
 import { createAdminRouter } from './admin/routes.js';
+import { createAdminCatalogRouter, createCustomerCatalogRouter } from './catalog/routes.js';
+import { createMediaRouter } from './media/routes.js';
+import { createAdminInventoryRouter, createSalesInventoryRouter } from './inventory/routes.js';
 import { HttpError } from './http/errors.js';
 
 export interface AuthDependencies {
@@ -16,9 +20,12 @@ export interface AuthDependencies {
 export interface AppDependencies {
   checkReadiness: () => Promise<ReadinessResult>;
   auth?: AuthDependencies;
+  /** Directory where uploaded product images are stored. */
+  mediaRoot?: string;
 }
 
-export function createApp({ checkReadiness, auth }: AppDependencies) {
+export function createApp({ checkReadiness, auth, mediaRoot }: AppDependencies) {
+  const imageRoot = mediaRoot ?? path.resolve(process.cwd(), 'media');
   const app = express();
   app.disable('x-powered-by');
   if (auth) app.set('trust proxy', auth.config.trustProxy);
@@ -56,6 +63,13 @@ export function createApp({ checkReadiness, auth }: AppDependencies) {
   if (auth) {
     app.use('/api/auth', createAuthRouter(auth.pool, auth.config));
     app.use('/api/companies', createCompanyRouter(auth.pool, auth.config));
+    app.use('/api/catalog', createCustomerCatalogRouter(auth.pool, auth.config));
+    app.use('/api/media', createMediaRouter(auth.pool, auth.config, imageRoot));
+    // More specific admin/sales routers are mounted before the Phase 4B-02
+    // routers; unmatched paths pass through to the next router.
+    app.use('/api/admin/catalog', createAdminCatalogRouter(auth.pool, auth.config, imageRoot));
+    app.use('/api/admin', createAdminInventoryRouter(auth.pool, auth.config));
+    app.use('/api/sales', createSalesInventoryRouter(auth.pool, auth.config));
     app.use('/api/sales', createSalesRouter(auth.pool, auth.config));
     app.use('/api/admin', createAdminRouter(auth.pool, auth.config));
   }
