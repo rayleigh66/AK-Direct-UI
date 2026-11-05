@@ -649,6 +649,21 @@ export async function updateSku(
   input: UpdateSkuInput
 ): Promise<SkuDto> {
   return withTransaction(pool, async client => {
+    // Lock order is parent -> child everywhere (publish, SKU creation, image
+    // operations). Locking the product first serialises concurrent SKU status
+    // changes so two "last SKU" decisions cannot both succeed.
+    const pointer = await client.query<{ product_id: string }>(
+      'SELECT product_id FROM product_skus WHERE id = $1',
+      [skuId]
+    );
+    if (!pointer.rows[0]) throw new HttpError(404, 'sku_not_found', 'SKU not found.');
+    const productId = pointer.rows[0].product_id;
+    const productLock = await client.query<{ published: boolean }>(
+      'SELECT published FROM products WHERE id = $1 FOR UPDATE',
+      [productId]
+    );
+    if (!productLock.rows[0]) throw new HttpError(404, 'sku_not_found', 'SKU not found.');
+
     const rows = await client.query<SkuRow>('SELECT * FROM product_skus WHERE id = $1 FOR UPDATE', [skuId]);
     if (!rows.rows[0]) throw new HttpError(404, 'sku_not_found', 'SKU not found.');
     const current = rows.rows[0];
@@ -675,11 +690,7 @@ export async function updateSku(
     }
     const nextStatus = input.sellableStatus ?? current.sellable_status;
     if (current.sellable_status === 'active' && nextStatus === 'discontinued') {
-      const product = await client.query<{ published: boolean }>(
-        'SELECT published FROM products WHERE id = $1',
-        [current.product_id]
-      );
-      if (product.rows[0]?.published) {
+      if (productLock.rows[0].published) {
         const others = await client.query<{ count: string }>(
           `SELECT count(*)::text AS count FROM product_skus
            WHERE product_id = $1 AND sellable_status = 'active' AND id <> $2`,
@@ -817,6 +828,9 @@ export async function setPrimaryImage(
   imageId: string
 ): Promise<ImageDto[]> {
   return withTransaction(pool, async client => {
+    // Keep the parent-product lock first, matching every other image/SKU write.
+    const product = await client.query('SELECT 1 FROM products WHERE id = $1 FOR UPDATE', [productId]);
+    if (!product.rowCount) throw new HttpError(404, 'product_not_found', 'Product not found.');
     const image = await client.query<ImageRow>(
       'SELECT * FROM product_images WHERE id = $1 AND product_id = $2 AND removed_at IS NULL FOR UPDATE',
       [imageId, productId]

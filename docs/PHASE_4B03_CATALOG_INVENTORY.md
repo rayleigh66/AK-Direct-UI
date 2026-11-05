@@ -99,7 +99,15 @@ Notable error codes: `duplicate_product_code`, `duplicate_sku_code`, `publish_re
 - The API image ships an entrypoint that starts as root only long enough to `chown` `MEDIA_ROOT` to the `node` user and then `exec`s the API process under `node` via `su-exec` (`UID 1000`). This keeps uploads working even if Docker initialised the named volume from another image. The `backup` service also waits for the API to be healthy.
 - Serving goes through `GET /api/media/:id`, never a static directory, so authorisation is enforced per request.
 - **Database backups do not include image files.** `scripts/backup-container.sh` now writes a separate `*_media_*.tar.gz` archive of the media volume with the same 30-day retention and mode 600.
-- `scripts/media-restore.sh` restores that archive into the media volume (`CONFIRM_RESTORE=yes` required). The isolated Docker smoke creates a media marker file, backs it up, deletes it, restores the archive and verifies the marker, so image backup/restore is exercised rather than claimed.
+- `scripts/media-restore.sh` never wipes the target before validation:
+  1. requires `COMPOSE_PROJECT`, `CONFIRM_RESTORE=yes` and `CONFIRM_MEDIA_VOLUME=<project>_media_data`, and verifies the Compose project/volume labels on the target volume;
+  2. checks the gzip integrity and every member path (`./` relative, no `..`, no backslash) and rejects symlink/hardlink/device entries;
+  3. extracts into a temporary volume, computes a SHA-256 manifest and verifies the extraction;
+  4. snapshots the current media into a recoverable previous volume;
+  5. promotes the staging volume and compares the target manifest with the staged manifest;
+  6. on any promotion/verification failure, restores the previous volume and keeps it for manual recovery if rollback itself fails.
+  The API is stopped only after validation and the snapshot exist.
+- `scripts/test-media-restore.sh` exercises the actual script against an isolated Compose project/volume: wrong target confirmation, missing volume, corrupt/truncated archives, path traversal, extraction failure, forced post-promotion failure with rollback, and a valid restore with content/checksum verification. It also hashes the production-named volume read-only before/after and fails if it changed.
 - Restoring only the database leaves images untouched; restoring only media leaves metadata untouched. Both archives must be kept together.
 
 ## 5. Inventory transactions

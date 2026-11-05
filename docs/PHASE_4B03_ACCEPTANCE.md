@@ -58,6 +58,30 @@ The default Mock application is unchanged and still passes its suite.
 - Concurrent test: two adjustments with the same version produce exactly one 200 and one 409, version increments once, final value equals the winner, and exactly one movement exists.
 - Import test: one invalid row (unknown SKU, duplicate pair, unsellable > on hand, negative) aborts the whole preview with no batch, audit or stock change.
 
+## 6a. Review fixes (P0-01, P0-02)
+
+### P0-01 — concurrent SKU discontinuation
+
+`updateSku()` now reads the SKU's immutable `product_id`, locks the parent `products` row `FOR UPDATE`, and only then locks the SKU row. Every other catalogue write (publish, SKU creation, image upload/order/primary/removal, product edit) already locks the product first, so the lock order is consistently parent → child. `setPrimaryImage()` was updated to take the same parent lock before the image row.
+
+Regression tests (PostgreSQL, separate HTTP sessions through the real app):
+
+- Published product with two active SKUs, both discontinued concurrently: exactly one 200 and one 409 `last_active_sku`; the losing SKU remains active; the product stays published with exactly one active SKU; exactly one `UPDATE_SKU` audit row exists.
+- Publish vs last-active-SKU discontinuation, five rounds: exactly one 200 and one 409 each round; if published, the product always has at least one active SKU; if discontinued, the product stays unpublished and publish fails with `publish_requires_sku`; audit rows match the successful action only.
+- Mutation evidence: temporarily removing `FOR UPDATE` from the parent product read makes the new discontinuous test fail with two 200 responses, confirming the regression test detects the original race.
+
+### P0-02 — safe media restore
+
+`scripts/media-restore.sh` was rewritten to validate before touching the target:
+
+- explicit `COMPOSE_PROJECT` and `CONFIRM_MEDIA_VOLUME` plus Compose label verification on the target volume;
+- gzip integrity, relative-path/`..`/backslash checks, and rejection of non-regular entries before extraction;
+- extraction into a temporary staging volume with a SHA-256 manifest;
+- recoverable snapshot of the current media before promotion;
+- promotion only after successful staging, then manifest verification; any failure restores the snapshot and keeps it if rollback itself fails.
+
+`scripts/test-media-restore.sh` runs the real script against an isolated Compose project (created via `docker compose create`) and asserts the target manifest is byte-identical after: wrong target confirmation, missing volume, corrupt archive, truncated archive, path traversal, extraction failure, and forced post-promotion verification failure (rollback path). A valid restore is verified against the archive checksum and must remove pre-restore files. The production-named media volume is hashed read-only before/after and must not change. All cases PASS locally; the same script runs in CI.
+
 ## 7. Local test results
 
 | Command | Result |
@@ -67,10 +91,11 @@ The default Mock application is unchanged and still passes its suite.
 | `npm run build` / `npm run verify:assets` | PASS |
 | `npm run api:lint` / `npm run api:build` | PASS |
 | `npm run api:test` | 5 files, **18 passed** |
-| `npm run api:test:db` | 3 files, **36 passed** (6 infrastructure, 13 auth/RBAC, 17 catalogue/inventory) |
+| `npm run api:test:db` | 3 files, **38 passed** (6 infrastructure, 13 auth/RBAC, 19 catalogue/inventory) |
 | `npm run test:e2e` | **90 passed / 18 skipped** |
 | `npm run test:e2e:preview` | **1 passed** |
 | `bash scripts/test-smoke-isolation.sh` | PASS (DB + media backup/restore, 4 migrations, runtime role) |
+| `bash scripts/test-media-restore.sh` | PASS (wrong target, missing volume, corrupt/truncated/unsafe/extraction-failure archives, forced rollback, valid restore with checksums) |
 | `bash scripts/real-auth-e2e.sh` | **2 passed** (desktop 1440 + mobile 390) |
 | Docker default stack (001–004) | `/api/ready` 200 |
 | Container restart persistence | PASS — product/image/stock counts unchanged after `docker compose restart db api`; the media file was served again with HTTP 200 `image/png` |
@@ -118,7 +143,7 @@ Actual result: **PASS** — `All isolated Phase 4B-01/4B-02/4B-03 compose checks
 | Real device Safari/Chrome | **NOT RUN** — Playwright emulation only |
 | Orders/cart/reservation | Out of scope; not claimed |
 | Image EXIF stripping / thumbnails / CDN | Not implemented |
-| CI execution of the real-auth Docker Playwright flow | **NOT RUN in CI** — it requires a running stack; run locally with `scripts/real-auth-e2e.sh` |
+| CI execution of the real-auth Docker Playwright flow | **PASS in CI** — the `real-catalog-e2e` job starts the real-auth stack and runs desktop + mobile Playwright, then the media restore security tests |
 
 ## 11. Residual risks
 
@@ -132,4 +157,4 @@ Actual result: **PASS** — `All isolated Phase 4B-01/4B-02/4B-03 compose checks
 
 ## 12. CI
 
-CI runs `local-prototype`, `backend-foundation` (36 integration tests) and `docker-smoke`. The exact push/PR run links for the current Head are recorded in the PR body.
+CI runs `local-prototype`, `backend-foundation` (38 integration tests), `docker-smoke` and `real-catalog-e2e` (real-auth stack, desktop/mobile Playwright and media restore security tests). The exact push/PR run links for the current Head are recorded in the PR body.

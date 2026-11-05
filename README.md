@@ -59,7 +59,7 @@ Phase 4B-03 persists products, SKUs, image metadata, series, tags, warehouses an
 
 - Product and SKU codes are entered manually and are unique; new products start unpublished.
 - `reserved` stock is never writable by the API until the order module exists.
-- Image files live in the `media_data` Docker volume. Database dumps **do not** contain them: the backup service also writes `*_media_*.tar.gz`, and `scripts/media-restore.sh` restores it.
+- Image files live in the `media_data` Docker volume. Database dumps **do not** contain them: the backup service also writes `*_media_*.tar.gz`, and `scripts/media-restore.sh` restores it after validating the archive into a staging volume (requires `COMPOSE_PROJECT`, `CONFIRM_MEDIA_VOLUME` and `CONFIRM_RESTORE=yes`).
 - With `VITE_REAL_AUTH=true` the app shows the real admin catalogue/inventory/import/setup workspace, the read-only sales inventory view and the customer catalogue. The default Mock UI is unchanged.
 
 ```bash

@@ -144,6 +144,9 @@ jobs:
       - name: Real-auth catalogue and inventory E2E
         run: bash scripts/real-auth-e2e.sh
 
+      - name: Media restore security tests (isolated Compose project)
+        run: bash scripts/test-media-restore.sh
+
       - name: Stop the stack
         if: always()
         run: docker compose down -v

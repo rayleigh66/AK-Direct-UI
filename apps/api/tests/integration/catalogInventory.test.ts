@@ -518,6 +518,113 @@ describeDb('catalog, media and inventory persistence', () => {
     expect(cannotPublish.body.error.code).toBe('publish_requires_sku');
   });
 
+  it('serialises concurrent discontinuations so a published product keeps an active SKU', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    const product = await createProduct(admin.agent, admin.csrfToken, { productCode: 'AKT-RACE-SKU' });
+    const first = await createSku(admin.agent, admin.csrfToken, product.id, { skuCode: 'AKT-RACE-SKU-1' });
+    const second = await createSku(admin.agent, admin.csrfToken, product.id, { skuCode: 'AKT-RACE-SKU-2' });
+    await uploadImage(admin.agent, admin.csrfToken, product.id);
+    expect(
+      (await post(admin.agent, `/api/admin/catalog/products/${product.id}/publish`, {}, admin.csrfToken))
+        .status
+    ).toBe(200);
+
+    const [one, two] = await Promise.all([
+      patch(
+        admin.agent,
+        `/api/admin/catalog/skus/${first.id}`,
+        { sellableStatus: 'discontinued' },
+        admin.csrfToken
+      ),
+      patch(
+        admin.agent,
+        `/api/admin/catalog/skus/${second.id}`,
+        { sellableStatus: 'discontinued' },
+        admin.csrfToken
+      ),
+    ]);
+    expect([one.status, two.status].sort()).toEqual([200, 409]);
+    const blocked = one.status === 409 ? one : two;
+    expect(blocked.body.error.code).toBe('last_active_sku');
+
+    const skus = await pool.query<{ id: string; sellable_status: string }>(
+      'SELECT id, sellable_status FROM product_skus WHERE product_id = $1 ORDER BY id',
+      [product.id]
+    );
+    const active = skus.rows.filter(row => row.sellable_status === 'active');
+    expect(active).toHaveLength(1);
+    const loserId = one.status === 409 ? first.id : second.id;
+    expect(skus.rows.find(row => row.id === loserId)?.sellable_status).toBe('active');
+
+    const published = await pool.query<{ published: boolean }>(
+      'SELECT published FROM products WHERE id = $1',
+      [product.id]
+    );
+    expect(published.rows[0].published).toBe(true);
+
+    const audits = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM audit_logs
+       WHERE action = 'UPDATE_SKU' AND target_id = ANY($1::text[])`,
+      [[first.id, second.id]]
+    );
+    expect(Number(audits.rows[0].count)).toBe(1);
+  });
+
+  it('keeps the invariant when publishing races the last-SKU discontinuation', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    for (let round = 0; round < 5; round++) {
+      const product = await createProduct(admin.agent, admin.csrfToken, {
+        productCode: `AKT-PUBRACE-${round}`,
+      });
+      const sku = await createSku(admin.agent, admin.csrfToken, product.id, {
+        skuCode: `AKT-PUBRACE-${round}-SKU`,
+      });
+      await uploadImage(admin.agent, admin.csrfToken, product.id);
+
+      const [publish, discontinue] = await Promise.all([
+        post(admin.agent, `/api/admin/catalog/products/${product.id}/publish`, {}, admin.csrfToken),
+        patch(
+          admin.agent,
+          `/api/admin/catalog/skus/${sku.id}`,
+          { sellableStatus: 'discontinued' },
+          admin.csrfToken
+        ),
+      ]);
+      expect([publish.status, discontinue.status].sort()).toEqual([200, 409]);
+
+      const state = await pool.query<{ published: boolean; active_count: string }>(
+        `SELECT p.published,
+                (SELECT count(*)::text FROM product_skus s
+                 WHERE s.product_id = p.id AND s.sellable_status = 'active') AS active_count
+         FROM products p WHERE p.id = $1`,
+        [product.id]
+      );
+      if (state.rows[0].published) {
+        expect(Number(state.rows[0].active_count)).toBeGreaterThanOrEqual(1);
+      } else {
+        expect(Number(state.rows[0].active_count)).toBe(0);
+      }
+      if (publish.status === 200) {
+        expect(state.rows[0].published).toBe(true);
+        expect(discontinue.body.error.code).toBe('last_active_sku');
+      } else {
+        expect(state.rows[0].published).toBe(false);
+        expect(publish.body.error.code).toBe('publish_requires_sku');
+      }
+
+      const publishAudits = await pool.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM audit_logs WHERE action = 'PUBLISH_PRODUCT' AND target_id = $1",
+        [product.id]
+      );
+      const skuAudits = await pool.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM audit_logs WHERE action = 'UPDATE_SKU' AND target_id = $1",
+        [sku.id]
+      );
+      expect(Number(publishAudits.rows[0].count)).toBe(publish.status === 200 ? 1 : 0);
+      expect(Number(skuAudits.rows[0].count)).toBe(discontinue.status === 200 ? 1 : 0);
+    }
+  });
+
   it('manages image ordering, primary selection and removal rules', async () => {
     const admin = await loggedInAgent('catalog.admin@example.test');
     const product = await createProduct(admin.agent, admin.csrfToken, { productCode: 'AKT-IMAGES' });
