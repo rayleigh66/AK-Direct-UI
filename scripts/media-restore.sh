@@ -186,7 +186,7 @@ fail_restore() {
     exit 1
   fi
   if ! start_api; then
-    echo "Rollback succeeded, but the API did not restart healthy; writers remain stopped." >&2
+    echo "Rollback succeeded, but the API did not restart healthy. Do not send traffic until the API is verified." >&2
     exit 1
   fi
   exit 1
@@ -259,7 +259,7 @@ fi
 # 5. Only reopen writers after a verified restore.
 if ! start_api; then
   KEEP_PREVIOUS=1
-  echo "Media was restored and verified, but the API did not restart healthy. Writers remain stopped; the previous media snapshot is kept in volume $PREVIOUS_VOLUME." >&2
+  echo "Media was restored and verified, but the API did not restart healthy. Do not send traffic to the API. The previous media snapshot is kept in volume $PREVIOUS_VOLUME for manual recovery." >&2
   exit 1
 fi
 echo "Media restore completed from $BACKUP_FILE (project $PROJECT, volume $TARGET_VOLUME)."
