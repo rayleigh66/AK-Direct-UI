@@ -1101,6 +1101,223 @@ describeDb('company shared cart and customer orders', () => {
     }
   }, 60_000);
 
+  it('scopes sales access and notifications by the current company assignment', async () => {
+    const admin = await login('order.admin@example.test');
+    const item = await createPublishedProduct(admin, { onHand: 100 });
+    const company = await createCompany({ assignedSalesUserId: sales1Id, letters: ['A'] });
+    const customer = await login(company.customers[0].username);
+    expect((await setCart(customer, item.skuId, 10)).status).toBe(200);
+    const created = await submit(customer);
+    expect(created.status).toBe(201);
+    const orderId = created.body.order.id as string;
+    const skuId = created.body.order.lines[0].skuId as string;
+
+    const sales1 = await login('order.sales1@example.test');
+    const sales2 = await login('order.sales2@example.test');
+
+    const sales1List = await sales1.agent.get('/api/sales/orders');
+    expect(sales1List.status).toBe(200);
+    expect(sales1List.body.orders.map((order: { id: string }) => order.id)).toContain(orderId);
+    expect((await sales1.agent.get(`/api/sales/orders/${orderId}`)).status).toBe(200);
+
+    const sales2List = await sales2.agent.get('/api/sales/orders');
+    expect(sales2List.body.orders.map((order: { id: string }) => order.id)).not.toContain(orderId);
+    expect((await sales2.agent.get(`/api/sales/orders/${orderId}`)).status).toBe(404);
+    expect((await admin.agent.get(`/api/admin/orders/${orderId}`)).status).toBe(200);
+
+    const before = await pool.query<{
+      snapshot: string | null;
+      current: string | null;
+    }>(
+      `SELECT o.assigned_sales_user_id AS snapshot, c.assigned_sales_user_id AS current
+       FROM orders o JOIN customer_companies c ON c.id = o.company_id WHERE o.id = $1`,
+      [orderId]
+    );
+    expect(before.rows[0]).toEqual({ snapshot: sales1Id, current: sales1Id });
+
+    // A no longer owns the company: access must change even though the order's
+    // submission-time snapshot still says A.
+    const reassigned = await patch(
+      admin.agent,
+      `/api/admin/companies/${company.companyId}/sales-assignment`,
+      { salesUserId: sales2Id },
+      admin.csrf
+    );
+    expect(reassigned.status).toBe(200);
+
+    const after = await pool.query<{ snapshot: string | null; current: string | null }>(
+      `SELECT o.assigned_sales_user_id AS snapshot, c.assigned_sales_user_id AS current
+       FROM orders o JOIN customer_companies c ON c.id = o.company_id WHERE o.id = $1`,
+      [orderId]
+    );
+    expect(after.rows[0]).toEqual({ snapshot: sales1Id, current: sales2Id });
+
+    const sales1After = await sales1.agent.get('/api/sales/orders');
+    expect(sales1After.body.orders.map((order: { id: string }) => order.id)).not.toContain(
+      orderId
+    );
+    expect((await sales1.agent.get(`/api/sales/orders/${orderId}`)).status).toBe(404);
+
+    const sales2After = await sales2.agent.get('/api/sales/orders');
+    expect(sales2After.body.orders.map((order: { id: string }) => order.id)).toContain(orderId);
+    const sales2Detail = await sales2.agent.get(`/api/sales/orders/${orderId}`);
+    expect(sales2Detail.status).toBe(200);
+    expect(sales2Detail.body.order.assignedSalesUserId).toBe(sales1Id);
+    expect(sales2Detail.body.order.currentAssignedSalesUserId).toBe(sales2Id);
+    expect((await admin.agent.get('/api/admin/orders')).body.orders.map((order: { id: string }) => order.id)).toContain(orderId);
+    expect((await admin.agent.get(`/api/admin/orders/${orderId}`)).status).toBe(200);
+
+    // The submission notification to A is invalidated, not delivered later.
+    const notificationsAfterReassign = await pool.query<{
+      audience: string;
+      internal_user_id: string | null;
+      status: string;
+      event_type: string;
+      cancelled_at: Date | null;
+    }>(
+      `SELECT audience, internal_user_id, status, event_type, cancelled_at
+       FROM order_notifications WHERE order_id = $1 ORDER BY created_at, id`,
+      [orderId]
+    );
+    const oldSales = notificationsAfterReassign.rows.find(
+      row => row.audience === 'sales' && row.internal_user_id === sales1Id
+    );
+    expect(oldSales).toMatchObject({ status: 'cancelled' });
+    expect(oldSales?.cancelled_at).not.toBeNull();
+    expect(
+      notificationsAfterReassign.rows.some(
+        row => row.audience === 'customer' && row.status === 'pending'
+      )
+    ).toBe(true);
+
+    // A post-reassignment change and cancellation notify only the new owner.
+    const modified = await patch(
+      customer.agent,
+      `/api/orders/${orderId}/lines`,
+      { expectedRevision: created.body.order.revision, lines: [{ skuId, quantity: 12 }] },
+      customer.csrf
+    );
+    expect(modified.status).toBe(200);
+
+    const afterModify = await pool.query<{
+      internal_user_id: string | null;
+      status: string;
+      event_type: string;
+    }>(
+      `SELECT internal_user_id, status, event_type FROM order_notifications
+       WHERE order_id = $1 AND audience = 'sales' ORDER BY created_at, id`,
+      [orderId]
+    );
+    expect(
+      afterModify.rows.some(
+        row =>
+          row.internal_user_id === sales2Id &&
+          row.status === 'pending' &&
+          row.event_type === 'ORDER_MODIFIED'
+      )
+    ).toBe(true);
+    expect(
+      afterModify.rows.some(
+        row => row.internal_user_id === sales1Id && row.status === 'pending'
+      )
+    ).toBe(false);
+
+    // A customer cancellation after reassignment notifies only the new owner.
+    const cancelItem = await createPublishedProduct(admin, { onHand: 100 });
+    expect((await setCart(customer, cancelItem.skuId, 10)).status).toBe(200);
+    const second = await submit(customer);
+    expect(second.status).toBe(201);
+    const secondOrderId = second.body.order.id as string;
+    const cancelled = await post(
+      customer.agent,
+      `/api/orders/${secondOrderId}/cancel`,
+      { expectedRevision: second.body.order.revision, reason: 'Second order changed' },
+      customer.csrf
+    );
+    expect(cancelled.status).toBe(200);
+    const secondSalesNotifications = await pool.query<{
+      internal_user_id: string | null;
+      status: string;
+      event_type: string;
+    }>(
+      `SELECT internal_user_id, status, event_type FROM order_notifications
+       WHERE order_id = $1 AND audience = 'sales' ORDER BY created_at, id`,
+      [secondOrderId]
+    );
+    expect(
+      secondSalesNotifications.rows.some(
+        row =>
+          row.internal_user_id === sales2Id &&
+          row.status === 'pending' &&
+          row.event_type === 'ORDER_CANCELLED'
+      )
+    ).toBe(true);
+    expect(
+      secondSalesNotifications.rows.some(row => row.internal_user_id === sales1Id)
+    ).toBe(false);
+
+    const preview = await admin.agent.get(
+      `/api/admin/orders/impact?kind=product_unpublish&targetId=${item.productId}`
+    );
+    expect(preview.status).toBe(200);
+    const unpublish = await post(
+      admin.agent,
+      `/api/admin/catalog/products/${item.productId}/unpublish`,
+      {
+        confirmAffectedOrders: true,
+        impactToken: preview.body.impact.impactToken,
+      },
+      admin.csrf
+    );
+    expect(unpublish.status).toBe(200);
+
+    const afterAdminCancel = await pool.query<{
+      internal_user_id: string | null;
+      status: string;
+      event_type: string;
+    }>(
+      `SELECT internal_user_id, status, event_type FROM order_notifications
+       WHERE order_id = $1 AND audience = 'sales' ORDER BY created_at, id`,
+      [orderId]
+    );
+    expect(
+      afterAdminCancel.rows.some(
+        row =>
+          row.internal_user_id === sales2Id &&
+          row.status === 'pending' &&
+          row.event_type === 'ORDER_CANCELLED_BY_ADMIN'
+      )
+    ).toBe(true);
+    expect(
+      afterAdminCancel.rows.some(
+        row => row.internal_user_id === sales1Id && row.status === 'pending'
+      )
+    ).toBe(false);
+
+    // Unassigning the company removes B's access and invalidates B's unsent rows.
+    const unassigned = await patch(
+      admin.agent,
+      `/api/admin/companies/${company.companyId}/sales-assignment`,
+      { salesUserId: null },
+      admin.csrf
+    );
+    expect(unassigned.status).toBe(200);
+    expect(
+      (await sales2.agent.get('/api/sales/orders')).body.orders.map(
+        (order: { id: string }) => order.id
+      )
+    ).not.toContain(orderId);
+    expect((await sales2.agent.get(`/api/sales/orders/${orderId}`)).status).toBe(404);
+    expect((await admin.agent.get(`/api/admin/orders/${orderId}`)).status).toBe(200);
+    expect((await customer.agent.get(`/api/orders/${orderId}`)).status).toBe(200);
+    const remainingSalesPending = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM order_notifications
+       WHERE order_id = $1 AND audience = 'sales' AND status = 'pending'`,
+      [orderId]
+    );
+    expect(remainingSalesPending.rows[0].count).toBe('0');
+  }, 60_000);
+
   it('runs cart and order writes through the least-privilege runtime role', async () => {
     const role = `aoking_runtime_orders_${process.pid}`;
     const rolePassword = 'RuntimeOrdersPass123!';
@@ -1186,6 +1403,13 @@ describeDb('company shared cart and customer orders', () => {
         .send({ username: 'order.admin@example.test', password: PASSWORD });
       expect(adminLogin.status).toBe(200);
       expect((await all.get('/api/admin/orders')).status).toBe(200);
+      const reassigned = await patch(
+        all,
+        `/api/admin/companies/${companyAId}/sales-assignment`,
+        { salesUserId: sales2Id },
+        adminToken
+      );
+      expect(reassigned.status).toBe(200);
     } finally {
       await runtimePool.end();
       const owner = new Client({ connectionString: databaseUrl() });

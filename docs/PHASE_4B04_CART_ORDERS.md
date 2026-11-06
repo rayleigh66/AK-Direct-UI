@@ -19,9 +19,14 @@ Implemented:
 
 Explicitly not implemented: order confirmation, final tier/promotion pricing, stock reservation (`reserved` stays 0), payment, shipment, WMS, automatic deployment, FactoryOS3.
 
-## 2. Migration `005_cart_orders.sql`
+## 2. Migrations `005_cart_orders.sql` and `006_sales_reassignment.sql`
 
-Additive only. `001`–`004` are untouched and checksum-frozen.
+Additive only. `001`–`005` are untouched and checksum-frozen.
+
+`006_sales_reassignment.sql` adds the `cancelled` notification status and
+`cancelled_at`, and cancels any pending sales notification addressed to a
+salesperson who is no longer the company's current assignee. `schema_version`
+becomes `4b04.1`; readiness requires `006_sales_reassignment.sql`.
 
 | Table | Purpose |
 | --- | --- |
@@ -38,7 +43,7 @@ Additive only. `001`–`004` are untouched and checksum-frozen.
 
 Constraints: unique order number; unique `(order_id, line_number)` and `(order_id, sku_id)`; non-negative and bounded quantities/amounts; positive reference total; a cancellation timestamp is present exactly when the status is `CANCELLED`; cart quantities match the MOQ; order-item line amount equals reference unit price × quantity. There is no DELETE grant for orders, order items or history.
 
-`schema_version` becomes `4b04`; readiness requires `005_cart_orders.sql`.
+`schema_version` becomes `4b04.1`; readiness requires `006_sales_reassignment.sql`.
 
 ### Order-number date basis
 
@@ -77,7 +82,7 @@ Delivery fields follow the approved Mock values: `Express`, `Air`, `Sea`, `Custo
 
 | Method | Path | Permission |
 | --- | --- | --- |
-| GET | `/api/sales/orders`, `/api/sales/orders/:id` | `sales.read_assigned` (assigned companies) or `sales.read_all` |
+| GET | `/api/sales/orders`, `/api/sales/orders/:id` | `sales.read_assigned` via the company's **current** `assigned_sales_user_id`, or `sales.read_all` |
 | GET | `/api/admin/orders`, `/api/admin/orders/:id` | `sales.read_all` |
 | GET | `/api/admin/orders/impact?kind=…&targetId=…[&companyId=…]` | `sales.read_all` |
 
@@ -180,7 +185,13 @@ Notifications are durable `order_notifications` rows with status `pending`. **No
 
 Customer order DTOs contain only order number, status/label, revision, line snapshots, reference amounts, delivery fields, customer note, cancellation reason and a customer-friendly history. They omit company/internal IDs, assigned salesperson, internal notes, audit data, submitter identity and employee permissions.
 
-Internal sales/administrator DTOs add company code/name, submitting username, assigned salesperson and full history actor/details. Sales queries are filtered by `assigned_sales_user_id`; administrators with `sales.read_all` see all.
+Internal sales/administrator DTOs add company code/name, submitting username, the immutable submission-time assigned-salesperson snapshot (`assignedSalesUserId`), the current owner (`currentAssignedSalesUserId`) and full history actor/details.
+
+Sales list and detail authorization uses the **current** `customer_companies.assigned_sales_user_id` through a database join/condition, never the order snapshot. After a reassignment, the former owner receives an empty list and 404 on direct detail; the new owner sees existing pending orders; administrators with `sales.read_all` are unchanged. The order snapshot is preserved for audit only.
+
+Order-change, customer-cancellation and administrative-cancellation notifications resolve the current assignee inside the transaction under a shared company lock. A sales-assignment transaction locks the company `FOR UPDATE` and marks every pending sales notification for a different assignee as `cancelled` with `cancelled_at`; a sender must therefore never deliver a stale pending row to the former owner. Unassigned companies generate customer notifications only.
+
+To keep that added shared lock deadlock-safe, destructive catalogue actions lock affected companies before their product/order locks, and notification insertion always takes the company lock before the order lock. The resulting order matches submission (`company → product → SKU → order`).
 
 ## 9. Phase 4B-03 P1 fixes
 

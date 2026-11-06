@@ -297,9 +297,13 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                     <div className="font-mono font-semibold">{detail.submittedByUsername}</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <div className="text-slate-400">Assigned salesperson</div>
+                    <div className="text-slate-400">Current salesperson (access scope)</div>
                     <div className="font-mono text-[11px] break-all">
-                      {detail.assignedSalesUserId ?? 'Unassigned'}
+                      {detail.currentAssignedSalesUserId ?? 'Unassigned'}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      Submitted under {detail.assignedSalesUserId ?? 'no salesperson'} (audit
+                      snapshot)
                     </div>
                   </div>
                 </div>

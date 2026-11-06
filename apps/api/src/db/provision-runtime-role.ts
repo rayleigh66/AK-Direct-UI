@@ -152,6 +152,10 @@ export async function provisionRuntimeRole(
       `GRANT SELECT, INSERT ON order_items, order_idempotency,
         order_status_history, order_notifications TO ${role}`
     );
+    // Reassignment invalidates unsent sales notifications for the former owner.
+    await client.query(
+      `GRANT UPDATE (status, cancelled_at) ON order_notifications TO ${role}`
+    );
     // Product/price snapshots stay immutable; only the mutable quantity and its
     // derived reference line total may be updated on a pending order.
     await client.query(

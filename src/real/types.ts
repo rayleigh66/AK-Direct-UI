@@ -241,7 +241,10 @@ export interface CustomerOrderDto {
 export interface InternalOrderDto extends Omit<CustomerOrderDto, 'history'> {
   company: { id: string; customerCode: string; shortName: string };
   submittedByUsername: string;
+  /** Immutable submission-time snapshot. */
   assignedSalesUserId: string | null;
+  /** Current company owner used for access and notifications. */
+  currentAssignedSalesUserId: string | null;
   history: InternalOrderHistoryDto[];
 }
 

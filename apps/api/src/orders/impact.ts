@@ -4,6 +4,7 @@ import type { DbPool } from '../db/pool.js';
 import { writeAudit } from '../audit/audit.js';
 import { HttpError } from '../http/errors.js';
 import type { AuthContext } from '../auth/types.js';
+import { queueOrderNotifications } from './notifications.js';
 
 export type ImpactKind =
   | 'product_unpublish'
@@ -46,7 +47,6 @@ interface AffectedRow {
   revision: string;
   reference_total_cents: string;
   submitted_at: Date;
-  assigned_sales_user_id: string | null;
 }
 
 function targetKey(kind: ImpactKind, targetId: string, companyId?: string | null): string {
@@ -92,7 +92,7 @@ function conditions(
 
 const AFFECTED_SELECT = `
   SELECT o.id, o.order_no, o.company_id, c.customer_code, o.status, o.revision,
-         o.reference_total_cents, o.submitted_at, o.assigned_sales_user_id
+         o.reference_total_cents, o.submitted_at
   FROM orders o
   JOIN customer_companies c ON c.id = o.company_id
   WHERE o.status = 'PENDING_CONFIRMATION' AND
@@ -155,6 +155,33 @@ export async function findPendingOrderImpact(
   return impactFrom(kind, targetId, companyId ?? null, result.rows);
 }
 
+/**
+ * Lock the companies with affected pending orders BEFORE any product/order
+ * lock. Submission locks company -> product -> SKU; using the same order in
+ * destructive admin actions avoids a company/product deadlock.
+ */
+export async function lockAffectedCompanies(
+  client: PoolClient,
+  kind: ImpactKind,
+  targetId: string,
+  companyId?: string | null
+): Promise<void> {
+  const { where, values } = conditions(kind, targetId, companyId);
+  const rows = await client.query<{ company_id: string }>(
+    `SELECT DISTINCT o.company_id
+     FROM orders o
+     WHERE o.status = 'PENDING_CONFIRMATION' AND ${where}
+     ORDER BY o.company_id`,
+    values
+  );
+  if (rows.rows.length === 0) return;
+  await client.query(
+    `SELECT id FROM customer_companies
+     WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE`,
+    [rows.rows.map(row => row.company_id)]
+  );
+}
+
 export interface DestructiveOrderImpactOptions {
   confirmAffectedOrders?: boolean;
   impactToken?: string;
@@ -180,6 +207,8 @@ export async function enforcePendingOrderImpact(
   auth: AuthContext,
   input: EnforceImpactInput
 ): Promise<AffectedOrderSummary[]> {
+  // Hold company locks before order locks (company -> product -> SKU -> order).
+  await lockAffectedCompanies(client, input.kind, input.targetId, input.companyId);
   const { where, values } = conditions(input.kind, input.targetId, input.companyId);
   const result = await client.query<AffectedRow>(
     `${AFFECTED_SELECT} ${where} ORDER BY o.id FOR UPDATE OF o`,
@@ -239,33 +268,15 @@ export async function enforcePendingOrderImpact(
         { trigger: input.kind, targetId: input.targetId },
       ]
     );
-    await client.query(
-      `INSERT INTO order_notifications
-        (id, order_id, company_id, audience, internal_user_id, event_type, title, message, status)
-       VALUES ($1, $2, $3, 'customer', NULL, 'ORDER_CANCELLED_BY_ADMIN', $4, $5, 'pending')`,
-      [
-        randomUUID(),
-        row.id,
-        row.company_id,
-        `Order ${row.order_no} cancelled`,
-        `Order ${row.order_no} was cancelled because ${input.reason}`,
-      ]
-    );
-    if (row.assigned_sales_user_id) {
-      await client.query(
-        `INSERT INTO order_notifications
-          (id, order_id, company_id, audience, internal_user_id, event_type, title, message, status)
-         VALUES ($1, $2, $3, 'sales', $4, 'ORDER_CANCELLED_BY_ADMIN', $5, $6, 'pending')`,
-        [
-          randomUUID(),
-          row.id,
-          row.company_id,
-          row.assigned_sales_user_id,
-          `Order ${row.order_no} · ${row.customer_code}`,
-          `Pending order ${row.order_no} was cancelled by an administrator (${input.kind}).`,
-        ]
-      );
-    }
+    await queueOrderNotifications(client, {
+      orderId: row.id,
+      companyId: row.company_id,
+      companyCode: row.customer_code,
+      orderNo: row.order_no,
+      eventType: 'ORDER_CANCELLED_BY_ADMIN',
+      customerMessage: `Order ${row.order_no} was cancelled because ${input.reason}`,
+      salesMessage: `Pending order ${row.order_no} was cancelled by an administrator (${input.kind}).`,
+    });
     await writeAudit(client, {
       actorType: auth.user.type,
       actorId: auth.user.id,

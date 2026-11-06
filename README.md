@@ -78,6 +78,7 @@ Phase 4B-04 adds the real customer ordering path: one PostgreSQL cart per custom
 - Submission locks the company cart, re-checks company/account/brand/product/SKU/MOQ/stock in PostgreSQL, recomputes integer-cent reference amounts, creates the order, history, audit and pending notifications, then clears the cart — all in one transaction.
 - Idempotency is bound to company + submitting account + key + canonical payload.
 - Orders start as `PENDING_CONFIRMATION`. Confirmation, final pricing and reservation are explicitly deferred to Phase 4B-05; the sales UI shows a disabled confirmation button.
+- Sales order access follows the customer company's **current** assigned salesperson; the order stores the submission-time salesperson only as an audit snapshot. Pending sales notifications to a former owner are cancelled on reassignment.
 - `ORDER_NUMBER_TIME_ZONE` (default `UTC`) controls the daily order-number date basis.
 - With `VITE_REAL_AUTH=true` the customer sees Catalogue → Cart → Orders; sales sees assigned pending orders; administrators see read-only supervision and the pending-order impact dialog.
 

@@ -10,6 +10,7 @@ import {
   enforcePendingOrderImpact,
   type DestructiveOrderImpactOptions,
 } from '../orders/impact.js';
+import { cancelStaleSalesNotifications } from '../orders/notifications.js';
 
 export interface CompanyRow {
   id: string;
@@ -472,19 +473,35 @@ export async function setSalesAssignment(
   salesUserId: string | null
 ): Promise<CompanyDto> {
   return withTransaction(pool, async client => {
+    // Serialise against notification inserts: they hold FOR SHARE on this row
+    // while resolving the current assignee.
+    const existing = await client.query<CompanyRow>(
+      'SELECT * FROM customer_companies WHERE id = $1 FOR UPDATE',
+      [companyId]
+    );
+    if (!existing.rows[0]) throw new HttpError(404, 'company_not_found', 'Company not found.');
     if (salesUserId) await validateAssignedSales(client, salesUserId);
+
     const result = await client.query<CompanyRow>(
       `UPDATE customer_companies SET assigned_sales_user_id = $2, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [companyId, salesUserId]
     );
-    if (!result.rows[0]) throw new HttpError(404, 'company_not_found', 'Company not found.');
+    const cancelledPendingNotifications = await cancelStaleSalesNotifications(
+      client,
+      companyId,
+      salesUserId
+    );
     await writeAudit(client, {
       ...actor(auth),
       action: 'ASSIGN_SALES',
       targetType: 'customer_company',
       targetId: companyId,
-      details: { salesUserId },
+      details: {
+        salesUserId,
+        previousSalesUserId: existing.rows[0].assigned_sales_user_id,
+        cancelledPendingNotifications,
+      },
     });
     return companyDto(result.rows[0]);
   });

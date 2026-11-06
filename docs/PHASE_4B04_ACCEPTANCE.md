@@ -9,7 +9,7 @@
 
 | Area | Result |
 | --- | --- |
-| Schema | Additive migration `005_cart_orders.sql` (001–004 untouched) |
+| Schema | Additive migrations `005_cart_orders.sql` and `006_sales_reassignment.sql` (001–005 untouched) |
 | Cart | One company cart, monotonic revision, shared by all sub-accounts, PostgreSQL persistence, server eligibility/stock checks |
 | Orders | Atomic submission, server-recomputed integer-cent reference amounts, `OD + YYMMDD + daily sequence`, immutable snapshots |
 | Idempotency | Company + actor + key + canonical payload digest |
@@ -27,7 +27,9 @@ Not implemented: order confirmation, final tier/promotion pricing, stock reserva
 
 `005_cart_orders.sql` adds `order_statuses`, `company_carts`, `cart_items`, `order_sequences`, `orders`, `order_items`, `order_idempotency`, `order_status_history`, `order_notifications` and `inventory_import_commit_results`, plus `inventory_import_batches.payload_digest`.
 
-Guards include: unique order numbers, unique company/SKU cart lines, quantity 10–1,000,000, positive bounded cent amounts, `line_reference_cents = reference_unit_price_cents × quantity`, cancellation timestamp ↔ `CANCELLED`, one daily sequence row per date, and foreign keys to company/user/product/SKU/warehouse/order. `schema_version` becomes `4b04`; readiness requires `005_cart_orders.sql`.
+`006_sales_reassignment.sql` adds the `cancelled` notification status and `cancelled_at`, and cancels pending sales notifications addressed to a former company owner. `schema_version` is `4b04.1`; readiness requires `006_sales_reassignment.sql`.
+
+Guards include: unique order numbers, unique company/SKU cart lines, quantity 10–1,000,000, positive bounded cent amounts, `line_reference_cents = reference_unit_price_cents × quantity`, cancellation timestamp ↔ `CANCELLED`, one daily sequence row per date, and foreign keys to company/user/product/SKU/warehouse/order. `schema_version` becomes `4b04.1`; readiness requires `006_sales_reassignment.sql`.
 
 Order-number date basis is `ORDER_NUMBER_TIME_ZONE` (default `UTC`), validated at startup. Daily sequences are allocated with `INSERT … ON CONFLICT … UPDATE … RETURNING`; numbers are never reused and are not derived from a random value.
 
@@ -37,7 +39,7 @@ The full contract and permission matrix are in [Phase 4B-04 Cart & Orders](PHASE
 
 - Every write requires authentication, a changed initial password, server-side RBAC and CSRF.
 - Customers are always scoped by `auth.user.companyId`; no request field can select another company.
-- Sales see only `assigned_sales_user_id = auth.user.id` unless they also hold `sales.read_all`.
+- Sales see only orders whose customer company currently has `assigned_sales_user_id = auth.user.id` (a database join, not the order snapshot), unless they also hold `sales.read_all`. A former owner receives 404 on direct detail; the current owner sees existing orders.
 - Administrators use `sales.read_all` for supervision; no order write route exists for administrators or sales in this phase.
 - Customer DTOs omit company/internal IDs, assigned salesperson, internal notes, audit data, submitter identity and employee permissions; the integration suite asserts these fields are absent.
 - All cart/order responses set `Cache-Control: no-store`.
@@ -84,6 +86,16 @@ The React admin catalogue shows the impact dialog and requires explicit confirma
 - Zero/negative or unsafe cent totals cannot be stored (`reference_total_cents > 0` and bounded; `sumCents`/`multiplyCents` guards).
 - No new SKU permanent price, tier rule or promotion was created.
 
+## 6a. P0-01 — sales ownership follows the current company assignment
+
+- `orders.assigned_sales_user_id` remains the immutable submission-time snapshot.
+- `/api/sales/orders` and `/api/sales/orders/:id` now authorize through `customer_companies.assigned_sales_user_id` (SQL join/condition), so a former owner gets an empty list and 404 on direct detail; the new owner sees existing pending orders; `sales.read_all` supervision is unchanged.
+- Internal DTOs expose both the snapshot and `currentAssignedSalesUserId`.
+- Change/cancellation/administrative-cancellation notifications resolve the current assignee under a shared company lock; the assignment transaction locks the company and marks stale pending sales notifications `cancelled` with `cancelled_at`. A future sender must only process `pending` rows.
+- Destructive catalogue/company actions lock affected customer companies before their product/order locks, matching submission's company → product → SKU → order lock order, so the added assignment check cannot introduce a lock-order deadlock.
+- Integration test: company assigned A → order → reassignment to B → A list empty/404, B list/detail 200, admin 200, snapshot unchanged; A's unsent submission notification is cancelled; post-reassignment modify, customer cancellation and administrative cancellation create pending rows only for B; unassignment removes B's access, leaves customer/admin access intact, and cancels B's remaining pending sales rows.
+- Runtime-role test also performs a sales reassignment, exercising the column-level notification `UPDATE` grant.
+
 ## 7. Phase 4B-03 P1 fixes
 
 | P1 | Evidence |
@@ -107,13 +119,13 @@ The React admin catalogue shows the impact dialog and requires explicit confirma
 | `npm run build` / `npm run verify:assets` | PASS |
 | `npm run api:lint` / `npm run api:build` | PASS |
 | `npm run api:test` | **6 files, 25 passed** |
-| `npm run api:test:db` | **5 files, 57 passed** — infrastructure 6, auth/RBAC 13, catalogue/inventory 19, cart/orders 15, import P1 4 |
+| `npm run api:test:db` | **5 files, 58 passed** — infrastructure 6, auth/RBAC 13, catalogue/inventory 19, cart/orders 16, import P1 4 |
 | `npm run test:e2e` | **90 passed / 18 skipped** |
 | `npm run test:e2e:preview` | **1 passed** |
-| `bash scripts/test-smoke-isolation.sh` | PASS — 5 migrations, runtime role, backup/restore, media marker, readiness |
+| `bash scripts/test-smoke-isolation.sh` | PASS — 6 migrations, runtime role, backup/restore, media marker, readiness |
 | `bash scripts/test-media-restore.sh` | PASS — archive negatives + live API stop/rollback/restart/health cases |
 | `bash scripts/real-auth-e2e.sh` (isolated Compose project) | **4 passed** — catalogue + orders, desktop 1440 and mobile 390 |
-| Restart persistence | PASS — 10 orders, latest `OD2611060010`, unchanged after `db`/`api` restart |
+| Restart persistence | PASS — order count unchanged after isolated `db`/`api` restart; `/api/ready` 200 |
 
 ### Real-mode Playwright path
 
@@ -125,7 +137,7 @@ The React admin catalogue shows the impact dialog and requires explicit confirma
 4. customer B sees the company order, changes the quantity to 14 (`$588.00`) and later cancels it;
 5. the assigned salesperson sees the pending order and the disabled Phase 4B-05 confirmation button.
 
-Layout is asserted with no horizontal overflow at 375, 390, 430, 768 and 1440 px; mobile 390 and desktop 1440 screenshots are stored in `docs/ui-review/real-orders/`.
+Layout is asserted with no horizontal overflow at 375, 390, 430, 768 and 1440 px; mobile 390 and desktop 1440 screenshots are stored in `docs/ui-review/real-orders/`. The internal detail now shows the current salesperson (access scope) alongside the submission-time audit snapshot.
 
 ## 10. Screenshots
 

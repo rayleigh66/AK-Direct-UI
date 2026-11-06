@@ -8,6 +8,7 @@ import type { AuthContext } from '../auth/types.js';
 import { storeImage, removeStoredImage } from '../media/storage.js';
 import {
   enforcePendingOrderImpact,
+  lockAffectedCompanies,
   type DestructiveOrderImpactOptions,
 } from '../orders/impact.js';
 
@@ -492,6 +493,10 @@ export async function setProductPublished(
   impactOptions: DestructiveOrderImpactOptions = {}
 ): Promise<ProductDto> {
   return withTransaction(pool, async client => {
+    // Keep the lock order company -> product consistent with order submission.
+    if (!published) {
+      await lockAffectedCompanies(client, 'product_unpublish', productId);
+    }
     const rows = await client.query<ProductRow>('SELECT * FROM products WHERE id = $1 FOR UPDATE', [
       productId,
     ]);
@@ -675,6 +680,9 @@ export async function updateSku(
     );
     if (!pointer.rows[0]) throw new HttpError(404, 'sku_not_found', 'SKU not found.');
     const productId = pointer.rows[0].product_id;
+    if (input.sellableStatus === 'discontinued') {
+      await lockAffectedCompanies(client, 'sku_discontinue', skuId);
+    }
     const productLock = await client.query<{ published: boolean }>(
       'SELECT published FROM products WHERE id = $1 FOR UPDATE',
       [productId]

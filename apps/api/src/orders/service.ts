@@ -6,6 +6,7 @@ import { writeAudit } from '../audit/audit.js';
 import { HttpError } from '../http/errors.js';
 import type { AuthContext } from '../auth/types.js';
 import { getCartForCompany, requireCustomerCompany } from '../cart/service.js';
+import { queueOrderNotifications } from './notifications.js';
 import {
   PRICING_MODE,
   PRICING_VERSION,
@@ -87,7 +88,10 @@ export interface CustomerOrderDto {
 export interface InternalOrderDto extends Omit<CustomerOrderDto, 'history'> {
   company: { id: string; customerCode: string; shortName: string };
   submittedByUsername: string;
+  /** Immutable submission-time audit snapshot. */
   assignedSalesUserId: string | null;
+  /** Current ownership used for sales access and notifications. */
+  currentAssignedSalesUserId: string | null;
   history: InternalOrderHistoryDto[];
 }
 
@@ -117,6 +121,7 @@ interface OrderRow {
   company_code: string;
   company_name: string;
   submitted_by_username: string;
+  current_assigned_sales_user_id: string | null;
 }
 
 interface OrderLineRow {
@@ -155,6 +160,7 @@ const ORDER_SELECT = `
   SELECT o.*, st.customer_label AS status_label,
          to_char(o.expected_ship_date, 'YYYY-MM-DD') AS expected_ship_date_text,
          c.customer_code AS company_code, c.short_name AS company_name,
+         c.assigned_sales_user_id AS current_assigned_sales_user_id,
          u.username AS submitted_by_username
   FROM orders o
   JOIN order_statuses st ON st.id = o.status
@@ -245,6 +251,7 @@ function internalOrderDto(
     },
     submittedByUsername: row.submitted_by_username,
     assignedSalesUserId: row.assigned_sales_user_id,
+    currentAssignedSalesUserId: row.current_assigned_sales_user_id,
     history: history.map(event => ({
       eventType: event.event_type,
       fromStatus: event.from_status,
@@ -415,50 +422,6 @@ function assertLineOrderable(row: CartLineRow, quantity: number): void {
       `SKU ${row.sku_code} only has ${available} PCS available; ${quantity} PCS cannot be ordered.`,
       undefined,
       { skuCode: row.sku_code, available, requested: quantity }
-    );
-  }
-}
-
-async function queueNotification(
-  client: PoolClient,
-  input: {
-    orderId: string;
-    companyId: string;
-    companyCode: string;
-    orderNo: string;
-    eventType: 'ORDER_SUBMITTED' | 'ORDER_MODIFIED' | 'ORDER_CANCELLED' | 'ORDER_CANCELLED_BY_ADMIN';
-    assignedSalesUserId: string | null;
-    customerMessage: string;
-    salesMessage: string;
-  }
-): Promise<void> {
-  await client.query(
-    `INSERT INTO order_notifications
-      (id, order_id, company_id, audience, internal_user_id, event_type, title, message, status)
-     VALUES ($1, $2, $3, 'customer', NULL, $4, $5, $6, 'pending')`,
-    [
-      randomUUID(),
-      input.orderId,
-      input.companyId,
-      input.eventType,
-      `Order ${input.orderNo}`,
-      input.customerMessage,
-    ]
-  );
-  if (input.assignedSalesUserId) {
-    await client.query(
-      `INSERT INTO order_notifications
-        (id, order_id, company_id, audience, internal_user_id, event_type, title, message, status)
-       VALUES ($1, $2, $3, 'sales', $4, $5, $6, $7, 'pending')`,
-      [
-        randomUUID(),
-        input.orderId,
-        input.companyId,
-        input.assignedSalesUserId,
-        input.eventType,
-        `Order ${input.orderNo} · ${input.companyCode}`,
-        input.salesMessage,
-      ]
     );
   }
 }
@@ -702,13 +665,12 @@ export async function submitOrder(
       [companyId]
     );
 
-    await queueNotification(client, {
+    await queueOrderNotifications(client, {
       orderId,
       companyId,
       companyCode: companyRow.customer_code,
       orderNo,
       eventType: 'ORDER_SUBMITTED',
-      assignedSalesUserId: companyRow.assigned_sales_user_id,
       customerMessage: `Order ${orderNo} was submitted and is awaiting sales confirmation.`,
       salesMessage: `A new pending order ${orderNo} requires review.`,
     });
@@ -959,13 +921,12 @@ export async function modifyOrderLines(
         },
       ]
     );
-    await queueNotification(client, {
+    await queueOrderNotifications(client, {
       orderId,
       companyId,
       companyCode: row.company_code,
       orderNo: row.order_no,
       eventType: 'ORDER_MODIFIED',
-      assignedSalesUserId: row.assigned_sales_user_id,
       customerMessage: `Quantities for order ${row.order_no} were updated.`,
       salesMessage: `Customer quantities for pending order ${row.order_no} were updated.`,
     });
@@ -1045,13 +1006,12 @@ export async function cancelCustomerOrder(
        VALUES ($1, $2, 'CANCELLED', 'PENDING_CONFIRMATION', 'CANCELLED', 'customer', $3, $4, $5, '{}')`,
       [randomUUID(), orderId, auth.user.id, auth.user.username, reason]
     );
-    await queueNotification(client, {
+    await queueOrderNotifications(client, {
       orderId,
       companyId,
       companyCode: row.company_code,
       orderNo: row.order_no,
       eventType: 'ORDER_CANCELLED',
-      assignedSalesUserId: row.assigned_sales_user_id,
       customerMessage: `Order ${row.order_no} was cancelled.`,
       salesMessage: `Customer cancelled pending order ${row.order_no}.`,
     });
@@ -1095,7 +1055,7 @@ async function listInternalOrders(
   const rows = readAll
     ? await pool.query<OrderRow>(`${ORDER_SELECT} ORDER BY o.submitted_at DESC, o.id`)
     : await pool.query<OrderRow>(
-        `${ORDER_SELECT} WHERE o.assigned_sales_user_id = $1
+        `${ORDER_SELECT} WHERE c.assigned_sales_user_id = $1
          ORDER BY o.submitted_at DESC, o.id`,
         [auth.user.id]
       );
@@ -1133,7 +1093,7 @@ async function getInternalOrder(
   }
   const row = await orderRow(pool, 'WHERE o.id = $1', [orderId]);
   if (!row) throw new HttpError(404, 'order_not_found', 'Order not found.');
-  if (!readAll && row.assigned_sales_user_id !== auth.user.id) {
+  if (!readAll && row.current_assigned_sales_user_id !== auth.user.id) {
     throw new HttpError(404, 'order_not_found', 'Order not found.');
   }
   return buildInternalOrder(pool, row);
