@@ -390,22 +390,17 @@ const CART_LINES_FOR_ORDER = `
 `;
 
 function assertLineOrderable(row: CartLineRow, quantity: number): void {
-  if (!row.published) {
+  // Withdrawn catalogue access must also redact validation-error responses.
+  if (!row.brand_granted) {
     throw new HttpError(
-      422,
-      'product_unavailable',
-      `Product ${row.product_code} is no longer published.`
+      422, 'brand_not_authorized', 'Your company is no longer authorized for this brand.'
     );
+  }
+  if (!row.published) {
+    throw new HttpError(422, 'product_unavailable', 'This product is no longer published.');
   }
   if (row.sellable_status !== 'active') {
     throw new HttpError(422, 'sku_unavailable', `SKU ${row.sku_code} is discontinued.`);
-  }
-  if (!row.brand_granted) {
-    throw new HttpError(
-      422,
-      'brand_not_authorized',
-      `Your company is no longer authorized for the brand of ${row.product_code}.`
-    );
   }
   if (!Number.isInteger(quantity) || quantity < SKU_MOQ) {
     throw new HttpError(
@@ -1091,11 +1086,12 @@ async function getInternalOrder(
   if (!readAll && !(mode === 'sales' && readAssigned)) {
     throw new HttpError(403, 'forbidden', 'You do not have access to customer orders.');
   }
-  const row = await orderRow(pool, 'WHERE o.id = $1', [orderId]);
+  const row = readAll
+    ? await orderRow(pool, 'WHERE o.id = $1', [orderId])
+    : await orderRow(pool, 'WHERE o.id = $1 AND c.assigned_sales_user_id = $2', [
+        orderId, auth.user.id,
+      ]);
   if (!row) throw new HttpError(404, 'order_not_found', 'Order not found.');
-  if (!readAll && row.current_assigned_sales_user_id !== auth.user.id) {
-    throw new HttpError(404, 'order_not_found', 'Order not found.');
-  }
   return buildInternalOrder(pool, row);
 }
 

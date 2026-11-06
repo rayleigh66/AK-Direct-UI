@@ -126,8 +126,8 @@ async function csrf(agent: TestAgent): Promise<string> {
   return response.body.csrfToken as string;
 }
 
-async function login(username: string): Promise<{ agent: TestAgent; csrf: string }> {
-  const agent = request.agent(app);
+async function login(username: string, targetApp: Express = app): Promise<{ agent: TestAgent; csrf: string }> {
+  const agent = request.agent(targetApp);
   const token = await csrf(agent);
   const response = await agent
     .post('/api/auth/login')
@@ -480,6 +480,124 @@ describeDb('company shared cart and customer orders', () => {
     const restored = await cartFor(customers.aA.agent);
     expect(restored.itemCount).toBe(1);
     expect(restored.items[0].isAvailable).toBe(true);
+  });
+
+  it('redacts revoked-brand cart JSON through the runtime role, restores grants and permits explicit removal', async () => {
+    const role = `aoking_runtime_redaction_${process.pid}`;
+    await provisionRuntimeRole({
+      adminDatabaseUrl: databaseUrl(), runtimeUser: role, runtimePassword: 'RuntimeRedaction123!',
+    });
+    const runtimeUrl = new URL(databaseUrl());
+    runtimeUrl.username = role;
+    runtimeUrl.password = 'RuntimeRedaction123!';
+    const runtimePool = createPool(runtimeUrl.toString());
+    const runtimeApp = createApp({
+      checkReadiness: () => checkReadiness(runtimePool),
+      auth: { pool: runtimePool, config }, mediaRoot,
+    });
+    try {
+      const admin = await login('order.admin@example.test', runtimeApp);
+      const item = await createPublishedProduct(admin, { priceCents: 7349, onHand: 23 });
+      const company = await createCompany({ assignedSalesUserId: sales1Id, letters: ['A'] });
+      const customer = await login(company.customers[0].username, runtimeApp);
+      const other = await login('AK000302A', runtimeApp);
+      const added = await setCart(customer, item.skuId, 10);
+      expect(added.status).toBe(200);
+      const original = added.body.cart.items[0];
+      expect(original).toMatchObject({ unitPriceCents: 7349, lineTotalCents: 73490, available: 23 });
+      expect(original.imageUrl).toMatch(/^\/api\/media\//);
+      const grantUrl = `/api/admin/companies/${company.companyId}/brands/${brandId}`;
+      expect((await admin.agent.put(grantUrl).send({ granted: false })).status).toBe(403);
+      expect((await put(admin.agent, grantUrl, { granted: false }, admin.csrf)).status).toBe(200);
+      const revoked = await customer.agent.get('/api/cart');
+      expect(revoked.status).toBe(200);
+      const assertRestricted = (cart: typeof revoked.body.cart) => {
+        expect(cart).toMatchObject({ itemCount: 1, totalQuantity: 10, referenceTotalCents: 0, hasUnavailableItems: true });
+        expect(cart.items[0]).toEqual({
+          skuId: item.skuId, quantity: 10, isAvailable: false, detailsRestricted: true,
+          updatedAt: original.updatedAt,
+          issues: ['Your company is no longer authorized for this brand.'],
+        });
+        const json = JSON.stringify(cart);
+        for (const value of [original.productId, original.productCode, original.productTitle,
+          original.productTitleEn, original.skuCode, original.colorName, original.colorNameEn,
+          original.colorHex, original.imageUrl, '7349', 'unitPriceCents', 'lineTotalCents', '"available":']) {
+          expect(json).not.toContain(value);
+        }
+      };
+      assertRestricted(revoked.body.cart);
+      expect((await customer.agent.get(`/api/catalog/products/${item.productId}`)).status).toBe(404);
+      expect((await customer.agent.get(original.imageUrl)).status).toBe(404);
+      const catalog = await customer.agent.get('/api/catalog/products');
+      expect(catalog.status).toBe(200);
+      expect(JSON.stringify(catalog.body)).not.toContain(item.productId);
+      const stale = await setCart(customer, item.skuId, 10, added.body.cart.revision - 1);
+      expect(stale.status).toBe(409);
+      assertRestricted(stale.body.cart);
+      const staleSubmit = await post(customer.agent, '/api/orders', {
+        idempotencyKey: randomUUID(), expectedCartRevision: added.body.cart.revision - 1, ...delivery(),
+      }, customer.csrf);
+      expect(staleSubmit.status).toBe(409);
+      assertRestricted(staleSubmit.body.cart);
+      expect((await setCart(customer, item.skuId, 10)).status).toBe(409);
+      const deniedSubmit = await post(customer.agent, '/api/orders', {
+        idempotencyKey: randomUUID(), expectedCartRevision: added.body.cart.revision, ...delivery(),
+      }, customer.csrf);
+      expect(deniedSubmit.status).toBe(422);
+      expect(deniedSubmit.body.error.code).toBe('brand_not_authorized');
+      expect(deniedSubmit.text).not.toContain(original.productCode);
+      expect(deniedSubmit.text).not.toContain(original.skuCode);
+
+      const otherCart = await cartFor(other.agent);
+      expect(otherCart.items.some((line: { skuId: string }) => line.skuId === item.skuId)).toBe(false);
+      expect((await del(other.agent, `/api/cart/items/${item.skuId}`, {
+        expectedRevision: otherCart.revision,
+      }, other.csrf)).status).toBe(404);
+      expect((await put(admin.agent, grantUrl, { granted: true }, admin.csrf)).status).toBe(200);
+      const restored = await cartFor(customer.agent);
+      expect(restored.items[0]).toMatchObject(original);
+      expect(restored.referenceTotalCents).toBe(73490);
+      expect((await customer.agent.get(original.imageUrl)).status).toBe(200);
+      expect((await customer.agent.get(`/api/catalog/products/${item.productId}`)).status).toBe(200);
+      expect((await put(admin.agent, grantUrl, { granted: false }, admin.csrf)).status).toBe(200);
+      expect((await customer.agent.delete(`/api/cart/items/${item.skuId}`).send({ expectedRevision: restored.revision })).status).toBe(403);
+      const removed = await del(customer.agent, `/api/cart/items/${item.skuId}`, {
+        expectedRevision: restored.revision,
+      }, customer.csrf);
+      expect(removed.status).toBe(200);
+      expect(removed.body.cart.itemCount).toBe(0);
+    } finally {
+      await runtimePool.end();
+      await pool.query(`DROP OWNED BY "${role}"`);
+      await pool.query(`DROP ROLE "${role}"`);
+    }
+  }, 60_000);
+
+  it('restricts unpublished cart details but retains authorized discontinued SKU information', async () => {
+    const admin = await login('order.admin@example.test');
+    const item = await createPublishedProduct(admin, { altSku: true });
+    const company = await createCompany({ assignedSalesUserId: null, letters: ['A'] });
+    const customer = await login(company.customers[0].username);
+    const added = await setCart(customer, item.skuId, 10);
+    const original = added.body.cart.items[0];
+    expect((await patch(admin.agent, `/api/admin/catalog/skus/${item.skuId}`, {
+      sellableStatus: 'discontinued',
+    }, admin.csrf)).status).toBe(200);
+    const discontinued = await cartFor(customer.agent);
+    expect(discontinued.items[0]).toMatchObject({
+      unitPriceCents: 3800, productTitleEn: original.productTitleEn, isAvailable: false,
+      issues: ['This SKU is discontinued.'],
+    });
+    expect((await post(admin.agent, `/api/admin/catalog/products/${item.productId}/unpublish`, {}, admin.csrf)).status).toBe(200);
+    const unpublished = await cartFor(customer.agent);
+    expect(unpublished.items[0]).toEqual({
+      skuId: item.skuId, quantity: 10, updatedAt: original.updatedAt, isAvailable: false,
+      detailsRestricted: true, issues: ['This product is no longer published.'],
+    });
+    expect(unpublished.referenceTotalCents).toBe(0);
+    expect((await customer.agent.get(original.imageUrl)).status).toBe(404);
+    expect((await post(admin.agent, `/api/admin/catalog/products/${item.productId}/publish`, {}, admin.csrf)).status).toBe(200);
+    expect((await cartFor(customer.agent)).items[0]).toMatchObject(discontinued.items[0]);
   });
 
   it('removes and clears cart lines with revision protection', async () => {
@@ -1316,7 +1434,79 @@ describeDb('company shared cart and customer orders', () => {
       [orderId]
     );
     expect(remainingSalesPending.rows[0].count).toBe('0');
+    // New events for an unassigned company must not revive its historic owner.
+    expect((await setCart(customer, cancelItem.skuId, 10)).status).toBe(200);
+    const unassignedOrder = await submit(customer);
+    expect(unassignedOrder.status).toBe(201);
+    const unassignedNotifications = await pool.query<{ audience: string; internal_user_id: string | null }>(
+      'SELECT audience, internal_user_id FROM order_notifications WHERE order_id = $1',
+      [unassignedOrder.body.order.id]
+    );
+    expect(unassignedNotifications.rows).toEqual([{ audience: 'customer', internal_user_id: null }]);
+
   }, 60_000);
+
+  it('serialises an in-flight outbox insert with HTTP reassignment and cancels the former owner row', async () => {
+    const { queueOrderNotifications } = await import('../../src/orders/notifications.js');
+    const admin = await login('order.admin@example.test');
+    const item = await createPublishedProduct(admin);
+    const company = await createCompany({ assignedSalesUserId: sales1Id, letters: ['A'] });
+    const customer = await login(company.customers[0].username);
+    expect((await setCart(customer, item.skuId, 10)).status).toBe(200);
+    const created = await submit(customer);
+    expect(created.status).toBe(201);
+    const client = await pool.connect();
+    let reassignment: Promise<SupertestResponse> | undefined;
+    try {
+      await client.query('BEGIN');
+      await client.query("SET LOCAL statement_timeout = '5s'");
+      const pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await queueOrderNotifications(client, {
+        orderId: created.body.order.id, orderNo: created.body.order.orderNo,
+        companyId: company.companyId, companyCode: 'TEST', eventType: 'ORDER_MODIFIED',
+        customerMessage: 'Customer change', salesMessage: 'Sales change',
+      });
+      reassignment = patch(admin.agent,
+        `/api/admin/companies/${company.companyId}/sales-assignment`,
+        { salesUserId: sales2Id }, admin.csrf).then(response => response);
+      // Observe the actual PostgreSQL lock wait, not a scheduling delay.
+      let blocked = false;
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const waiting = await pool.query<{ blocked: boolean }>(
+          'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked', [pid]
+        );
+        if (waiting.rows[0].blocked) { blocked = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await client.query('COMMIT');
+      expect((await reassignment).status).toBe(200);
+      const rows = await pool.query<{ internal_user_id: string; status: string }>(
+        `SELECT internal_user_id, status FROM order_notifications
+         WHERE order_id = $1 AND audience = 'sales'`, [created.body.order.id]
+      );
+      expect(rows.rows).toHaveLength(2);
+      expect(rows.rows.every(row => row.internal_user_id === sales1Id && row.status === 'cancelled')).toBe(true);
+      // Later events resolve B, rather than reviving cancelled events for A.
+      await client.query('BEGIN');
+      await queueOrderNotifications(client, {
+        orderId: created.body.order.id, orderNo: created.body.order.orderNo,
+        companyId: company.companyId, companyCode: 'TEST', eventType: 'ORDER_MODIFIED',
+        customerMessage: 'Later change', salesMessage: 'Later change',
+      });
+      await client.query('COMMIT');
+      const pending = await pool.query<{ internal_user_id: string }>(
+        `SELECT internal_user_id FROM order_notifications
+         WHERE order_id = $1 AND audience = 'sales' AND status = 'pending'`, [created.body.order.id]
+      );
+      expect(pending.rows).toEqual([{ internal_user_id: sales2Id }]);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+      if (reassignment) await reassignment;
+    }
+  });
 
   it('runs cart and order writes through the least-privilege runtime role', async () => {
     const role = `aoking_runtime_orders_${process.pid}`;

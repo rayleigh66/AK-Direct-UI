@@ -369,7 +369,26 @@ export const CartView: React.FC<{
           </div>
         ) : (
           <div className="space-y-2">
-            {cart.items.map(item => (
+            {cart.items.map(item => item.detailsRestricted ? (
+              <div key={item.skuId} className="p-3 rounded-xl border border-rose-200 space-y-2" data-testid="cart-item">
+                <div className="flex items-center gap-3 text-xs">
+                  <Package className="w-6 h-6 text-slate-400" />
+                  <div className="flex-1">
+                    <div className="font-bold">Unavailable item</div>
+                    <div className="text-slate-500">{item.quantity} PCS · Details unavailable</div>
+                  </div>
+                  <button type="button" disabled={busySku === item.skuId}
+                    onClick={() => void remove(item.skuId)}
+                    className="w-9 h-9 rounded-lg border border-slate-300 text-rose-600 grid place-items-center disabled:opacity-50"
+                    aria-label="Remove unavailable item" data-testid="cart-remove">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="rounded-lg bg-rose-50 p-2 text-[11px] text-rose-700" data-testid="cart-item-issue">
+                  {item.issues.join(' ')}
+                </div>
+              </div>
+            ) : (
               <div
                 key={item.skuId}
                 className="p-3 rounded-xl border border-slate-200 space-y-2"

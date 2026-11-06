@@ -59,7 +59,7 @@ async function signOut(page: Page): Promise<void> {
 }
 
 test('customer A and B share a cart, submit a real order and the salesperson sees it pending', async ({
-  page,
+  page, request,
 }, testInfo) => {
   test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'Real-auth admin credentials are required.');
   test.skip(!SALES_EMAIL || !SALES_PASSWORD, 'A real salesperson is required.');
@@ -233,4 +233,56 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.getByTestId('order-detail')).toContainText('Cancelled');
   await expectNoHorizontalOverflow(page);
   await screenshot(page, `customer-orders-cancelled-${testInfo.project.name}`);
+
+  // Keep the customer's browser session open while an independent administrator
+  // withdraws access. A fresh server DTO must replace the previously visible data.
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const session = await (await page.request.get('/api/auth/session')).json();
+  const companyId = session.user.companyId as string;
+  const token = (await (await page.request.get('/api/auth/csrf')).json()).csrfToken;
+  const beforeCart = (await (await page.request.get('/api/cart')).json()).cart;
+  expect((await page.request.put(`/api/cart/items/${skuValue}`, {
+    headers: { 'X-CSRF-Token': token }, data: { quantity: 10, expectedRevision: beforeCart.revision },
+  })).status()).toBe(200);
+  await page.reload();
+  await page.getByTestId('real-tab-cart').click();
+  await expect(page.getByTestId('cart-item')).toContainText(skuCode);
+  const adminToken = (await (await request.get('/api/auth/csrf')).json()).csrfToken;
+  expect((await request.post('/api/auth/login', {
+    headers: { 'X-CSRF-Token': adminToken }, data: { username: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+  })).status()).toBe(200);
+  const grantUrl = `/api/admin/companies/${companyId}/brands/brand-aoking`;
+  const grant = async (granted: boolean) => {
+    expect((await request.put(grantUrl, {
+      headers: { 'X-CSRF-Token': adminToken }, data: { granted },
+    })).status()).toBe(200);
+  };
+  await grant(false);
+  await page.reload();
+  await page.getByTestId('real-tab-cart').click();
+  const restricted = page.getByTestId('cart-item');
+  await expect(restricted).toContainText('Unavailable item');
+  await expect(restricted).toContainText('10 PCS');
+  await expect(restricted).not.toContainText(skuCode);
+  await expect(restricted).not.toContainText('$');
+  await expect(restricted.locator('img')).toHaveCount(0);
+  await expect(restricted.getByTestId('cart-quantity-input')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  if (process.env.ISSUE11_SCREENSHOT_DIR) {
+    await mkdir(process.env.ISSUE11_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.ISSUE11_SCREENSHOT_DIR, `restricted-${testInfo.project.name}.png`), fullPage: true });
+  }
+  await grant(true);
+  await page.reload();
+  await page.getByTestId('real-tab-cart').click();
+  await expect(page.getByTestId('cart-item')).toContainText(skuCode);
+  await expect(page.getByTestId('cart-item')).toContainText('$42.00');
+  await grant(false);
+  await page.reload();
+  await page.getByTestId('real-tab-cart').click();
+  await page.getByRole('button', { name: 'Remove unavailable item' }).click();
+  await expect(page.getByTestId('cart-empty')).toBeVisible();
+  await grant(true);
+  expect(errors).toEqual([]);
 });

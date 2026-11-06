@@ -144,7 +144,8 @@ export interface CustomerBrandDto {
   nameEn: string;
 }
 
-export interface CartItemDto {
+export interface VisibleCartItemDto {
+  detailsRestricted?: false;
   skuId: string;
   productId: string;
   productCode: string;
@@ -164,6 +165,18 @@ export interface CartItemDto {
   issues: string[];
   updatedAt: string;
 }
+
+/** Only cart-owned identifiers/state survive withdrawal of catalogue access. */
+export interface RestrictedCartItemDto {
+  detailsRestricted: true;
+  skuId: string;
+  quantity: number;
+  isAvailable: false;
+  issues: string[];
+  updatedAt: string;
+}
+
+export type CartItemDto = VisibleCartItemDto | RestrictedCartItemDto;
 
 export interface CartDto {
   revision: number;

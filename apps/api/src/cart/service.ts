@@ -10,7 +10,8 @@ import {
   validateOrderQuantity,
 } from '../orders/validation.js';
 
-export interface CartItemDto {
+export interface VisibleCartItemDto {
+  detailsRestricted?: false;
   skuId: string;
   productId: string;
   productCode: string;
@@ -30,6 +31,18 @@ export interface CartItemDto {
   issues: string[];
   updatedAt: string;
 }
+
+/** Only cart-owned identifiers/state survive withdrawal of catalogue access. */
+export interface RestrictedCartItemDto {
+  detailsRestricted: true;
+  skuId: string;
+  quantity: number;
+  isAvailable: false;
+  issues: string[];
+  updatedAt: string;
+}
+
+export type CartItemDto = VisibleCartItemDto | RestrictedCartItemDto;
 
 export interface CartDto {
   revision: number;
@@ -139,6 +152,21 @@ async function loadCart(db: Pick<DbPool, 'query'> | PoolClient, companyId: strin
   );
   const items = await db.query<CartItemRow>(CART_ITEMS_SELECT, [companyId]);
   const dtos: CartItemDto[] = items.rows.map(row => {
+    // Explicit allowlist: never serialize catalogue/price/stock metadata when
+    // catalogue access has been withdrawn. Do not derive issues from stock or
+    // SKU state in this branch either. The cart line remains removable.
+    if (!row.brand_granted || !row.published) {
+      return {
+        detailsRestricted: true,
+        skuId: row.sku_id,
+        quantity: row.quantity,
+        isAvailable: false,
+        issues: [!row.brand_granted
+          ? 'Your company is no longer authorized for this brand.'
+          : 'This product is no longer published.'],
+        updatedAt: new Date(row.updated_at).toISOString(),
+      };
+    }
     const issues = itemIssues(row);
     const lineTotalCents = row.base_price_cents * row.quantity;
     return {
@@ -162,7 +190,7 @@ async function loadCart(db: Pick<DbPool, 'query'> | PoolClient, companyId: strin
       updatedAt: new Date(row.updated_at).toISOString(),
     };
   });
-  const availableItems = dtos.filter(item => item.isAvailable);
+  const availableItems = dtos.filter((item): item is VisibleCartItemDto => !item.detailsRestricted && item.isAvailable);
   return {
     revision: cartRow.rows[0] ? Number(cartRow.rows[0].revision) : 1,
     updatedAt: cartRow.rows[0] ? new Date(cartRow.rows[0].updated_at).toISOString() : null,
