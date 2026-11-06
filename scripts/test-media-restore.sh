@@ -33,9 +33,9 @@ DATABASE_URL=postgres://aoking_media_runtime:media_restore_runtime_password@db:5
 WEB_PORT=18999
 BACKUP_RETENTION_DAYS=30
 BACKUP_HOST_DIR=$BACKUP_ROOT
-API_IMAGE=aoking-direct-api:4b03
-MIGRATE_IMAGE=aoking-direct-migrate:4b03
-WEB_IMAGE=aoking-direct-web:4b03
+API_IMAGE=aoking-direct-api:4b04
+MIGRATE_IMAGE=aoking-direct-migrate:4b04
+WEB_IMAGE=aoking-direct-web:4b04
 EOF
 
 compose() {
@@ -93,8 +93,8 @@ reset_media() {
 }
 
 echo "=== Isolated Compose project: $PROJECT ==="
-if ! docker image inspect aoking-direct-api:4b03 >/dev/null 2>&1; then
-  echo "NOT RUN: build the stack first so aoking-direct-api:4b03 exists." >&2
+if ! docker image inspect aoking-direct-api:4b04 >/dev/null 2>&1; then
+  echo "NOT RUN: build the stack first so aoking-direct-api:4b04 exists." >&2
   exit 2
 fi
 compose create api >/dev/null

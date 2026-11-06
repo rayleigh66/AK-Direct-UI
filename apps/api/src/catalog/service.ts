@@ -6,6 +6,10 @@ import { writeAudit } from '../audit/audit.js';
 import { HttpError } from '../http/errors.js';
 import type { AuthContext } from '../auth/types.js';
 import { storeImage, removeStoredImage } from '../media/storage.js';
+import {
+  enforcePendingOrderImpact,
+  type DestructiveOrderImpactOptions,
+} from '../orders/impact.js';
 
 export type Queryable = Pick<DbPool, 'query'>;
 
@@ -484,7 +488,8 @@ export async function setProductPublished(
   pool: DbPool,
   auth: AuthContext,
   productId: string,
-  published: boolean
+  published: boolean,
+  impactOptions: DestructiveOrderImpactOptions = {}
 ): Promise<ProductDto> {
   return withTransaction(pool, async client => {
     const rows = await client.query<ProductRow>('SELECT * FROM products WHERE id = $1 FOR UPDATE', [
@@ -507,6 +512,16 @@ export async function setProductPublished(
       }
     }
 
+    const affected = published
+      ? []
+      : await enforcePendingOrderImpact(client, auth, {
+          kind: 'product_unpublish',
+          targetId: productId,
+          reason: 'the product is no longer available',
+          confirmAffectedOrders: impactOptions.confirmAffectedOrders,
+          impactToken: impactOptions.impactToken,
+        });
+
     await client.query(
       `UPDATE products SET published = $2,
          published_at = CASE WHEN $2 THEN now() ELSE published_at END,
@@ -519,7 +534,7 @@ export async function setProductPublished(
       action: published ? 'PUBLISH_PRODUCT' : 'UNPUBLISH_PRODUCT',
       targetType: 'product',
       targetId: productId,
-      details: { published },
+      details: { published, cancelledPendingOrders: affected.length },
     });
     const updated = await queryRows<ProductRow>(client, `${PRODUCT_SELECT} WHERE p.id = $1`, [productId]);
     return buildProductDto(client, updated[0]);
@@ -640,6 +655,8 @@ export interface UpdateSkuInput {
   basePriceCents?: number;
   sellableStatus?: 'active' | 'discontinued';
   imageId?: string | null;
+  confirmAffectedOrders?: boolean;
+  impactToken?: string;
 }
 
 export async function updateSku(
@@ -689,6 +706,7 @@ export async function updateSku(
       await validateSkuImage(client, current.product_id, input.imageId);
     }
     const nextStatus = input.sellableStatus ?? current.sellable_status;
+    let affectedPendingOrders = 0;
     if (current.sellable_status === 'active' && nextStatus === 'discontinued') {
       if (productLock.rows[0].published) {
         const others = await client.query<{ count: string }>(
@@ -704,6 +722,15 @@ export async function updateSku(
           );
         }
       }
+      affectedPendingOrders = (
+        await enforcePendingOrderImpact(client, auth, {
+          kind: 'sku_discontinue',
+          targetId: skuId,
+          reason: 'this SKU is no longer available',
+          confirmAffectedOrders: input.confirmAffectedOrders,
+          impactToken: input.impactToken,
+        })
+      ).length;
     }
 
     await client.query(
@@ -733,7 +760,11 @@ export async function updateSku(
       action: 'UPDATE_SKU',
       targetType: 'product_sku',
       targetId: skuId,
-      details: { skuCode, productId: current.product_id },
+      details: {
+        skuCode,
+        productId: current.product_id,
+        cancelledPendingOrders: affectedPendingOrders,
+      },
     });
     const updated = await queryRows<SkuRow>(client, 'SELECT * FROM product_skus WHERE id = $1', [skuId]);
     return skuDto(updated[0]);

@@ -16,6 +16,8 @@ export interface ApiEnv {
   loginLockMinutes: number;
   trustProxy: boolean | number;
   mediaRoot: string;
+  /** IANA time zone used to derive the YYMMDD part of a business order number. */
+  orderNumberTimeZone: string;
 }
 
 const NODE_ENVIRONMENTS: NodeEnvironment[] = ['development', 'test', 'production'];
@@ -77,6 +79,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
     trustProxy = hops;
   }
 
+  const orderNumberTimeZone = (source.ORDER_NUMBER_TIME_ZONE ?? 'UTC').trim() || 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: orderNumberTimeZone });
+  } catch {
+    throw new Error('ORDER_NUMBER_TIME_ZONE must be a valid IANA time zone (for example UTC).');
+  }
+
   return {
     nodeEnv: rawNodeEnv as NodeEnvironment,
     port,
@@ -91,6 +100,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
     loginLockMinutes: positiveNumber('LOGIN_LOCK_MINUTES', 15, 24 * 60),
     trustProxy,
     mediaRoot: path.resolve((source.MEDIA_ROOT ?? './media').trim() || './media'),
+    orderNumberTimeZone,
   };
 }
 

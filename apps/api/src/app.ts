@@ -10,6 +10,12 @@ import { createAdminRouter } from './admin/routes.js';
 import { createAdminCatalogRouter, createCustomerCatalogRouter } from './catalog/routes.js';
 import { createMediaRouter } from './media/routes.js';
 import { createAdminInventoryRouter, createSalesInventoryRouter } from './inventory/routes.js';
+import { createCartRouter } from './cart/routes.js';
+import {
+  createAdminOrderRouter,
+  createCustomerOrderRouter,
+  createSalesOrderRouter,
+} from './orders/routes.js';
 import { HttpError } from './http/errors.js';
 
 export interface AuthDependencies {
@@ -68,7 +74,11 @@ export function createApp({ checkReadiness, auth, mediaRoot }: AppDependencies) 
     // More specific admin/sales routers are mounted before the Phase 4B-02
     // routers; unmatched paths pass through to the next router.
     app.use('/api/admin/catalog', createAdminCatalogRouter(auth.pool, auth.config, imageRoot));
+    app.use('/api/admin/orders', createAdminOrderRouter(auth.pool, auth.config));
     app.use('/api/admin', createAdminInventoryRouter(auth.pool, auth.config));
+    app.use('/api/cart', createCartRouter(auth.pool, auth.config));
+    app.use('/api/orders', createCustomerOrderRouter(auth.pool, auth.config));
+    app.use('/api/sales/orders', createSalesOrderRouter(auth.pool, auth.config));
     app.use('/api/sales', createSalesInventoryRouter(auth.pool, auth.config));
     app.use('/api/sales', createSalesRouter(auth.pool, auth.config));
     app.use('/api/admin', createAdminRouter(auth.pool, auth.config));
@@ -101,6 +111,7 @@ export function createApp({ checkReadiness, auth, mediaRoot }: AppDependencies) 
       }
       res.status(error.status).json({
         error: { code: error.code, message: error.message },
+        ...(error.details ?? {}),
       });
       return;
     }

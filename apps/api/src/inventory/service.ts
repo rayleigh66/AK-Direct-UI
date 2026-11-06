@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { DbPool } from '../db/pool.js';
 import { withTransaction } from '../db/transaction.js';
@@ -436,9 +436,94 @@ export interface ImportPreviewDto {
 interface ImportBatchRow {
   id: string;
   idempotency_key: string;
+  payload_digest: string | null;
   source_name: string | null;
   status: 'previewed' | 'committed' | 'failed';
   created_at: Date;
+  committed_at: Date | null;
+  created_by: string | null;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: string }).code === '23505'
+  );
+}
+
+/**
+ * Canonical payload digest: fixed key order, trimmed source name, rows sorted by
+ * their business key. Re-ordering JSON object keys cannot create a false
+ * mismatch; a genuinely different row set cannot reuse another batch.
+ */
+function importPayloadDigest(
+  sourceName: string | null,
+  rows: Array<{ rowNumber: number; skuCode: string; warehouseCode: string; onHand: unknown; unsellable: unknown }>
+): string {
+  const normalizedRows = rows
+    .map(row => ({
+      rowNumber: row.rowNumber,
+      skuCode: row.skuCode,
+      warehouseCode: row.warehouseCode,
+      onHand: row.onHand,
+      unsellable: row.unsellable,
+    }))
+    .sort((left, right) => {
+      if (left.rowNumber !== right.rowNumber) return left.rowNumber - right.rowNumber;
+      if (left.skuCode !== right.skuCode) return left.skuCode.localeCompare(right.skuCode);
+      return left.warehouseCode.localeCompare(right.warehouseCode);
+    });
+  const canonical = JSON.stringify({ sourceName, rows: normalizedRows });
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+function normalizedImportRows(input: PreviewImportInput): Array<{
+  rowNumber: number;
+  skuCode: string;
+  warehouseCode: string;
+  onHand: unknown;
+  unsellable: unknown;
+}> {
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  return rows.map((line, index) => ({
+    rowNumber:
+      Number.isInteger(line?.rowNumber) && Number(line.rowNumber) > 0
+        ? Number(line.rowNumber)
+        : index + 1,
+    skuCode: String(line?.skuCode ?? '').trim().toUpperCase(),
+    warehouseCode: String(line?.warehouseCode ?? '').trim().toUpperCase(),
+    onHand: line?.onHand,
+    unsellable: line?.unsellable,
+  }));
+}
+
+async function resolveExistingPreview(
+  db: PoolClient | DbPool,
+  auth: AuthContext,
+  idempotencyKey: string,
+  digest: string
+): Promise<ImportPreviewDto> {
+  const existing = await db.query<ImportBatchRow>(
+    'SELECT * FROM inventory_import_batches WHERE idempotency_key = $1',
+    [idempotencyKey]
+  );
+  const batch = existing.rows[0];
+  if (!batch) {
+    throw new HttpError(
+      409,
+      'idempotency_conflict',
+      'The import idempotency key could not be resolved. Use a new key.'
+    );
+  }
+  if (batch.created_by !== auth.user.id || batch.payload_digest !== digest) {
+    throw new HttpError(
+      409,
+      'idempotency_conflict',
+      'This idempotency key was already used for another import payload or actor. Use a new key.'
+    );
+  }
+  return loadPreview(db, batch.id);
 }
 
 async function loadPreview(client: PoolClient | DbPool, batchId: string): Promise<ImportPreviewDto> {
@@ -503,14 +588,16 @@ export async function previewImport(
   input: PreviewImportInput
 ): Promise<ImportPreviewDto> {
   const idempotencyKey = text(input.idempotencyKey, 'idempotencyKey', 128);
+  const sourceName = input.sourceName?.trim() || null;
+  const digest = importPayloadDigest(sourceName, normalizedImportRows(input));
 
-  // A retried preview with the same idempotency key returns the stored batch
-  // even if the retried request carries no row body.
+  // A retried preview returns the stored batch only when the same actor sends
+  // the same canonical payload. A different payload or actor is rejected.
   const existing = await pool.query<ImportBatchRow>(
     'SELECT * FROM inventory_import_batches WHERE idempotency_key = $1',
     [idempotencyKey]
   );
-  if (existing.rows[0]) return loadPreview(pool, existing.rows[0].id);
+  if (existing.rows[0]) return resolveExistingPreview(pool, auth, idempotencyKey, digest);
 
   if (!Array.isArray(input.rows) || input.rows.length === 0) {
     throw new HttpError(400, 'empty_import', 'The import file has no data rows.');
@@ -519,7 +606,8 @@ export async function previewImport(
     throw new HttpError(413, 'import_too_large', `A maximum of ${MAX_IMPORT_ROWS} rows is supported.`);
   }
 
-  return withTransaction(pool, async client => {
+  try {
+    return await withTransaction(pool, async client => {
     const seen = new Set<string>();
     const resolved: Array<ImportLineInput & { skuId: string; warehouseId: string; onHandBefore: number; unsellableBefore: number; reserved: number; version: number }> = [];
 
@@ -590,9 +678,9 @@ export async function previewImport(
     const batchId = randomUUID();
     await client.query(
       `INSERT INTO inventory_import_batches
-        (id, idempotency_key, source_name, status, row_count, created_by)
-       VALUES ($1, $2, $3, 'previewed', $4, $5)`,
-      [batchId, idempotencyKey, input.sourceName?.trim() || null, resolved.length, auth.user.id]
+        (id, idempotency_key, payload_digest, source_name, status, row_count, created_by)
+       VALUES ($1, $2, $3, $4, 'previewed', $5, $6)`,
+      [batchId, idempotencyKey, digest, sourceName, resolved.length, auth.user.id]
     );
     for (const row of resolved) {
       await client.query(
@@ -614,7 +702,15 @@ export async function previewImport(
       details: { rows: resolved.length, sourceName: input.sourceName ?? null },
     });
     return loadPreview(client, batchId);
-  });
+    });
+  } catch (error) {
+    // Two concurrent requests with the same key: the loser re-reads the winner's
+    // batch and applies the same actor/payload binding instead of returning 500.
+    if (isUniqueViolation(error)) {
+      return resolveExistingPreview(pool, auth, idempotencyKey, digest);
+    }
+    throw error;
+  }
 }
 
 export interface CommitImportResult {
@@ -623,6 +719,73 @@ export interface CommitImportResult {
   alreadyCommitted: boolean;
   committedAt: string;
   rows: Array<{ skuCode: string; warehouseCode: string; onHand: number; unsellable: number; version: number }>;
+}
+
+type CommitRow = CommitImportResult['rows'][number];
+
+async function readStoredCommitResult(
+  client: PoolClient,
+  batchId: string
+): Promise<{ committedAt: string; rows: CommitRow[] } | null> {
+  const stored = await client.query<{ committed_at: Date; result: { rows?: CommitRow[] } }>(
+    'SELECT committed_at, result FROM inventory_import_commit_results WHERE batch_id = $1',
+    [batchId]
+  );
+  if (!stored.rows[0]) return null;
+  return {
+    committedAt: new Date(stored.rows[0].committed_at).toISOString(),
+    rows: Array.isArray(stored.rows[0].result?.rows) ? stored.rows[0].result.rows : [],
+  };
+}
+
+async function storeCommitResult(
+  client: PoolClient,
+  batchId: string,
+  committedAt: Date,
+  rows: CommitRow[]
+): Promise<void> {
+  await client.query(
+    `INSERT INTO inventory_import_commit_results (batch_id, committed_at, result)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (batch_id) DO NOTHING`,
+    [batchId, committedAt, JSON.stringify({ rows })]
+  );
+}
+
+/**
+ * A committed batch created before Phase 4B-04 has no stored result, but its
+ * immutable preview rows already record the exact post-commit values. Persist
+ * that outcome once so later commits never return subsequently adjusted stock.
+ */
+async function legacyCommitResult(
+  client: PoolClient,
+  batchId: string,
+  committedAt: Date
+): Promise<CommitRow[]> {
+  const rows = await client.query<{
+    sku_code: string;
+    warehouse_code: string;
+    on_hand_new: number;
+    unsellable_new: number;
+    version_before: string;
+  }>(
+    `SELECT s.sku_code, w.code AS warehouse_code, r.on_hand_new, r.unsellable_new,
+            r.version_before
+     FROM inventory_import_rows r
+     JOIN product_skus s ON s.id = r.sku_id
+     JOIN warehouses w ON w.id = r.warehouse_id
+     WHERE r.batch_id = $1 ORDER BY r.row_number`,
+    [batchId]
+  );
+  const result = rows.rows.map(row => ({
+    skuCode: row.sku_code,
+    warehouseCode: row.warehouse_code,
+    onHand: row.on_hand_new,
+    unsellable: row.unsellable_new,
+    version: Number(row.version_before) + 1,
+  }));
+  await storeCommitResult(client, batchId, committedAt, result);
+  return result;
 }
 
 export async function commitImport(
@@ -641,33 +804,17 @@ export async function commitImport(
     if (!batch.rows[0]) throw new HttpError(404, 'import_not_found', 'Import preview not found.');
 
     if (batch.rows[0].status === 'committed') {
-      const rows = await client.query<{
-        sku_code: string;
-        warehouse_code: string;
-        on_hand: number;
-        unsellable: number;
-        version: string;
-      }>(
-        `SELECT s.sku_code, w.code AS warehouse_code, b.on_hand, b.unsellable, b.version
-         FROM inventory_import_rows r
-         JOIN product_skus s ON s.id = r.sku_id
-         JOIN warehouses w ON w.id = r.warehouse_id
-         JOIN inventory_balances b ON b.sku_id = r.sku_id AND b.warehouse_id = r.warehouse_id
-         WHERE r.batch_id = $1 ORDER BY r.row_number`,
-        [batchId]
-      );
+      const committedAt = batch.rows[0].committed_at ?? new Date();
+      const stored = await readStoredCommitResult(client, batchId);
+      const rows = stored
+        ? stored.rows
+        : await legacyCommitResult(client, batchId, committedAt);
       return {
         batchId,
         status: 'committed',
         alreadyCommitted: true,
-        committedAt: new Date(batch.rows[0].committed_at ?? new Date()).toISOString(),
-        rows: rows.rows.map(row => ({
-          skuCode: row.sku_code,
-          warehouseCode: row.warehouse_code,
-          onHand: row.on_hand,
-          unsellable: row.unsellable,
-          version: Number(row.version),
-        })),
+        committedAt: (stored?.committedAt ?? new Date(committedAt).toISOString()),
+        rows,
       };
     }
 
@@ -761,9 +908,23 @@ export async function commitImport(
       );
     }
 
-    await client.query(
-      "UPDATE inventory_import_batches SET status = 'committed', committed_at = now() WHERE id = $1",
+    const committed = await client.query<{ committed_at: Date }>(
+      `UPDATE inventory_import_batches SET status = 'committed', committed_at = now()
+       WHERE id = $1 RETURNING committed_at`,
       [batchId]
+    );
+    const resultRows: CommitRow[] = previewRows.rows.map(row => ({
+      skuCode: row.sku_code,
+      warehouseCode: row.warehouse_code,
+      onHand: row.on_hand_new,
+      unsellable: row.unsellable_new,
+      version: locked.get(`${row.sku_id}:${row.warehouse_id}`)!.version + 1,
+    }));
+    await storeCommitResult(
+      client,
+      batchId,
+      committed.rows[0].committed_at,
+      resultRows
     );
     await writeAudit(client, {
       ...actor(auth),
@@ -777,14 +938,8 @@ export async function commitImport(
       batchId,
       status: 'committed',
       alreadyCommitted: false,
-      committedAt: new Date().toISOString(),
-      rows: previewRows.rows.map(row => ({
-        skuCode: row.sku_code,
-        warehouseCode: row.warehouse_code,
-        onHand: row.on_hand_new,
-        unsellable: row.unsellable_new,
-        version: locked.get(`${row.sku_id}:${row.warehouse_id}`)!.version + 1,
-      })),
+      committedAt: new Date(committed.rows[0].committed_at).toISOString(),
+      rows: resultRows,
     };
   });
 }

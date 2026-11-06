@@ -6,6 +6,7 @@ import { hashPassword, validatePasswordPolicy } from './password.js';
 
 const { Client } = pg;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INTERNAL_ROLES = ['admin', 'sales', 'sales_writer', 'auditor'];
 
 function argValue(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -38,6 +39,13 @@ async function main() {
   const password = await readPassword();
   const mustChange = !process.argv.includes('--no-must-change');
   const salesWriter = process.argv.includes('--sales-writer');
+  const role = (argValue('--role') ?? 'admin').trim();
+  if (!INTERNAL_ROLES.includes(role)) {
+    throw new Error(`--role must be one of: ${INTERNAL_ROLES.join(', ')}.`);
+  }
+  if (role !== 'admin' && salesWriter) {
+    throw new Error('--sales-writer is only valid with the admin role.');
+  }
 
   if (!EMAIL.test(email)) throw new Error('Provide a valid --email.');
   if (!name) throw new Error('Provide a non-empty --name.');
@@ -65,7 +73,8 @@ async function main() {
        VALUES ($1, $2, $3, $4, $5, 'active', now(), now())`,
       [id, name, email, passwordHash, mustChange]
     );
-    const roles = ['admin', ...(salesWriter ? ['sales_writer'] : [])];
+    const roles =
+      role === 'admin' ? ['admin', ...(salesWriter ? ['sales_writer'] : [])] : [role];
     for (const role of roles) {
       await client.query(
         'INSERT INTO internal_user_roles (internal_user_id, role_id) VALUES ($1, $2)',
@@ -82,6 +91,9 @@ async function main() {
     console.log(
       `Internal user created: ${email} (roles: ${roles.join(', ')}; mustChangePassword=${mustChange}).`
     );
+    if (role !== 'admin') {
+      console.log(`Assign this ${role} user to a customer company before expecting scoped access.`);
+    }
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;

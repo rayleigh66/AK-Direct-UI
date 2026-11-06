@@ -130,6 +130,33 @@ export async function provisionRuntimeRole(
         unsellable_new, on_hand_before, unsellable_before, reserved_before,
         version_before) ON inventory_import_rows TO ${role}`
     );
+    await client.query(
+      `GRANT SELECT ON inventory_import_commit_results TO ${role}`
+    );
+    await client.query(
+      `GRANT INSERT ON inventory_import_commit_results TO ${role}`
+    );
+
+    // Phase 4B-04 shared cart and orders. Orders, order lines and status
+    // history are never deleted by the API. Cart items are the only deletable
+    // rows (remove line / clear cart). Idempotency and notification outbox rows
+    // are immutable once written in this phase.
+    await client.query(`GRANT SELECT ON order_statuses TO ${role}`);
+    await client.query(
+      `GRANT SELECT, INSERT, UPDATE ON company_carts, order_sequences, orders TO ${role}`
+    );
+    await client.query(
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON cart_items TO ${role}`
+    );
+    await client.query(
+      `GRANT SELECT, INSERT ON order_items, order_idempotency,
+        order_status_history, order_notifications TO ${role}`
+    );
+    // Product/price snapshots stay immutable; only the mutable quantity and its
+    // derived reference line total may be updated on a pending order.
+    await client.query(
+      `GRANT UPDATE (quantity, line_reference_cents) ON order_items TO ${role}`
+    );
     await client.query('COMMIT');
 
     return { runtimeUser: input.runtimeUser, databaseName };

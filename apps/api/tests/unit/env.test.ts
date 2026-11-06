@@ -26,6 +26,16 @@ describe('API environment validation', () => {
     expect(() => loadEnv({ ...valid, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
   });
 
+  it('validates the configurable order-number time zone', () => {
+    expect(loadEnv(valid).orderNumberTimeZone).toBe('UTC');
+    expect(
+      loadEnv({ ...valid, ORDER_NUMBER_TIME_ZONE: 'Asia/Shanghai' }).orderNumberTimeZone
+    ).toBe('Asia/Shanghai');
+    expect(() =>
+      loadEnv({ ...valid, ORDER_NUMBER_TIME_ZONE: 'Not/AZone' })
+    ).toThrow(/ORDER_NUMBER_TIME_ZONE/);
+  });
+
   it('redacts database credentials for safe logging', () => {
     const redacted = redactDatabaseUrl(valid.DATABASE_URL!);
     expect(redacted).not.toContain('secret');

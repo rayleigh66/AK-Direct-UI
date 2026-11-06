@@ -115,7 +115,7 @@ jobs:
 
   real-catalog-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -141,7 +141,7 @@ jobs:
           sed -i 's/^WEB_PORT=.*/WEB_PORT=18080/; s/^VITE_REAL_AUTH=.*/VITE_REAL_AUTH=true/' .env
           docker compose up -d --build --wait
 
-      - name: Real-auth catalogue and inventory E2E
+      - name: Real-auth catalogue, shared cart, order and sales E2E
         run: bash scripts/real-auth-e2e.sh
 
       - name: Media restore security tests (isolated Compose project)

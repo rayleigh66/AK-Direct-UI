@@ -144,6 +144,132 @@ export interface CustomerBrandDto {
   nameEn: string;
 }
 
+export interface CartItemDto {
+  skuId: string;
+  productId: string;
+  productCode: string;
+  productTitle: string;
+  productTitleEn: string;
+  brandId: string;
+  skuCode: string;
+  colorName: string;
+  colorNameEn: string;
+  colorHex: string;
+  imageUrl: string | null;
+  quantity: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
+  available: number;
+  isAvailable: boolean;
+  issues: string[];
+  updatedAt: string;
+}
+
+export interface CartDto {
+  revision: number;
+  updatedAt: string | null;
+  items: CartItemDto[];
+  itemCount: number;
+  totalQuantity: number;
+  referenceTotalCents: number;
+  hasUnavailableItems: boolean;
+  pricingMode: 'base_reference';
+  isReferenceQuote: true;
+  priceNote: string;
+}
+
+export type ShippingMethod = 'Express' | 'Air' | 'Sea' | 'Customer Pickup' | 'Other';
+
+export interface OrderLineDto {
+  id: string;
+  lineNumber: number;
+  skuId: string;
+  productId: string;
+  productCode: string;
+  productTitle: string;
+  productTitleEn: string;
+  skuCode: string;
+  colorName: string;
+  colorNameEn: string;
+  colorHex: string;
+  quantity: number;
+  baseUnitPriceCents: number;
+  referenceUnitPriceCents: number;
+  lineReferenceCents: number;
+  priceSource: 'base_price';
+  pricingVersion: string;
+}
+
+export interface CustomerOrderHistoryDto {
+  eventType: 'SUBMITTED' | 'LINES_MODIFIED' | 'CANCELLED' | 'ADMIN_CANCELLED';
+  fromStatus: string | null;
+  toStatus: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface InternalOrderHistoryDto extends CustomerOrderHistoryDto {
+  actorType: 'customer' | 'internal' | 'system';
+  actorLabel: string;
+  details: Record<string, unknown>;
+}
+
+export interface CustomerOrderDto {
+  id: string;
+  orderNo: string;
+  status: string;
+  statusLabel: string;
+  revision: number;
+  lines: OrderLineDto[];
+  referenceTotalCents: number;
+  pricingMode: 'base_reference';
+  pricingVersion: string;
+  isReferenceQuote: true;
+  priceNote: string;
+  shippingMethod: ShippingMethod;
+  destinationCountryAlpha3: string;
+  expectedShipDate: string;
+  shippingRequirements: string;
+  customerVisibleNote: string;
+  submittedAt: string;
+  updatedAt: string;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  history: CustomerOrderHistoryDto[];
+}
+
+export interface InternalOrderDto extends Omit<CustomerOrderDto, 'history'> {
+  company: { id: string; customerCode: string; shortName: string };
+  submittedByUsername: string;
+  assignedSalesUserId: string | null;
+  history: InternalOrderHistoryDto[];
+}
+
+export type OrderImpactKind =
+  | 'product_unpublish'
+  | 'sku_discontinue'
+  | 'brand_revoke'
+  | 'company_suspend';
+
+export interface AffectedOrderSummaryDto {
+  id: string;
+  orderNo: string;
+  companyId: string;
+  companyCode: string;
+  status: string;
+  revision: number;
+  referenceTotalCents: number;
+  submittedAt: string;
+}
+
+export interface OrderImpactDto {
+  kind: OrderImpactKind;
+  targetId: string;
+  companyId: string | null;
+  affectedOrders: AffectedOrderSummaryDto[];
+  impactToken: string;
+}
+
 export interface BrandDto {
   id: string;
   code: string;

@@ -1,14 +1,20 @@
 import { apiJson, apiUpload } from '../auth/api';
 import type {
   BrandDto,
+  CartDto,
   CommitImportResultDto,
   CustomerBrandDto,
+  CustomerOrderDto,
   CustomerProductDto,
   ImportPreviewDto,
   ImportPreviewRowDto,
+  InternalOrderDto,
   InventoryRowDto,
+  OrderImpactDto,
+  OrderImpactKind,
   ProductDto,
   SeriesDto,
+  ShippingMethod,
   SkuDto,
   TagDto,
   WarehouseDto,
@@ -35,10 +41,19 @@ export async function updateProduct(id: string, input: Record<string, unknown>):
     .product;
 }
 
-export async function setPublished(id: string, published: boolean): Promise<ProductDto> {
+export async function setPublished(
+  id: string,
+  published: boolean,
+  options: { confirmAffectedOrders?: boolean; impactToken?: string } = {}
+): Promise<ProductDto> {
   const action = published ? 'publish' : 'unpublish';
-  return (await apiJson<{ product: ProductDto }>('POST', `/api/admin/catalog/products/${id}/${action}`, {}))
-    .product;
+  return (
+    await apiJson<{ product: ProductDto }>(
+      'POST',
+      `/api/admin/catalog/products/${id}/${action}`,
+      options
+    )
+  ).product;
 }
 
 export async function createSku(productId: string, input: Record<string, unknown>): Promise<SkuDto> {
@@ -208,3 +223,123 @@ export async function listCustomerTags(): Promise<TagDto[]> {
 }
 
 export type PreviewRow = ImportPreviewRowDto;
+
+// --- Company shared cart ----------------------------------------------------
+
+export async function getCart(): Promise<CartDto> {
+  return (await apiJson<{ cart: CartDto }>('GET', '/api/cart')).cart;
+}
+
+export async function setCartItem(
+  skuId: string,
+  quantity: number,
+  expectedRevision: number
+): Promise<CartDto> {
+  return (
+    await apiJson<{ cart: CartDto }>('PUT', `/api/cart/items/${skuId}`, {
+      quantity,
+      expectedRevision,
+    })
+  ).cart;
+}
+
+export async function removeCartItem(
+  skuId: string,
+  expectedRevision: number
+): Promise<CartDto> {
+  return (
+    await apiJson<{ cart: CartDto }>('DELETE', `/api/cart/items/${skuId}`, {
+      expectedRevision,
+    })
+  ).cart;
+}
+
+export async function clearCart(expectedRevision: number): Promise<CartDto> {
+  return (
+    await apiJson<{ cart: CartDto }>('DELETE', '/api/cart/items', { expectedRevision })
+  ).cart;
+}
+
+// --- Orders -----------------------------------------------------------------
+
+export interface DeliveryPayload {
+  shippingMethod: ShippingMethod;
+  destinationCountryAlpha3: string;
+  expectedShipDate: string;
+  shippingRequirements: string;
+}
+
+export async function submitOrder(
+  input: DeliveryPayload & { idempotencyKey: string; expectedCartRevision: number }
+): Promise<{ order: CustomerOrderDto; alreadySubmitted: boolean }> {
+  return apiJson<{ order: CustomerOrderDto; alreadySubmitted: boolean }>(
+    'POST',
+    '/api/orders',
+    input
+  );
+}
+
+export async function listCustomerOrders(): Promise<CustomerOrderDto[]> {
+  return (await apiJson<{ orders: CustomerOrderDto[] }>('GET', '/api/orders')).orders;
+}
+
+export async function getCustomerOrder(id: string): Promise<CustomerOrderDto> {
+  return (await apiJson<{ order: CustomerOrderDto }>('GET', `/api/orders/${id}`)).order;
+}
+
+export async function modifyOrderLines(
+  id: string,
+  expectedRevision: number,
+  lines: Array<{ skuId: string; quantity: number }>
+): Promise<CustomerOrderDto> {
+  return (
+    await apiJson<{ order: CustomerOrderDto }>('PATCH', `/api/orders/${id}/lines`, {
+      expectedRevision,
+      lines,
+    })
+  ).order;
+}
+
+export async function cancelCustomerOrder(
+  id: string,
+  expectedRevision: number,
+  reason: string
+): Promise<CustomerOrderDto> {
+  return (
+    await apiJson<{ order: CustomerOrderDto }>('POST', `/api/orders/${id}/cancel`, {
+      expectedRevision,
+      reason,
+    })
+  ).order;
+}
+
+export async function listSalesOrders(): Promise<InternalOrderDto[]> {
+  return (await apiJson<{ orders: InternalOrderDto[] }>('GET', '/api/sales/orders')).orders;
+}
+
+export async function getSalesOrder(id: string): Promise<InternalOrderDto> {
+  return (await apiJson<{ order: InternalOrderDto }>('GET', `/api/sales/orders/${id}`)).order;
+}
+
+export async function listAdminOrders(): Promise<InternalOrderDto[]> {
+  return (await apiJson<{ orders: InternalOrderDto[] }>('GET', '/api/admin/orders')).orders;
+}
+
+export async function getAdminOrder(id: string): Promise<InternalOrderDto> {
+  return (await apiJson<{ order: InternalOrderDto }>('GET', `/api/admin/orders/${id}`)).order;
+}
+
+export async function getPendingOrderImpact(
+  kind: OrderImpactKind,
+  targetId: string,
+  companyId?: string
+): Promise<OrderImpactDto> {
+  const params = new URLSearchParams({ kind, targetId });
+  if (companyId) params.set('companyId', companyId);
+  return (
+    await apiJson<{ impact: OrderImpactDto }>(
+      'GET',
+      `/api/admin/orders/impact?${params.toString()}`
+    )
+  ).impact;
+}
