@@ -138,7 +138,11 @@ export function createAdminCatalogRouter(
     write,
     asyncHandler(async (req, res) => {
       res.status(200).json({
-        product: await setProductPublished(pool, req.auth!, req.params.id, false),
+        product: await setProductPublished(pool, req.auth!, req.params.id, false, {
+          confirmAffectedOrders: req.body?.confirmAffectedOrders === true,
+          impactToken:
+            typeof req.body?.impactToken === 'string' ? req.body.impactToken : undefined,
+        }),
       });
     })
   );
@@ -184,6 +188,8 @@ export function createAdminCatalogRouter(
           basePriceCents: body.basePriceCents,
           sellableStatus: body.sellableStatus,
           imageId: body.imageId,
+          confirmAffectedOrders: body.confirmAffectedOrders === true,
+          impactToken: typeof body.impactToken === 'string' ? body.impactToken : undefined,
         }),
       });
     })

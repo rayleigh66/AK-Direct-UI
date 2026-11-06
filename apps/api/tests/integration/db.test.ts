@@ -53,6 +53,8 @@ describeDb('PostgreSQL migrations and readiness', () => {
       '002_auth_rbac.sql',
       '003_sales_write_scope.sql',
       '004_catalog_inventory.sql',
+      '005_cart_orders.sql',
+      '006_sales_reassignment.sql',
     ]);
     expect(first.skipped).toEqual([]);
 
@@ -63,6 +65,8 @@ describeDb('PostgreSQL migrations and readiness', () => {
       '002_auth_rbac.sql',
       '003_sales_write_scope.sql',
       '004_catalog_inventory.sql',
+      '005_cart_orders.sql',
+      '006_sales_reassignment.sql',
     ]);
 
     const client = new Client({ connectionString: databaseUrl() });
@@ -75,9 +79,9 @@ describeDb('PostgreSQL migrations and readiness', () => {
     );
     await client.end();
 
-    expect(migrations.rowCount).toBe(4);
+    expect(migrations.rowCount).toBe(6);
     expect(migrations.rows[0]?.checksum).toMatch(/^[a-f0-9]{64}$/);
-    expect(metadata.rows[0]?.value).toBe('4b03');
+    expect(metadata.rows[0]?.value).toBe('4b04.1');
   }, 20_000);
 
   it('detects drift if an applied migration file is edited', async () => {
@@ -98,6 +102,14 @@ describeDb('PostgreSQL migrations and readiness', () => {
       await copyFile(
         join(realMigrationsDir, '004_catalog_inventory.sql'),
         join(tempDir, '004_catalog_inventory.sql')
+      );
+      await copyFile(
+        join(realMigrationsDir, '005_cart_orders.sql'),
+        join(tempDir, '005_cart_orders.sql')
+      );
+      await copyFile(
+        join(realMigrationsDir, '006_sales_reassignment.sql'),
+        join(tempDir, '006_sales_reassignment.sql')
       );
       const probe = join(tempDir, '999_checksum_probe.sql');
       await writeFile(probe, 'CREATE TABLE checksum_probe (id integer PRIMARY KEY);');
@@ -131,7 +143,7 @@ describeDb('PostgreSQL migrations and readiness', () => {
     const stale = await checkReadiness(pool);
     expect(stale.ok).toBe(false);
     expect(stale.checks.migrations).toBe('version_mismatch');
-    await pool.query("UPDATE system_metadata SET value = '4b03' WHERE key = 'schema_version'");
+    await pool.query("UPDATE system_metadata SET value = '4b04.1' WHERE key = 'schema_version'");
     await pool.end();
   }, 20_000);
 

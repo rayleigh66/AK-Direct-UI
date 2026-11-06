@@ -14,11 +14,19 @@ export interface AuthUserDto {
 export class AuthApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** Extra server fields such as the latest cart or affected pending orders. */
+  readonly details: Record<string, unknown>;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details: Record<string, unknown> = {}
+  ) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -32,7 +40,8 @@ async function readJson<T>(response: Response): Promise<T> {
     throw new AuthApiError(
       response.status,
       body.error?.code ?? 'request_failed',
-      body.error?.message ?? 'The request failed.'
+      body.error?.message ?? 'The request failed.',
+      body as Record<string, unknown>
     );
   }
   return body;

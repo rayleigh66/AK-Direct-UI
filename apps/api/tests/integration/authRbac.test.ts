@@ -31,6 +31,7 @@ const config: AuthConfig = {
   loginWindowMinutes: 15,
   loginLockMinutes: 15,
   trustProxy: false,
+  orderNumberTimeZone: 'UTC',
 };
 
 type TestAgent = ReturnType<typeof request.agent>;

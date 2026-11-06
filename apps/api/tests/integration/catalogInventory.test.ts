@@ -38,6 +38,7 @@ const config: AuthConfig = {
   loginWindowMinutes: 15,
   loginLockMinutes: 15,
   trustProxy: false,
+  orderNumberTimeZone: 'UTC',
 };
 
 type TestAgent = ReturnType<typeof request.agent>;
@@ -937,10 +938,19 @@ describeDb('catalog, media and inventory persistence', () => {
       versionBefore: 1,
     });
 
+    // A retry with the same actor and canonical payload is safe; the key is now
+    // bound to that payload (Phase 4B-04 P1-A).
     const repeatedPreview = await post(
       admin.agent,
       '/api/admin/inventory/import/preview',
-      { idempotencyKey: key, rows: [] },
+      {
+        idempotencyKey: key,
+        sourceName: 'stock.csv',
+        rows: [
+          { rowNumber: 2, skuCode: 'AKT-IMPORT-2', warehouseCode: 'WH-TEST-A', onHand: 4, unsellable: 2 },
+          { rowNumber: 1, skuCode: 'AKT-IMPORT-1', warehouseCode: 'WH-TEST-A', onHand: 8, unsellable: 1 },
+        ],
+      },
       admin.csrfToken
     );
     expect(repeatedPreview.status).toBe(201);

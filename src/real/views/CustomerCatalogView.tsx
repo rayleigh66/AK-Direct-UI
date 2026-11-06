@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, ShoppingBag, X } from 'lucide-react';
+import { Check, Search, ShoppingBag, X } from 'lucide-react';
 import { listCustomerBrands, listCustomerProducts, listCustomerSeries, listCustomerTags } from '../api';
+import { useRealCart, usdFromCents } from '../cart';
 import type { CustomerProductDto, CustomerBrandDto, SeriesDto, TagDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 
@@ -18,6 +19,11 @@ export const CustomerCatalogView: React.FC = () => {
   const [seriesId, setSeriesId] = useState('');
   const [tagId, setTagId] = useState('');
   const [selected, setSelected] = useState<CustomerProductDto | null>(null);
+  const { cart, setItem } = useRealCart();
+  const [skuQuantities, setSkuQuantities] = useState<Record<string, string>>({});
+  const [addError, setAddError] = useState('');
+  const [addingSku, setAddingSku] = useState<string | null>(null);
+  const [addedSku, setAddedSku] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -39,6 +45,40 @@ export const CustomerCatalogView: React.FC = () => {
   };
 
   useEffect(load, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    const next: Record<string, string> = {};
+    for (const sku of selected.skus) {
+      const existing = cart?.items.find(item => item.skuId === sku.id);
+      next[sku.id] = String(existing?.quantity ?? 10);
+    }
+    setSkuQuantities(next);
+    setAddError('');
+    setAddedSku(null);
+    // Only re-initialise when a product is opened; cart changes must not clear
+    // the "Added" confirmation while the detail stays open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  const addSku = async (skuId: string) => {
+    const quantity = Number(skuQuantities[skuId]);
+    if (!Number.isInteger(quantity) || quantity < 10) {
+      setAddError('Minimum 10 whole PCS per SKU.');
+      return;
+    }
+    setAddingSku(skuId);
+    setAddError('');
+    setAddedSku(null);
+    try {
+      await setItem(skuId, quantity);
+      setAddedSku(skuId);
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'The SKU could not be added to the cart.');
+    } finally {
+      setAddingSku(null);
+    }
+  };
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -218,29 +258,89 @@ export const CustomerCatalogView: React.FC = () => {
               </dl>
               <div className="space-y-2">
                 <div className="text-xs font-bold text-slate-700">Colours / 颜色</div>
-                {selected.skus.map(sku => (
-                  <div
-                    key={sku.id}
-                    className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200"
-                  >
-                    <div className="flex items-center gap-2 text-xs">
-                      <span
-                        className="w-5 h-5 rounded-full border border-slate-300"
-                        style={{ backgroundColor: sku.colorHex }}
-                      />
-                      <span className="font-semibold">{sku.colorNameEn}</span>
-                      <span className="font-mono text-[10px] text-slate-400">{sku.skuCode}</span>
-                    </div>
-                    <div className="text-right text-xs">
-                      <div className="font-bold">{usd(sku.basePriceCents)}</div>
-                      <div className="text-[10px] text-slate-400">{sku.available} pcs available</div>
-                    </div>
+                {addError && (
+                  <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-[11px] text-rose-800">
+                    {addError}
                   </div>
-                ))}
+                )}
+                {selected.skus.map(sku => {
+                  const inCart = cart?.items.find(item => item.skuId === sku.id);
+                  const disabled = sku.available < 10;
+                  return (
+                    <div
+                      key={sku.id}
+                      className="p-3 rounded-xl border border-slate-200 space-y-2"
+                      data-testid="catalog-sku-row"
+                      data-sku-code={sku.skuCode}
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span
+                          className="w-5 h-5 rounded-full border border-slate-300"
+                          style={{ backgroundColor: sku.colorHex }}
+                        />
+                        <span className="font-semibold">{sku.colorNameEn}</span>
+                        <span className="font-mono text-[10px] text-slate-400">{sku.skuCode}</span>
+                        {inCart && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                            In cart: {inCart.quantity}
+                          </span>
+                        )}
+                        <span className="ml-auto text-right">
+                          <span className="font-bold">{usdFromCents(sku.basePriceCents)}</span>
+                          <span className="text-[10px] text-slate-400 ml-2">
+                            {sku.available} pcs available
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-[11px] text-slate-500">
+                          Quantity (MOQ 10)
+                          <input
+                            type="number"
+                            min={10}
+                            step={1}
+                            value={skuQuantities[sku.id] ?? '10'}
+                            onChange={event =>
+                              setSkuQuantities(prev => ({ ...prev, [sku.id]: event.target.value }))
+                            }
+                            disabled={disabled}
+                            className="ml-2 w-24 h-9 px-2 rounded-lg border border-slate-300 text-center text-xs disabled:bg-slate-100"
+                            data-testid="catalog-add-qty"
+                            aria-label={`Quantity for ${sku.skuCode}`}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={disabled || addingSku === sku.id}
+                          onClick={() => void addSku(sku.id)}
+                          data-testid="catalog-add-submit"
+                          className="min-h-[38px] px-3 rounded-xl bg-[#ff681e] text-white text-xs font-bold disabled:opacity-40"
+                        >
+                          {addingSku === sku.id
+                            ? 'Saving…'
+                            : inCart
+                              ? 'Update cart'
+                              : 'Add to cart'}
+                        </button>
+                        {addedSku === sku.id && (
+                          <span className="text-[11px] text-emerald-700 flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Added to the company shared cart
+                          </span>
+                        )}
+                        {disabled && (
+                          <span className="text-[11px] text-amber-700">
+                            Fewer than 10 PCS available.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               <div className="rounded-xl bg-[#fff7f2] border border-[#ffeadb] p-3 text-[11px] text-[#8a4d2c] flex items-start gap-2">
                 <ShoppingBag className="w-4 h-4 mt-0.5" />
-                Cart and ordering are not enabled in this phase. / 本阶段尚未开放购物车与下单。
+                The cart is shared by every account of your company. Submitting an order creates a
+                pending request; it does not reserve stock.
               </div>
             </div>
           </div>

@@ -118,7 +118,12 @@ export function createAdminRouter(pool: DbPool, config: AuthConfig): Router {
           pool,
           req.auth!,
           req.params.id,
-          statusValue(req.body?.status)
+          statusValue(req.body?.status),
+          {
+            confirmAffectedOrders: req.body?.confirmAffectedOrders === true,
+            impactToken:
+              typeof req.body?.impactToken === 'string' ? req.body.impactToken : undefined,
+          }
         ),
       });
     })
@@ -142,7 +147,12 @@ export function createAdminRouter(pool: DbPool, config: AuthConfig): Router {
         req.auth!,
         req.params.id,
         req.params.brandId,
-        booleanValue(req.body?.granted, 'granted')
+        booleanValue(req.body?.granted, 'granted'),
+        {
+          confirmAffectedOrders: req.body?.confirmAffectedOrders === true,
+          impactToken:
+            typeof req.body?.impactToken === 'string' ? req.body.impactToken : undefined,
+        }
       );
       res.status(200).json({ status: 'ok' });
     })

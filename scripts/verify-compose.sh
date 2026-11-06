@@ -244,13 +244,13 @@ wait_http "$BASE_URL/api/ready" 200 60
 
 step "T05: migrations are idempotent"
 MIGRATION_COUNT="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT" = "4" ] || {
-  echo "Expected 4 migration rows, got $MIGRATION_COUNT" >&2
+[ "$MIGRATION_COUNT" = "6" ] || {
+  echo "Expected 6 migration rows, got $MIGRATION_COUNT" >&2
   exit 1
 }
 compose run --rm migrate
 MIGRATION_COUNT_AGAIN="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT_AGAIN" = "4" ] || {
+[ "$MIGRATION_COUNT_AGAIN" = "6" ] || {
   echo "Migration count changed after second run: $MIGRATION_COUNT_AGAIN" >&2
   exit 1
 }
@@ -292,7 +292,7 @@ if compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0
   exit 1
 fi
 RUNTIME_MIGRATION_COUNT="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME"   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RUNTIME_MIGRATION_COUNT" = "4" ] || {
+[ "$RUNTIME_MIGRATION_COUNT" = "6" ] || {
   echo "Runtime role cannot read the expected migration metadata (got $RUNTIME_MIGRATION_COUNT)." >&2
   exit 1
 }
@@ -362,7 +362,7 @@ wait_http "$BASE_URL/api/ready" 200 60
 RESTORED_RUNTIME_CHECK="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql \
   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME" \
   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RESTORED_RUNTIME_CHECK" = "4" ]
+[ "$RESTORED_RUNTIME_CHECK" = "6" ]
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
 
 # Media files are backed up separately from PostgreSQL. Prove the archive can
@@ -383,4 +383,4 @@ echo "Smoke project: $SMOKE_PROJECT"
 echo "Isolated backup directory: $SMOKE_BACKUP_DIR"
 
 echo
-echo "All isolated Phase 4B-01/4B-02/4B-03 compose checks passed."
+echo "All isolated Phase 4B-01/4B-02/4B-03/4B-04 compose checks passed."

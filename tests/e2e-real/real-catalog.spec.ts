@@ -145,7 +145,10 @@ test('admin creates catalogue and stock, customer browses authorised products', 
 
   await productCard.click();
   await expect(page.getByTestId('catalog-detail')).toBeVisible();
-  await expect(page.getByTestId('catalog-detail')).toContainText('Cart and ordering are not enabled');
+  await expect(page.getByTestId('catalog-detail')).toContainText('Add to cart');
+  await expect(page.getByTestId('catalog-detail')).toContainText(
+    'shared by every account of your company'
+  );
   await expect(page.getByTestId('catalog-detail')).toContainText('Matte Black');
   await screenshot(page, `customer-detail-${testInfo.project.name}`);
 });

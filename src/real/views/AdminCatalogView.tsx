@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, ImagePlus, Plus, Search, Star, Trash2 } from 'l
 import {
   createProduct,
   createSku,
+  getPendingOrderImpact,
   listAdminBrands,
   listAdminProducts,
   listSeries,
@@ -15,7 +16,16 @@ import {
   updateSku,
   uploadProductImage,
 } from '../api';
-import type { BrandDto, ProductDto, SeriesDto, SkuDto, TagDto } from '../types';
+import type {
+  BrandDto,
+  OrderImpactDto,
+  OrderImpactKind,
+  ProductDto,
+  SeriesDto,
+  SkuDto,
+  TagDto,
+} from '../types';
+import { usdFromCents } from '../cart';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 
 const inputClass =
@@ -307,6 +317,14 @@ const CreateProductForm: React.FC<{
   );
 };
 
+interface DestructiveRequest {
+  kind: OrderImpactKind;
+  targetId: string;
+  description: string;
+  success: string;
+  action: (token?: string) => Promise<unknown>;
+}
+
 const ProductCard: React.FC<{
   product: ProductDto;
   brands: BrandDto[];
@@ -319,6 +337,33 @@ const ProductCard: React.FC<{
 }> = ({ product, brands, series, tags, canWrite, expanded, onToggle, run }) => {
   const primary = product.images.find(image => image.isPrimary) ?? product.images[0];
   const activeSkus = product.skus.filter(sku => sku.sellableStatus === 'active').length;
+  const [impact, setImpact] = useState<
+    (DestructiveRequest & { preview: OrderImpactDto }) | null
+  >(null);
+  const [impactError, setImpactError] = useState('');
+
+  const requestDestructive = async (request: DestructiveRequest) => {
+    setImpactError('');
+    try {
+      const preview = await getPendingOrderImpact(request.kind, request.targetId);
+      if (preview.affectedOrders.length === 0) {
+        await run(() => request.action(undefined), request.success);
+        return;
+      }
+      setImpact({ ...request, preview });
+    } catch (err) {
+      setImpactError(err instanceof Error ? err.message : 'The order-impact preview failed.');
+    }
+  };
+
+  const confirmImpact = async () => {
+    if (!impact) return;
+    await run(
+      () => impact.action(impact.preview.impactToken),
+      impact.success
+    );
+    setImpact(null);
+  };
 
   return (
     <section
@@ -370,18 +415,40 @@ const ProductCard: React.FC<{
             run={run}
           />
           <ImageManager product={product} canWrite={canWrite} run={run} />
-          <SkuManager product={product} canWrite={canWrite} run={run} />
+          <SkuManager
+            product={product}
+            canWrite={canWrite}
+            run={run}
+            requestDestructive={requestDestructive}
+          />
+          {impactError && (
+            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-[11px] text-rose-800">
+              {impactError}
+            </div>
+          )}
           {canWrite && (
             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 data-testid={product.published ? 'product-unpublish' : 'product-publish'}
-                onClick={() =>
-                  run(
-                    () => setPublished(product.id, !product.published),
-                    product.published ? 'Product unpublished.' : 'Product published.'
-                  )
-                }
+                onClick={() => {
+                  if (!product.published) {
+                    void run(() => setPublished(product.id, true), 'Product published.');
+                    return;
+                  }
+                  void requestDestructive({
+                    kind: 'product_unpublish',
+                    targetId: product.id,
+                    description:
+                      'Unpublishing this product cancels every pending-confirmation order that contains it.',
+                    success: 'Product unpublished and affected pending orders cancelled.',
+                    action: token =>
+                      setPublished(product.id, false, {
+                        confirmAffectedOrders: true,
+                        impactToken: token,
+                      }),
+                  });
+                }}
                 className={`h-10 px-4 rounded-xl text-sm font-bold ${
                   product.published
                     ? 'bg-white border border-slate-300'
@@ -393,6 +460,57 @@ const ProductCard: React.FC<{
               <span className="text-[11px] text-slate-500 self-center">
                 Publishing requires at least one active SKU and one image.
               </span>
+            </div>
+          )}
+          {impact && (
+            <div
+              className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-6"
+              role="dialog"
+              aria-modal="true"
+              data-testid="impact-dialog"
+            >
+              <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl p-5 space-y-3">
+                <h3 className="text-base font-extrabold text-rose-700">
+                  Pending orders will be cancelled
+                </h3>
+                <p className="text-xs text-slate-600">{impact.description}</p>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {impact.preview.affectedOrders.map(order => (
+                    <div
+                      key={order.id}
+                      className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-800 flex flex-wrap gap-2"
+                    >
+                      <span className="font-mono font-bold">{order.orderNo}</span>
+                      <span>{order.companyCode}</span>
+                      <span className="ml-auto">{usdFromCents(order.referenceTotalCents)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  The backend re-checks this exact set inside the transaction. If another order is
+                  submitted or cancelled first, the action is rejected and you must review again.
+                  Customers and their assigned salesperson receive a pending notification record;
+                  no email is sent in this phase.
+                </p>
+                <div className="flex flex-wrap gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setImpact(null)}
+                    className="min-h-[42px] px-4 rounded-xl border border-slate-300 text-xs font-semibold"
+                    data-testid="impact-cancel"
+                  >
+                    Keep current state
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmImpact()}
+                    className="min-h-[42px] px-4 rounded-xl bg-rose-600 text-white text-xs font-bold"
+                    data-testid="impact-confirm"
+                  >
+                    Confirm and cancel {impact.preview.affectedOrders.length} order(s)
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -677,7 +795,8 @@ const SkuManager: React.FC<{
   product: ProductDto;
   canWrite: boolean;
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
-}> = ({ product, canWrite, run }) => {
+  requestDestructive: (request: DestructiveRequest) => Promise<void>;
+}> = ({ product, canWrite, run, requestDestructive }) => {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
     skuCode: '',
@@ -707,7 +826,13 @@ const SkuManager: React.FC<{
       </div>
 
       {product.skus.map(sku => (
-        <SkuRow key={sku.id} sku={sku} canWrite={canWrite} run={run} />
+        <SkuRow
+          key={sku.id}
+          sku={sku}
+          canWrite={canWrite}
+          run={run}
+          requestDestructive={requestDestructive}
+        />
       ))}
 
       {adding && canWrite && (
@@ -822,7 +947,8 @@ const SkuRow: React.FC<{
   sku: SkuDto;
   canWrite: boolean;
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
-}> = ({ sku, canWrite, run }) => {
+  requestDestructive: (request: DestructiveRequest) => Promise<void>;
+}> = ({ sku, canWrite, run, requestDestructive }) => {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(usd(sku.basePriceCents));
 
@@ -885,15 +1011,28 @@ const SkuRow: React.FC<{
           </button>
           <button
             type="button"
-            onClick={() =>
-              run(
-                () =>
+            onClick={() => {
+              if (sku.sellableStatus !== 'active') {
+                void run(
+                  () => updateSku(sku.id, { sellableStatus: 'active' }),
+                  'SKU status updated.'
+                );
+                return;
+              }
+              void requestDestructive({
+                kind: 'sku_discontinue',
+                targetId: sku.id,
+                description:
+                  'Discontinuing this SKU cancels every pending-confirmation order that contains it.',
+                success: 'SKU discontinued and affected pending orders cancelled.',
+                action: token =>
                   updateSku(sku.id, {
-                    sellableStatus: sku.sellableStatus === 'active' ? 'discontinued' : 'active',
+                    sellableStatus: 'discontinued',
+                    confirmAffectedOrders: true,
+                    impactToken: token,
                   }),
-                'SKU status updated.'
-              )
-            }
+              });
+            }}
             className="h-10 px-3 rounded-xl border border-slate-300 font-semibold"
           >
             {sku.sellableStatus === 'active' ? 'Discontinue' : 'Reactivate'}

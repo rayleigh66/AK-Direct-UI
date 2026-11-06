@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b03}
+    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b04}
     command:
       - sh
       - -c
@@ -44,7 +44,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: ${API_IMAGE:-aoking-direct-api:4b03}
+    image: ${API_IMAGE:-aoking-direct-api:4b04}
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -62,6 +62,7 @@ services:
       LOGIN_WINDOW_MINUTES: ${LOGIN_WINDOW_MINUTES:-15}
       LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
       TRUST_PROXY: ${TRUST_PROXY:-0}
+      ORDER_NUMBER_TIME_ZONE: ${ORDER_NUMBER_TIME_ZONE:-UTC}
     depends_on:
       db:
         condition: service_healthy
@@ -91,7 +92,7 @@ services:
       dockerfile: Dockerfile.web
       args:
         VITE_REAL_AUTH: ${VITE_REAL_AUTH:-false}
-    image: ${WEB_IMAGE:-aoking-direct-web:4b03}
+    image: ${WEB_IMAGE:-aoking-direct-web:4b04}
     ports:
       - "127.0.0.1:${WEB_PORT:-8080}:80"
     depends_on:

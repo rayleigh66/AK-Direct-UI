@@ -6,6 +6,11 @@ import { withTransaction } from '../db/transaction.js';
 import { HttpError } from '../http/errors.js';
 import { generateInitialPassword, hashPassword } from '../auth/password.js';
 import type { AuthContext } from '../auth/types.js';
+import {
+  enforcePendingOrderImpact,
+  type DestructiveOrderImpactOptions,
+} from '../orders/impact.js';
+import { cancelStaleSalesNotifications } from '../orders/notifications.js';
 
 export interface CompanyRow {
   id: string;
@@ -337,15 +342,32 @@ export async function setCompanyStatus(
   pool: DbPool,
   auth: AuthContext,
   companyId: string,
-  status: 'active' | 'suspended'
+  status: 'active' | 'suspended',
+  impactOptions: DestructiveOrderImpactOptions = {}
 ): Promise<CompanyDto> {
   return withTransaction(pool, async client => {
+    const company = await client.query<CompanyRow>(
+      'SELECT * FROM customer_companies WHERE id = $1 FOR UPDATE',
+      [companyId]
+    );
+    if (!company.rows[0]) throw new HttpError(404, 'company_not_found', 'Company not found.');
+
+    const affected =
+      status === 'suspended'
+        ? await enforcePendingOrderImpact(client, auth, {
+            kind: 'company_suspend',
+            targetId: companyId,
+            reason: 'the customer company was suspended',
+            confirmAffectedOrders: impactOptions.confirmAffectedOrders,
+            impactToken: impactOptions.impactToken,
+          })
+        : [];
+
     const result = await client.query<CompanyRow>(
       `UPDATE customer_companies SET status = $2, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [companyId, status]
     );
-    if (!result.rows[0]) throw new HttpError(404, 'company_not_found', 'Company not found.');
     if (status === 'suspended') {
       await client.query(
         'UPDATE auth_sessions SET revoked_at = now() WHERE company_id = $1 AND revoked_at IS NULL',
@@ -357,11 +379,7 @@ export async function setCompanyStatus(
       action: status === 'suspended' ? 'SUSPEND_COMPANY' : 'REACTIVATE_COMPANY',
       targetType: 'customer_company',
       targetId: companyId,
-      details: {
-        status,
-        pendingOrdersContract:
-          status === 'suspended' ? 'future_pending_orders_must_be_cancelled_phase_4b03' : undefined,
-      },
+      details: { status, cancelledPendingOrders: affected.length },
     });
     return companyDto(result.rows[0]);
   });
@@ -401,13 +419,31 @@ export async function setBrandGrant(
   auth: AuthContext,
   companyId: string,
   brandId: string,
-  granted: boolean
+  granted: boolean,
+  impactOptions: DestructiveOrderImpactOptions = {}
 ): Promise<void> {
   await withTransaction(pool, async client => {
-    const company = await client.query('SELECT 1 FROM customer_companies WHERE id = $1', [companyId]);
+    const company = await client.query('SELECT 1 FROM customer_companies WHERE id = $1 FOR UPDATE', [
+      companyId,
+    ]);
     if (company.rowCount !== 1) throw new HttpError(404, 'company_not_found', 'Company not found.');
     const brand = await client.query('SELECT 1 FROM brands WHERE id = $1', [brandId]);
     if (brand.rowCount !== 1) throw new HttpError(404, 'brand_not_found', 'Brand not found.');
+
+    let affectedPendingOrders = 0;
+    if (!granted) {
+      affectedPendingOrders = (
+        await enforcePendingOrderImpact(client, auth, {
+          kind: 'brand_revoke',
+          targetId: brandId,
+          companyId,
+          reason: 'your company is no longer authorized for this brand',
+          confirmAffectedOrders: impactOptions.confirmAffectedOrders,
+          impactToken: impactOptions.impactToken,
+        })
+      ).length;
+    }
+
     if (granted) {
       await client.query(
         `INSERT INTO brand_grants (company_id, brand_id, granted_at)
@@ -425,7 +461,7 @@ export async function setBrandGrant(
       action: granted ? 'GRANT_BRAND' : 'REVOKE_BRAND',
       targetType: 'customer_company',
       targetId: companyId,
-      details: { brandId },
+      details: { brandId, cancelledPendingOrders: affectedPendingOrders },
     });
   });
 }
@@ -437,19 +473,35 @@ export async function setSalesAssignment(
   salesUserId: string | null
 ): Promise<CompanyDto> {
   return withTransaction(pool, async client => {
+    // Serialise against notification inserts: they hold FOR SHARE on this row
+    // while resolving the current assignee.
+    const existing = await client.query<CompanyRow>(
+      'SELECT * FROM customer_companies WHERE id = $1 FOR UPDATE',
+      [companyId]
+    );
+    if (!existing.rows[0]) throw new HttpError(404, 'company_not_found', 'Company not found.');
     if (salesUserId) await validateAssignedSales(client, salesUserId);
+
     const result = await client.query<CompanyRow>(
       `UPDATE customer_companies SET assigned_sales_user_id = $2, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [companyId, salesUserId]
     );
-    if (!result.rows[0]) throw new HttpError(404, 'company_not_found', 'Company not found.');
+    const cancelledPendingNotifications = await cancelStaleSalesNotifications(
+      client,
+      companyId,
+      salesUserId
+    );
     await writeAudit(client, {
       ...actor(auth),
       action: 'ASSIGN_SALES',
       targetType: 'customer_company',
       targetId: companyId,
-      details: { salesUserId },
+      details: {
+        salesUserId,
+        previousSalesUserId: existing.rows[0].assigned_sales_user_id,
+        cancelledPendingNotifications,
+      },
     });
     return companyDto(result.rows[0]);
   });

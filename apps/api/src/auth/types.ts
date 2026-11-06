@@ -32,4 +32,5 @@ export type AuthConfig = Pick<
   | 'loginWindowMinutes'
   | 'loginLockMinutes'
   | 'trustProxy'
+  | 'orderNumberTimeZone'
 >;
