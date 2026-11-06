@@ -95,6 +95,6 @@ export async function recordLoginFailure(
   }
 }
 
-export async function clearLoginFailures(pool: DbPool, key: string): Promise<void> {
+export async function clearLoginFailures(pool: Pick<DbPool, 'query'>, key: string): Promise<void> {
   await pool.query('DELETE FROM login_attempts WHERE login_key = $1', [key]);
 }

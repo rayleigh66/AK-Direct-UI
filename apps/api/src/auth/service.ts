@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
+import { withTransaction } from '../db/transaction.js';
 import type { DbPool } from '../db/pool.js';
 import { HttpError } from '../http/errors.js';
 import { writeAudit } from '../audit/audit.js';
@@ -78,7 +80,7 @@ function customerAuthUser(row: CustomerRow): AuthUser {
   };
 }
 
-async function internalAuthUser(pool: DbPool, row: InternalRow): Promise<AuthUser> {
+async function internalAuthUser(pool: Pick<DbPool, 'query'>, row: InternalRow): Promise<AuthUser> {
   const access = await loadInternalAccess(pool, row.id);
   return {
     id: row.id,
@@ -93,6 +95,47 @@ async function internalAuthUser(pool: DbPool, row: InternalRow): Promise<AuthUse
 
 function invalidCredentials(): HttpError {
   return new HttpError(401, 'invalid_credentials', 'Invalid username or password.');
+}
+
+/** Account writers and issuers serialize company -> account -> sessions.
+ * Scrypt stays outside these locks; the verified hash is rechecked inside them.
+ */
+async function lockCredentials(
+  client: PoolClient,
+  type: AuthUser['type'],
+  userId: string,
+  companyId?: string
+): Promise<{ passwordHash: string; user: AuthUser } | null> {
+  if (type === 'customer') {
+    if (!companyId) return null;
+    await client.query('SELECT id FROM customer_companies WHERE id = $1 FOR SHARE', [companyId]);
+    const result = await client.query<CustomerRow>(
+      `SELECT cu.id, cu.company_id, cu.username, cu.password_hash,
+              cu.must_change_password, cu.status,
+              c.status AS company_status, c.customer_code, c.short_name AS company_name
+       FROM customer_users cu JOIN customer_companies c ON c.id = cu.company_id
+       WHERE cu.id = $1 AND cu.company_id = $2 FOR UPDATE OF cu`,
+      [userId, companyId]
+    );
+    const row = result.rows[0];
+    if (!row || row.status !== 'active' || row.company_status !== 'active') return null;
+    return { passwordHash: row.password_hash, user: customerAuthUser(row) };
+  }
+  const result = await client.query<InternalRow>(
+    `SELECT id, email, name, password_hash, must_change_password, status
+     FROM internal_users WHERE id = $1 FOR UPDATE`, [userId]
+  );
+  const row = result.rows[0];
+  if (!row || row.status !== 'active') return null;
+  return { passwordHash: row.password_hash, user: await internalAuthUser(client, row) };
+}
+
+async function rejectLogin(pool: DbPool, key: string, config: AuthConfig): Promise<never> {
+  const lock = await recordLoginFailure(pool, key, config);
+  if (lock.locked) {
+    throw new HttpError(429, 'rate_limited', 'Too many failed sign-in attempts. Try again later.', lock.retryAfterSeconds);
+  }
+  throw invalidCredentials();
 }
 
 export async function login(
@@ -146,65 +189,40 @@ export async function login(
     (internal && internal.status === 'active');
 
   if (!row || !eligible || !passwordValid) {
-    const lock = await recordLoginFailure(pool, attemptKey, config);
-    if (lock.locked) {
-      throw new HttpError(
-        429,
-        'rate_limited',
-        'Too many failed sign-in attempts. Try again later.',
-        lock.retryAfterSeconds
+    return rejectLogin(pool, attemptKey, config);
+  }
+
+  try {
+    return await withTransaction(pool, async client => {
+      const type = customerRow ? 'customer' : 'internal';
+      const current = await lockCredentials(client, type, row.id, customerRow?.company_id);
+      // A verified-but-stale password or suspended account cannot issue a session.
+      if (!current || current.passwordHash !== passwordHash) throw invalidCredentials();
+      await clearLoginFailures(client, attemptKey);
+      await client.query(
+        `UPDATE ${type === 'customer' ? 'customer_users' : 'internal_users'}
+         SET last_login_at = now(), updated_at = now() WHERE id = $1`, [row.id]
       );
+      const session = await createSession(client, config, {
+        userType: type,
+        ...(type === 'customer'
+          ? { customerUserId: row.id, companyId: customerRow!.company_id }
+          : { internalUserId: row.id }),
+        ip: input.ip,
+        userAgent: input.userAgent,
+      });
+      await writeAudit(client, {
+        actorType: type, actorId: row.id, actorLabel: current.user.username,
+        action: 'LOGIN_SUCCESS', targetType: type === 'customer' ? 'customer_user' : 'internal_user', targetId: row.id,
+      });
+      return { user: current.user, session };
+    });
+  } catch (error) {
+    if (error instanceof HttpError && error.code === 'invalid_credentials') {
+      return rejectLogin(pool, attemptKey, config);
     }
-    throw invalidCredentials();
+    throw error;
   }
-
-  await clearLoginFailures(pool, attemptKey);
-
-  let user: AuthUser;
-  if (customerRow) {
-    user = customerAuthUser(customerRow);
-    await pool.query(
-      'UPDATE customer_users SET last_login_at = now(), updated_at = now() WHERE id = $1',
-      [customerRow.id]
-    );
-    const session = await createSession(pool, config, {
-      userType: 'customer',
-      customerUserId: customerRow.id,
-      companyId: customerRow.company_id,
-      ip: input.ip,
-      userAgent: input.userAgent,
-    });
-    await writeAudit(pool, {
-      actorType: 'customer',
-      actorId: customerRow.id,
-      actorLabel: customerRow.username,
-      action: 'LOGIN_SUCCESS',
-      targetType: 'customer_user',
-      targetId: customerRow.id,
-    });
-    return { user, session };
-  }
-
-  if (!internal) throw invalidCredentials();
-  user = await internalAuthUser(pool, internal);
-  await pool.query('UPDATE internal_users SET last_login_at = now(), updated_at = now() WHERE id = $1', [
-    internal.id,
-  ]);
-  const session = await createSession(pool, config, {
-    userType: 'internal',
-    internalUserId: internal.id,
-    ip: input.ip,
-    userAgent: input.userAgent,
-  });
-  await writeAudit(pool, {
-    actorType: 'internal',
-    actorId: internal.id,
-    actorLabel: internal.email,
-    action: 'LOGIN_SUCCESS',
-    targetType: 'internal_user',
-    targetId: internal.id,
-  });
-  return { user, session };
 }
 
 export async function logout(
@@ -266,53 +284,48 @@ export async function changePassword(
   }
 
   const newHash = await hashPassword(newPassword);
-  if (auth.user.type === 'customer') {
-    await pool.query(
-      `UPDATE customer_users
+  return withTransaction(pool, async client => {
+    const current = await lockCredentials(client, auth.user.type, auth.user.id, auth.user.companyId);
+    if (!current || current.passwordHash !== storedHash) {
+      throw new HttpError(401, 'invalid_current_password', 'Current password is incorrect.');
+    }
+    // Middleware authentication may predate a concurrent revoke/logout. Check
+    // the authenticating session again under the account lock before replacing it.
+    const sessionRow = await client.query(
+      `SELECT id FROM auth_sessions
+       WHERE id = $1 AND token_hash = $2 AND user_type = $3
+         AND ${auth.user.type === 'customer' ? 'customer_user_id' : 'internal_user_id'} = $4
+         AND revoked_at IS NULL AND idle_expires_at > clock_timestamp()
+         AND absolute_expires_at > clock_timestamp() FOR UPDATE`,
+      [auth.sessionId, auth.sessionTokenHash, auth.user.type, auth.user.id]
+    );
+    if (sessionRow.rowCount !== 1) {
+      throw new HttpError(401, 'session_expired', 'Your session has expired.');
+    }
+    await client.query(
+      `UPDATE ${auth.user.type === 'customer' ? 'customer_users' : 'internal_users'}
        SET password_hash = $2, must_change_password = false,
-           password_changed_at = now(), updated_at = now()
-       WHERE id = $1`,
+           password_changed_at = now(), updated_at = now() WHERE id = $1`,
       [auth.user.id, newHash]
     );
-    await revokeSessionsForCustomerUser(pool, auth.user.id);
-  } else {
-    await pool.query(
-      `UPDATE internal_users
-       SET password_hash = $2, must_change_password = false,
-           password_changed_at = now(), updated_at = now()
-       WHERE id = $1`,
-      [auth.user.id, newHash]
-    );
-    await revokeSessionsForInternalUser(pool, auth.user.id);
-  }
-
-  const refreshedUser: AuthUser = { ...auth.user, mustChangePassword: false };
-  const session =
-    auth.user.type === 'customer'
-      ? await createSession(pool, config, {
-          userType: 'customer',
-          customerUserId: auth.user.id,
-          companyId: auth.user.companyId,
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-        })
-      : await createSession(pool, config, {
-          userType: 'internal',
-          internalUserId: auth.user.id,
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-        });
-
-  await writeAudit(pool, {
-    actorType: auth.user.type,
-    actorId: auth.user.id,
-    actorLabel: auth.user.username,
-    action: 'PASSWORD_CHANGED',
-    targetType: auth.user.type === 'customer' ? 'customer_user' : 'internal_user',
-    targetId: auth.user.id,
+    if (auth.user.type === 'customer') {
+      await revokeSessionsForCustomerUser(client, auth.user.id);
+    } else {
+      await revokeSessionsForInternalUser(client, auth.user.id);
+    }
+    const session = await createSession(client, config, {
+      userType: auth.user.type,
+      ...(auth.user.type === 'customer'
+        ? { customerUserId: auth.user.id, companyId: current.user.companyId }
+        : { internalUserId: auth.user.id }),
+      ip: meta.ip, userAgent: meta.userAgent,
+    });
+    await writeAudit(client, {
+      actorType: auth.user.type, actorId: auth.user.id, actorLabel: current.user.username,
+      action: 'PASSWORD_CHANGED', targetType: auth.user.type === 'customer' ? 'customer_user' : 'internal_user', targetId: auth.user.id,
+    });
+    return { user: { ...current.user, mustChangePassword: false }, session };
   });
-
-  return { user: refreshedUser, session };
 }
 
 export { generateInitialPassword };
