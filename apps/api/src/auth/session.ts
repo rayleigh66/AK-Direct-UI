@@ -67,7 +67,7 @@ function sessionDurations(config: AuthConfig, userType: UserType) {
 }
 
 export async function createSession(
-  pool: DbPool,
+  pool: Pick<DbPool, 'query'>,
   config: AuthConfig,
   input: CreateSessionInput
 ): Promise<CreatedSession> {
@@ -103,7 +103,7 @@ export async function createSession(
 }
 
 export async function loadInternalAccess(
-  pool: DbPool,
+  pool: Pick<DbPool, 'query'>,
   internalUserId: string
 ): Promise<{ roles: string[]; permissions: string[] }> {
   const [roles, permissions] = await Promise.all([
@@ -238,7 +238,7 @@ export async function revokeSession(pool: DbPool, sessionId: string): Promise<vo
 }
 
 export async function revokeSessionsForCustomerUser(
-  pool: DbPool,
+  pool: Pick<DbPool, 'query'>,
   customerUserId: string
 ): Promise<void> {
   await pool.query(
@@ -255,7 +255,7 @@ export async function revokeSessionsForCompany(pool: DbPool, companyId: string):
 }
 
 export async function revokeSessionsForInternalUser(
-  pool: DbPool,
+  pool: Pick<DbPool, 'query'>,
   internalUserId: string
 ): Promise<void> {
   await pool.query(
