@@ -217,7 +217,7 @@ export const CustomerCatalogView: React.FC = () => {
               key={product.id}
               type="button"
               onClick={event => {
-                event.currentTarget.focus();
+                event.currentTarget.focus({ preventScroll: true });
                 openProduct(product);
               }}
               data-testid="catalog-product-card"

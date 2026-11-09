@@ -415,7 +415,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
               role="button"
               tabIndex={0}
               onClick={event => {
-                event.currentTarget.focus();
+                event.currentTarget.focus({ preventScroll: true });
                 openOrder(order);
               }}
               onKeyDown={event => {
