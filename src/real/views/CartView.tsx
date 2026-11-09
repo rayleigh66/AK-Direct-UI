@@ -17,6 +17,8 @@ import { useRealCart, usdFromCents } from '../cart';
 import { submitOrder } from '../api';
 import type { CustomerOrderDto, ShippingMethod } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
+import { QuantityField } from '../../components/ui/QuantityField';
+import { HelpTooltip } from '../../components/ui/HelpTooltip';
 
 const SHIPPING_METHODS: ShippingMethod[] = [
   'Express',
@@ -423,17 +425,16 @@ export const CartView: React.FC<{
                     >
                       <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <input
-                      type="number"
+                    <QuantityField
                       min={10}
-                      step={1}
+                      max={item.available}
                       value={quantities[item.skuId] ?? ''}
-                      onChange={event =>
-                        setQuantities(prev => ({ ...prev, [item.skuId]: event.target.value }))
+                      onValueChange={value =>
+                        setQuantities(prev => ({ ...prev, [item.skuId]: value }))
                       }
                       className="w-20 h-9 px-2 rounded-lg border border-slate-300 text-center text-xs"
-                      data-testid="cart-quantity-input"
-                      aria-label={`Quantity for ${item.skuCode}`}
+                      testId="cart-quantity-input"
+                      ariaLabel={`Quantity for ${item.skuCode}`}
                     />
                     <button
                       type="button"
@@ -605,9 +606,12 @@ export const CartView: React.FC<{
               {cart.itemCount} lines · {totalPieces} PCS · reference total{' '}
               <strong>{usdFromCents(cart.referenceTotalCents)}</strong>
             </p>
-            <p className="text-[11px] text-slate-500">
-              This creates a PENDING_CONFIRMATION order. It does not confirm the order, reserve
-              stock, record payment or arrange shipment. Sales will verify the final price.
+            <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+              <span>Creates a pending order request. Sales verifies the final price.</span>
+              <HelpTooltip label="Pending order and reservation details" align="right">
+                This creates a PENDING_CONFIRMATION order. It does not confirm the order, reserve
+                stock, record payment or arrange shipment. Sales will verify the final price.
+              </HelpTooltip>
             </p>
             <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-[11px] text-slate-600">
               {draft.shippingMethod} · {draft.destinationCountryAlpha3} ·{' '}

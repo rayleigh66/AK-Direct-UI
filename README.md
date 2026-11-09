@@ -88,7 +88,7 @@ VITE_REAL_AUTH=true docker compose build web && docker compose up -d --no-deps w
 bash scripts/real-auth-e2e.sh
 ```
 
-See [Phase 4B-04 Cart & Orders](docs/PHASE_4B04_CART_ORDERS.md) for the schema, API contract, permission matrix, concurrency/idempotency rules and P1 fixes, and [Phase 4B-04 Acceptance](docs/PHASE_4B04_ACCEPTANCE.md) for results and risks.
+See [Phase 4B-04 Cart & Orders](docs/PHASE_4B04_CART_ORDERS.md) for the schema, API contract, permission matrix, concurrency/idempotency rules and P1 fixes, and [Phase 4B-04 Acceptance](docs/PHASE_4B04_ACCEPTANCE.md) for results and risks. The later UI/UX polish (status language, tooltips, quantity editing, searchable configuration controls, audit display and Real warehouse-name editing) is documented in [UI/UX Polish](docs/ui-review/UI_UX_POLISH.md).
 
 ## Scope and limitations
 

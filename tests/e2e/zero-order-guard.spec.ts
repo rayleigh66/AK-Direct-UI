@@ -38,7 +38,7 @@ test('sales sees a clear error when confirming a USD $0.00 order', async ({ page
 
   // Sales can see the pending order but confirmation must show the guard reason.
   await switchRole(page, /AK000123A/, 'Sales (Tom Miller)');
-  await page.getByRole('button', { name: '待确认核准 (Pending)' }).click();
+  await page.getByRole('button', { name: '待确认' }).click();
   const pending = page.locator('div.bg-white.rounded-2xl', { hasText: orderNo }).first();
   await expect(pending).toBeVisible();
   let dialogMessage = '';
@@ -49,5 +49,5 @@ test('sales sees a clear error when confirming a USD $0.00 order', async ({ page
   await pending.getByTestId('confirm-order').click();
   expect(dialogMessage).toContain('USD $0.00');
   expect(dialogMessage).toContain('暂不允许确认或预占库存');
-  await expect(pending).toContainText('PENDING_CONFIRMATION');
+  await expect(pending.locator('[data-order-status="PENDING_CONFIRMATION"]')).toHaveCount(1);
 });

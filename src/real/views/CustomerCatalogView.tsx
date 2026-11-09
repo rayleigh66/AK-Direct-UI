@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Search, ShoppingBag, X } from 'lucide-react';
+import { Check, Search, ShoppingBag, ShoppingCart, X } from 'lucide-react';
 import { listCustomerBrands, listCustomerProducts, listCustomerSeries, listCustomerTags } from '../api';
 import { useRealCart, usdFromCents } from '../cart';
 import type { CustomerProductDto, CustomerBrandDto, SeriesDto, TagDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
+import { QuantityField } from '../../components/ui/QuantityField';
+import { HelpTooltip } from '../../components/ui/HelpTooltip';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-export const CustomerCatalogView: React.FC = () => {
+export const CustomerCatalogView: React.FC<{ onOpenCart?: () => void }> = ({ onOpenCart }) => {
   const [products, setProducts] = useState<CustomerProductDto[]>([]);
   const [brands, setBrands] = useState<CustomerBrandDto[]>([]);
   const [series, setSeries] = useState<SeriesDto[]>([]);
@@ -108,6 +110,30 @@ export const CustomerCatalogView: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-base font-extrabold">Wholesale catalogue</h2>
+          <p className="text-[11px] text-slate-500">Authorised products · reference USD prices</p>
+        </div>
+        {onOpenCart && (
+          <button
+            type="button"
+            onClick={onOpenCart}
+            data-testid="real-catalog-cart-entry"
+            className="relative inline-flex min-h-[42px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-800"
+          >
+            <span className="relative inline-flex">
+              <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+              {(cart?.totalQuantity ?? 0) > 0 && (
+                <span className="absolute -right-2.5 -top-2.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-[#ff681e] px-1 text-[9px] font-bold leading-none text-white">
+                  {(cart?.totalQuantity ?? 0) > 99 ? '99+' : cart?.totalQuantity}
+                </span>
+              )}
+            </span>
+            Order list
+          </button>
+        )}
+      </div>
       <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 h-10 px-3 rounded-xl border border-slate-300 text-sm flex-1 min-w-[220px]">
@@ -157,9 +183,14 @@ export const CustomerCatalogView: React.FC = () => {
             ))}
           </select>
         </div>
-        <p className="text-[11px] text-slate-500">
-          Showing {visible.length} of {products.length} authorised products. Prices are USD wholesale
-          prices in cents. / 仅显示已授权上架商品。
+        <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+          <span>
+            Showing {visible.length} of {products.length} authorised products.
+          </span>
+          <HelpTooltip label="Catalogue price and visibility details">
+            Prices are reference USD wholesale prices in cents. Only products published for your
+            authorised brands are shown.
+          </HelpTooltip>
         </p>
       </section>
 
@@ -295,18 +326,17 @@ export const CustomerCatalogView: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <label className="text-[11px] text-slate-500">
                           Quantity (MOQ 10)
-                          <input
-                            type="number"
+                          <QuantityField
                             min={10}
-                            step={1}
+                            max={sku.available}
                             value={skuQuantities[sku.id] ?? '10'}
-                            onChange={event =>
-                              setSkuQuantities(prev => ({ ...prev, [sku.id]: event.target.value }))
+                            onValueChange={value =>
+                              setSkuQuantities(prev => ({ ...prev, [sku.id]: value }))
                             }
                             disabled={disabled}
                             className="ml-2 w-24 h-9 px-2 rounded-lg border border-slate-300 text-center text-xs disabled:bg-slate-100"
-                            data-testid="catalog-add-qty"
-                            aria-label={`Quantity for ${sku.skuCode}`}
+                            testId="catalog-add-qty"
+                            ariaLabel={`Quantity for ${sku.skuCode}`}
                           />
                         </label>
                         <button
@@ -338,9 +368,14 @@ export const CustomerCatalogView: React.FC = () => {
                 })}
               </div>
               <div className="rounded-xl bg-[#fff7f2] border border-[#ffeadb] p-3 text-[11px] text-[#8a4d2c] flex items-start gap-2">
-                <ShoppingBag className="w-4 h-4 mt-0.5" />
-                The cart is shared by every account of your company. Submitting an order creates a
-                pending request; it does not reserve stock.
+                <ShoppingBag className="w-4 h-4 mt-0.5 shrink-0" />
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span>Shared company cart · order requests do not reserve stock.</span>
+                  <HelpTooltip label="Shared cart and reservation details" align="right">
+                    The cart is shared by every account of your company. Submitting an order creates
+                    a pending request; it does not reserve stock.
+                  </HelpTooltip>
+                </span>
               </div>
             </div>
           </div>

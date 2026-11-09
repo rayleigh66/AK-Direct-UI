@@ -50,7 +50,21 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.getByTestId('warehouse-name-zh').fill('E2E 测试仓');
   await page.getByTestId('warehouse-name-en').fill('E2E Test Warehouse');
   await page.getByTestId('warehouse-create-submit').click();
-  await expect(page.getByTestId('warehouse-row').filter({ hasText: warehouseCode })).toBeVisible();
+  const warehouseRow = page.getByTestId('warehouse-row').filter({ hasText: warehouseCode });
+  await expect(warehouseRow).toBeVisible();
+
+  // Real Setup: edit both warehouse names through the existing updateWarehouse API.
+  await warehouseRow.getByTestId('warehouse-edit').click();
+  await page.getByTestId('warehouse-edit-name-zh').fill('E2E 测试仓（已编辑）');
+  await page.getByTestId('warehouse-edit-name-en').fill('E2E Test Warehouse Edited');
+  await page.getByTestId('warehouse-edit-save').click();
+  await expect(warehouseRow).toContainText('E2E Test Warehouse Edited');
+  await expect(warehouseRow).toContainText('E2E 测试仓（已编辑）');
+  const editOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  expect(editOverflow).toBeLessThanOrEqual(1);
+  await screenshot(page, `warehouse-edit-${testInfo.project.name}`);
 
   await page.getByTestId('series-name-zh').fill('E2E 系列');
   await page.getByTestId('series-name-en').fill(seriesName);
@@ -138,6 +152,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.getByRole('button', { name: /Save password/ }).click();
 
   await expect(page.getByTestId('catalog-search')).toBeVisible();
+  await expect(page.getByTestId('real-catalog-cart-entry')).toBeVisible();
   const productCard = page.getByTestId('catalog-product-card').filter({ hasText: productTitle });
   await expect(productCard).toBeVisible({ timeout: 20_000 });
   await expect(productCard).toContainText('$38.00');
@@ -146,7 +161,9 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await productCard.click();
   await expect(page.getByTestId('catalog-detail')).toBeVisible();
   await expect(page.getByTestId('catalog-detail')).toContainText('Add to cart');
-  await expect(page.getByTestId('catalog-detail')).toContainText(
+  await expect(page.getByTestId('catalog-detail')).toContainText('Shared company cart');
+  await page.getByRole('button', { name: 'Shared cart and reservation details help' }).click();
+  await expect(page.getByRole('tooltip')).toContainText(
     'shared by every account of your company'
   );
   await expect(page.getByTestId('catalog-detail')).toContainText('Matte Black');

@@ -77,7 +77,7 @@ test('sales cannot reach admin-only views or inventory import', async ({ page },
   test.skip(testInfo.project.name !== 'desktop-1440', 'Cross-role lifecycle evidence runs on desktop');
   await openCatalog(page);
   await switchRole(page, /AK000123A/, 'Sales (Tom Miller)');
-  await expect(page.getByRole('button', { name: '待确认核准 (Pending)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '待确认' })).toBeVisible();
   await expect(page.locator('aside').getByText('商品目录管理')).toHaveCount(0);
   await expect(page.locator('aside').getByText('多仓库存与导入')).toHaveCount(0);
   await expect(page.locator('aside').getByText('促销与等级配置')).toHaveCount(0);

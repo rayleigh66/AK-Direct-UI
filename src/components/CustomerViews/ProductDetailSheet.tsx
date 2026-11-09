@@ -9,6 +9,8 @@ import {
 import { isProductVisibleToCustomer } from '../../utils/catalogVisibility';
 import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
 import type { ProductSKU } from '../../types';
+import { QuantityField } from '../ui/QuantityField';
+import { HelpTooltip } from '../ui/HelpTooltip';
 
 interface ProductDetailSheetProps {
   skuId: string;
@@ -289,14 +291,13 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
               >
                 <Minus className="w-4 h-4" />
               </button>
-              <input
-                aria-label="Quantity in PCS"
-                data-testid="quantity-input"
-                type="number"
+              <QuantityField
+                ariaLabel="Quantity in PCS"
+                testId="quantity-input"
                 min={SKU_MOQ}
                 max={stock}
                 value={quantity}
-                onChange={(event) => setSafeQuantity(Number(event.target.value) || 0)}
+                onValueChange={value => setSafeQuantity(Number(value) || 0)}
                 className="w-14 h-11 text-center bg-transparent font-mono font-bold text-sm outline-none"
               />
               <button
@@ -312,12 +313,13 @@ export const ProductDetailSheet: React.FC<ProductDetailSheetProps> = ({ skuId, o
           </div>
 
           <div className="rounded-[12px] bg-[#f5f5f3] border border-[#eaeae7] p-3 text-xs text-[#666] leading-relaxed">
-            <div className="flex items-start gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#198364] shrink-0 mt-0.5" />
-              <span>
-                Submitting an order request does not reserve stock. Your sales representative confirms
-                the final quantity and warehouse allocation before the demo reservation is created.
-              </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-[#198364] shrink-0" />
+              <span>Order requests do not reserve stock.</span>
+              <HelpTooltip label="Reservation and stock details" align="right">
+                Your sales representative confirms the final quantity and warehouse allocation
+                before the demo reservation is created. Submitting this request does not lock stock.
+              </HelpTooltip>
             </div>
             <div className="mt-2 text-[11px] text-[#8f9191]">
               {product.description_en || product.description}

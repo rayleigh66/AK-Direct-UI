@@ -6,6 +6,7 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { customerStatus, customerTierName } from '../../utils/customerDisplay';
+import { HelpTooltip } from '../ui/HelpTooltip';
 import {
   Award,
   AlertCircle,
@@ -213,16 +214,18 @@ export const MembershipView: React.FC = () => {
         </div>
 
         {/* Rule Card */}
-        <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed space-y-1">
-          <div className="font-bold flex items-center gap-1.5">
+        <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed">
+          <div className="flex flex-wrap items-center gap-1.5 font-bold">
             <Sparkles className="w-4 h-4 text-indigo-600" />
-            <span>How tier changes work:</span>
+            <span>Base tier plus inactivity downgrade.</span>
+            <HelpTooltip label="How tier changes work">
+              1. Base tier is calculated from historical cumulative effective purchases.
+              2. The first downgrade is at 18 months, another at 30 months, then every 12 months
+              down to the lowest tier.
+              3. After a new full payment is recorded, the tier is recalculated and the inactivity
+              timer resets immediately.
+            </HelpTooltip>
           </div>
-          <p>
-            1. <strong>Base tier</strong> is calculated from historical cumulative effective purchases;
-            2. <strong>First downgrade at 18 months</strong>, another at 30 months, then every 12 months down to the lowest tier;
-            3. <strong>New purchase:</strong> after a new full payment is recorded, the tier is recalculated and the inactivity timer resets immediately.
-          </p>
         </div>
 
         <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 leading-relaxed">

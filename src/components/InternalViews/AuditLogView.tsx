@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AccessBoundary } from '../AccessBoundary';
+import { auditActionLabel, auditDetailsLabel, auditSearchText } from '../../utils/auditDisplay';
 import {
   ClipboardList,
   ShieldCheck,
@@ -22,12 +23,7 @@ export const AuditLogView: React.FC = () => {
   const filteredLogs = auditLogs.filter(log => {
     if (!filterQuery.trim()) return true;
     const q = filterQuery.toLowerCase();
-    return (
-      log.actor.toLowerCase().includes(q) ||
-      log.action.toLowerCase().includes(q) ||
-      log.target.toLowerCase().includes(q) ||
-      log.details.toLowerCase().includes(q)
-    );
+    return auditSearchText(log).includes(q);
   });
 
   const handleRunPrivacyScan = () => {
@@ -110,13 +106,17 @@ export const AuditLogView: React.FC = () => {
             <div key={log.id} className="p-4 space-y-2 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[10px] text-slate-400">{log.timestamp}</span>
-                <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
-                  {log.action}
+                <span
+                  title={log.action}
+                  data-action-code={log.action}
+                  className="font-bold text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded"
+                >
+                  {auditActionLabel(log.action)}
                 </span>
               </div>
               <div className="font-semibold text-slate-800">{log.actor}</div>
               <div className="font-mono text-[11px] text-slate-500">{log.target}</div>
-              <div className="text-slate-600 leading-relaxed">{log.details}</div>
+              <div className="text-slate-600 leading-relaxed">{auditDetailsLabel(log.details)}</div>
             </div>
           ))}
         </div>
@@ -141,15 +141,19 @@ export const AuditLogView: React.FC = () => {
                     {log.actor}
                   </td>
                   <td className="p-3">
-                    <span className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
-                      {log.action}
+                    <span
+                      title={log.action}
+                      data-action-code={log.action}
+                      className="font-bold text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded"
+                    >
+                      {auditActionLabel(log.action)}
                     </span>
                   </td>
                   <td className="p-3 font-mono font-medium text-slate-700 whitespace-nowrap">
                     {log.target}
                   </td>
                   <td className="p-3 pr-4 text-slate-600 leading-normal">
-                    {log.details}
+                    {auditDetailsLabel(log.details)}
                   </td>
                 </tr>
               ))}
