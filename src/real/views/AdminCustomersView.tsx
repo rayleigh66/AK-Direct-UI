@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
   Building2,
@@ -100,6 +100,11 @@ export const AdminCustomersView: React.FC<{
   const [pendingAccount, setPendingAccount] = useState<PendingAccount | null>(null);
   const [impact, setImpact] = useState<ImpactState | null>(null);
 
+  // Every company-detail request is tagged so a slow response for the
+  // previously selected company can never overwrite the current selection.
+  const detailRequestId = useRef(0);
+  const selectedCompanyId = useRef<string | null>(null);
+
   const canShowBrands = canManageBrands && canReadCatalog;
 
   const load = async () => {
@@ -128,12 +133,15 @@ export const AdminCustomersView: React.FC<{
   }, []);
 
   const selectCompany = async (company: AdminCustomerCompanyDto) => {
+    const requestId = ++detailRequestId.current;
+    selectedCompanyId.current = company.id;
     setSelectedId(company.id);
     setDetail(company);
     setSalesDraft(company.assignedSalesUserId ?? '');
     setAccounts([]);
     setBrandIds([]);
     setPendingAccount(null);
+    setImpact(null);
     setDetailLoading(true);
     setError('');
     try {
@@ -141,29 +149,39 @@ export const AdminCustomersView: React.FC<{
         canManageAccounts ? listCompanyAccounts(company.id) : Promise.resolve([]),
         canManageBrands ? listCompanyBrandIds(company.id) : Promise.resolve([]),
       ]);
+      if (requestId !== detailRequestId.current) return;
       setAccounts(accountItems);
       setBrandIds(ids);
     } catch (err) {
+      if (requestId !== detailRequestId.current) return;
       setError(err instanceof Error ? err.message : t('The request failed.', '请求失败。'));
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestId.current) setDetailLoading(false);
     }
   };
 
-  const reload = async (companyId: string | null = detail?.id ?? null) => {
+  const reload = async (companyId: string | null = selectedCompanyId.current) => {
+    const requestId = ++detailRequestId.current;
     const list = await listAdminCompanies();
+    if (requestId !== detailRequestId.current) return;
     setCompanies(list);
     if (!companyId) return;
     const updated = list.find(company => company.id === companyId);
     if (!updated) {
       setDetail(null);
       setSelectedId(null);
+      selectedCompanyId.current = null;
       return;
     }
     setDetail(updated);
     setSalesDraft(updated.assignedSalesUserId ?? '');
-    if (canManageAccounts) setAccounts(await listCompanyAccounts(companyId));
-    if (canManageBrands) setBrandIds(await listCompanyBrandIds(companyId));
+    const [accountItems, ids] = await Promise.all([
+      canManageAccounts ? listCompanyAccounts(companyId) : Promise.resolve(null),
+      canManageBrands ? listCompanyBrandIds(companyId) : Promise.resolve(null),
+    ]);
+    if (requestId !== detailRequestId.current) return;
+    if (accountItems) setAccounts(accountItems);
+    if (ids) setBrandIds(ids);
   };
 
   const run = async (action: () => Promise<unknown>, success: string) => {
@@ -251,17 +269,21 @@ export const AdminCustomersView: React.FC<{
 
   const addAccount = async () => {
     if (!detail || busy) return;
+    const companyId = detail.id;
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      const result = await createCompanyAccount(detail.id);
+      const result = await createCompanyAccount(companyId);
       setTempCredential({
         title: t('Customer account created', '客户账号已创建'),
         username: result.username,
         password: result.temporaryPassword,
       });
-      setAccounts(await listCompanyAccounts(detail.id));
+      if (selectedCompanyId.current !== companyId) return;
+      const nextAccounts = await listCompanyAccounts(companyId);
+      if (selectedCompanyId.current !== companyId) return;
+      setAccounts(nextAccounts);
       setNotice(
         t(
           'Account created. Save the temporary password before closing the dialog.',
@@ -269,6 +291,7 @@ export const AdminCustomersView: React.FC<{
         )
       );
     } catch (err) {
+      if (selectedCompanyId.current !== companyId) return;
       setError(err instanceof Error ? err.message : t('The request failed.', '请求失败。'));
     } finally {
       setBusy(false);
@@ -291,6 +314,7 @@ export const AdminCustomersView: React.FC<{
     if (next === 'suspended') {
       try {
         const preview = await getPendingOrderImpact('company_suspend', company.id);
+        if (selectedCompanyId.current !== company.id) return;
         if (preview.affectedOrders.length > 0) {
           setImpact({
             title: t('Suspend company and cancel pending orders', '停用客户并取消待确认订单'),
@@ -323,15 +347,17 @@ export const AdminCustomersView: React.FC<{
 
   const requestBrand = async (brand: BrandDto, granted: boolean) => {
     if (!detail || busy) return;
+    const companyId = detail.id;
     if (granted) {
       await run(
-        () => setCompanyBrandGrant(detail.id, brand.id, true),
+        () => setCompanyBrandGrant(companyId, brand.id, true),
         t('Brand access granted.', '品牌授权已添加。')
       );
       return;
     }
     try {
-      const preview = await getPendingOrderImpact('brand_revoke', brand.id, detail.id);
+      const preview = await getPendingOrderImpact('brand_revoke', brand.id, companyId);
+      if (selectedCompanyId.current !== companyId) return;
       if (preview.affectedOrders.length > 0) {
         setImpact({
           title: t('Revoke brand and cancel pending orders', '撤销品牌授权并取消待确认订单'),
@@ -342,7 +368,7 @@ export const AdminCustomersView: React.FC<{
           success: t('Brand access revoked and affected pending orders cancelled.', '品牌授权已撤销，受影响的待确认订单已取消。'),
           preview,
           run: token =>
-            setCompanyBrandGrant(detail.id, brand.id, false, {
+            setCompanyBrandGrant(companyId, brand.id, false, {
               confirmAffectedOrders: true,
               impactToken: token,
             }),
@@ -354,7 +380,7 @@ export const AdminCustomersView: React.FC<{
       return;
     }
     await run(
-      () => setCompanyBrandGrant(detail.id, brand.id, false),
+      () => setCompanyBrandGrant(companyId, brand.id, false),
       t('Brand access revoked.', '品牌授权已撤销。')
     );
   };

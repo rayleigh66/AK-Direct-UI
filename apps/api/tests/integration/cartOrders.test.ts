@@ -1136,6 +1136,202 @@ describeDb('company shared cart and customer orders', () => {
     expect((await suspendLogin.agent.get('/api/cart')).status).toBe(401);
   });
 
+  it('reports the full cancellation result for brand revocation and company suspension', async () => {
+    const admin = await login('order.admin@example.test');
+
+    // Brand revoke: preview lists the exact pending order, the token is
+    // required, a stale token is rejected, and confirmation records the
+    // cancellation in the order history, notification outbox and audit log.
+    const brandItem = await createPublishedProduct(admin, { onHand: 100 });
+    const brandCompany = await createCompany({ assignedSalesUserId: sales1Id, letters: ['A'] });
+    const brandCustomer = await login(brandCompany.customers[0].username);
+    expect((await setCart(brandCustomer, brandItem.skuId, 10)).status).toBe(200);
+    const brandOrder = await submit(brandCustomer);
+    expect(brandOrder.status).toBe(201);
+    const brandOrderId = brandOrder.body.order.id as string;
+
+    const brandPreview = await admin.agent.get(
+      `/api/admin/orders/impact?kind=brand_revoke&targetId=${brandId}&companyId=${brandCompany.companyId}`
+    );
+    expect(brandPreview.status).toBe(200);
+    expect(
+      brandPreview.body.impact.affectedOrders.map((order: { id: string }) => order.id)
+    ).toContain(brandOrderId);
+    expect(brandPreview.body.impact.impactToken).toMatch(/^[a-f0-9]{64}$/);
+
+    const brandBlocked = await put(
+      admin.agent,
+      `/api/admin/companies/${brandCompany.companyId}/brands/${brandId}`,
+      { granted: false },
+      admin.csrf
+    );
+    expect(brandBlocked.status).toBe(409);
+    expect(brandBlocked.body.error.code).toBe('pending_orders_affected');
+
+    const brandNoToken = await put(
+      admin.agent,
+      `/api/admin/companies/${brandCompany.companyId}/brands/${brandId}`,
+      { granted: false, confirmAffectedOrders: true },
+      admin.csrf
+    );
+    expect(brandNoToken.status).toBe(409);
+    expect(brandNoToken.body.error.code).toBe('impact_confirmation_required');
+
+    const brandStale = await put(
+      admin.agent,
+      `/api/admin/companies/${brandCompany.companyId}/brands/${brandId}`,
+      { granted: false, confirmAffectedOrders: true, impactToken: '0'.repeat(64) },
+      admin.csrf
+    );
+    expect(brandStale.status).toBe(409);
+    expect(brandStale.body.error.code).toBe('impact_changed');
+
+    const brandConfirmed = await put(
+      admin.agent,
+      `/api/admin/companies/${brandCompany.companyId}/brands/${brandId}`,
+      {
+        granted: false,
+        confirmAffectedOrders: true,
+        impactToken: brandPreview.body.impact.impactToken,
+      },
+      admin.csrf
+    );
+    expect(brandConfirmed.status).toBe(200);
+
+    const brandOrderRow = await pool.query<{ status: string; cancel_reason: string | null }>(
+      'SELECT status, cancel_reason FROM orders WHERE id = $1',
+      [brandOrderId]
+    );
+    expect(brandOrderRow.rows[0].status).toBe('CANCELLED');
+    expect(brandOrderRow.rows[0].cancel_reason).toContain('no longer authorized');
+
+    const brandHistory = await pool.query<{ details: { trigger?: string } }>(
+      `SELECT details FROM order_status_history
+       WHERE order_id = $1 AND event_type = 'ADMIN_CANCELLED'`,
+      [brandOrderId]
+    );
+    expect(brandHistory.rowCount).toBe(1);
+    expect(brandHistory.rows[0].details.trigger).toBe('brand_revoke');
+
+    const brandNotifications = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM order_notifications
+       WHERE order_id = $1 AND event_type = 'ORDER_CANCELLED_BY_ADMIN'`,
+      [brandOrderId]
+    );
+    expect(Number(brandNotifications.rows[0].count)).toBe(2);
+
+    const brandAudit = await pool.query<{ details: { cancelledPendingOrders?: number } }>(
+      `SELECT details FROM audit_logs
+       WHERE action = 'REVOKE_BRAND' AND target_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [brandCompany.companyId]
+    );
+    expect(brandAudit.rows[0].details.cancelledPendingOrders).toBe(1);
+
+    // Restore the grant so the company remains usable for the next action.
+    expect(
+      (
+        await put(
+          admin.agent,
+          `/api/admin/companies/${brandCompany.companyId}/brands/${brandId}`,
+          { granted: true },
+          admin.csrf
+        )
+      ).status
+    ).toBe(200);
+
+    // Company suspend: the same preview -> token -> atomic cancellation flow,
+    // plus session revocation and the audit result.
+    const suspendItem = await createPublishedProduct(admin, { onHand: 100 });
+    const suspendCompany = await createCompany({ assignedSalesUserId: sales1Id, letters: ['A'] });
+    const suspendCustomer = await login(suspendCompany.customers[0].username);
+    expect((await setCart(suspendCustomer, suspendItem.skuId, 10)).status).toBe(200);
+    const suspendOrder = await submit(suspendCustomer);
+    expect(suspendOrder.status).toBe(201);
+    const suspendOrderId = suspendOrder.body.order.id as string;
+
+    const suspendPreview = await admin.agent.get(
+      `/api/admin/orders/impact?kind=company_suspend&targetId=${suspendCompany.companyId}`
+    );
+    expect(suspendPreview.status).toBe(200);
+    expect(
+      suspendPreview.body.impact.affectedOrders.map((order: { id: string }) => order.id)
+    ).toContain(suspendOrderId);
+    expect(suspendPreview.body.impact.impactToken).toMatch(/^[a-f0-9]{64}$/);
+
+    const suspendBlocked = await patch(
+      admin.agent,
+      `/api/admin/companies/${suspendCompany.companyId}/status`,
+      { status: 'suspended' },
+      admin.csrf
+    );
+    expect(suspendBlocked.status).toBe(409);
+    expect(suspendBlocked.body.error.code).toBe('pending_orders_affected');
+
+    const suspendNoToken = await patch(
+      admin.agent,
+      `/api/admin/companies/${suspendCompany.companyId}/status`,
+      { status: 'suspended', confirmAffectedOrders: true },
+      admin.csrf
+    );
+    expect(suspendNoToken.status).toBe(409);
+    expect(suspendNoToken.body.error.code).toBe('impact_confirmation_required');
+
+    const suspendStale = await patch(
+      admin.agent,
+      `/api/admin/companies/${suspendCompany.companyId}/status`,
+      { status: 'suspended', confirmAffectedOrders: true, impactToken: '0'.repeat(64) },
+      admin.csrf
+    );
+    expect(suspendStale.status).toBe(409);
+    expect(suspendStale.body.error.code).toBe('impact_changed');
+
+    const suspendConfirmed = await patch(
+      admin.agent,
+      `/api/admin/companies/${suspendCompany.companyId}/status`,
+      {
+        status: 'suspended',
+        confirmAffectedOrders: true,
+        impactToken: suspendPreview.body.impact.impactToken,
+      },
+      admin.csrf
+    );
+    expect(suspendConfirmed.status).toBe(200);
+    expect(suspendConfirmed.body.company.status).toBe('suspended');
+
+    const suspendOrderRow = await pool.query<{ status: string; cancel_reason: string | null }>(
+      'SELECT status, cancel_reason FROM orders WHERE id = $1',
+      [suspendOrderId]
+    );
+    expect(suspendOrderRow.rows[0].status).toBe('CANCELLED');
+    expect(suspendOrderRow.rows[0].cancel_reason).toBe('the customer company was suspended');
+
+    const suspendHistory = await pool.query<{ details: { trigger?: string } }>(
+      `SELECT details FROM order_status_history
+       WHERE order_id = $1 AND event_type = 'ADMIN_CANCELLED'`,
+      [suspendOrderId]
+    );
+    expect(suspendHistory.rowCount).toBe(1);
+    expect(suspendHistory.rows[0].details.trigger).toBe('company_suspend');
+
+    const suspendNotifications = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM order_notifications
+       WHERE order_id = $1 AND event_type = 'ORDER_CANCELLED_BY_ADMIN'`,
+      [suspendOrderId]
+    );
+    expect(Number(suspendNotifications.rows[0].count)).toBe(2);
+
+    const suspendAudit = await pool.query<{ details: { cancelledPendingOrders?: number } }>(
+      `SELECT details FROM audit_logs
+       WHERE action = 'SUSPEND_COMPANY' AND target_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [suspendCompany.companyId]
+    );
+    expect(suspendAudit.rows[0].details.cancelledPendingOrders).toBe(1);
+
+    expect((await suspendCustomer.agent.get('/api/cart')).status).toBe(401);
+  });
+
   it('never leaves a pending order for an unpublished product or suspended company under races', async () => {
     const admin = await login('order.admin@example.test');
 
