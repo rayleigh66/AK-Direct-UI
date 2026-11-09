@@ -24,6 +24,7 @@ import { RealCartProvider, useRealCart } from './cart';
 import { LanguageToggle } from '../components/ui/LanguageToggle';
 import {
   InternalLanguageProvider,
+  translateInternalText,
   useInternalLanguage,
 } from './internalLanguage';
 
@@ -108,7 +109,11 @@ const WorkspaceShell: React.FC<{
             </div>
             <div className="min-w-0">
               <div className="text-[9px] font-extrabold uppercase tracking-[2px] text-[var(--orange-deep)]">
-                AOKING Direct · Wholesale operations
+                {isCustomer
+                  ? 'AOKING Direct · Wholesale operations'
+                  : language === 'zh'
+                    ? 'AOKING Direct · 批发运营'
+                    : 'AOKING Direct · Wholesale operations'}
               </div>
               <div className="truncate text-sm font-extrabold tracking-[-0.4px] sm:text-base">
                 {isCustomer ? 'Wholesale ordering' : language === 'zh' ? '运营工作台' : 'Operations workspace'}
@@ -138,7 +143,7 @@ const WorkspaceShell: React.FC<{
             <button
               type="button"
               onClick={() => void onSignOut()}
-              aria-label="Sign out"
+              aria-label={isCustomer ? 'Sign out' : language === 'zh' ? '退出登录' : 'Sign out'}
               className="fo-btn flex min-h-[42px] items-center gap-2"
             >
               <LogOut className="w-4 h-4" />
@@ -224,12 +229,15 @@ export const RealWorkspace: React.FC<{
   </RealCartProvider>
 );
 
-export const LoadingBlock: React.FC<{ label?: string }> = ({ label = 'Loading…' }) => (
-  <div className="flex items-center gap-2 py-10 text-xs text-[var(--muted)] justify-center">
-    <RefreshCw className="w-4 h-4 animate-spin" />
-    {label}
-  </div>
-);
+export const LoadingBlock: React.FC<{ label?: string }> = ({ label = 'Loading…' }) => {
+  const { language } = useInternalLanguage();
+  return (
+    <div className="flex items-center gap-2 py-10 text-xs text-[var(--muted)] justify-center">
+      <RefreshCw className="w-4 h-4 animate-spin" />
+      {translateInternalText(label, language)}
+    </div>
+  );
+};
 
 export const ErrorBlock: React.FC<{ message: string; onRetry?: () => void }> = ({
   message,

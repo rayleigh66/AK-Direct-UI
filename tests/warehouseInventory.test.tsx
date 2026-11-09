@@ -267,11 +267,11 @@ describe('administrator warehouse registration', () => {
     fireEvent.change(name, { target: { value: '  ' } });
     fireEvent.click(within(card).getByTestId('warehouse-edit-save'));
     expect(api.updateWarehouse).not.toHaveBeenCalled();
-    expect(within(card).getByRole('alert').textContent).toContain('required');
+    expect(within(card).getByRole('alert').textContent).toContain('必填');
     fireEvent.change(name, { target: { value: '未保存名称' } });
     vi.mocked(api.updateWarehouse).mockRejectedValueOnce(new Error('Name update rejected.'));
     fireEvent.click(within(card).getByTestId('warehouse-edit-save'));
-    await within(card).findByText('Name update rejected.');
+    await within(card).findByText('无法保存仓库名称。');
     expect((name as HTMLInputElement).value).toBe('未保存名称');
     fireEvent.click(within(card).getByTestId('warehouse-edit-cancel'));
     expect(within(card).queryByTestId('warehouse-edit-name-zh')).toBeNull();

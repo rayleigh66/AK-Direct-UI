@@ -112,7 +112,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
         .map(line => ({ skuId: line.skuId, quantity: Number(lineDrafts[line.skuId]) }))
         .filter((line, index) => line.quantity !== detail.lines[index].quantity);
       if (!changed.length) {
-        setActionError('Change at least one quantity first.');
+        setActionError(text('Change at least one quantity first.', '请先修改至少一个数量。'));
         return;
       }
       const updated = await modifyOrderLines(detail.id, detail.revision, changed);
@@ -120,7 +120,12 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       setLineDrafts(
         Object.fromEntries(updated.lines.map(line => [line.skuId, String(line.quantity)]))
       );
-      setNotice('Order quantities updated. Reference total recalculated.');
+      setNotice(
+        text(
+          'Order quantities updated. Reference total recalculated.',
+          '订单数量已更新，参考总额已重新计算。'
+        )
+      );
       await loadList();
     } catch (err) {
       setActionError(
@@ -145,7 +150,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       );
       setDetail(updated);
       setCancelOpen(false);
-      setNotice('Order cancelled.');
+      setNotice(text('Order cancelled.', '订单已取消。'));
       await loadList();
     } catch (err) {
       setActionError(
@@ -268,7 +273,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
           data-testid="order-detail"
         >
           {detailLoading || !detail ? (
-            <LoadingBlock label="Loading order detail…" />
+            <LoadingBlock label={text('Loading order detail…', '正在加载订单详情…')} />
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2">
@@ -352,7 +357,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                           }
                           className="ml-1 w-20 h-9 px-2 rounded-lg border border-slate-300 text-center"
                           testId="order-line-qty"
-                          ariaLabel={`Quantity for ${line.skuCode}`}
+                          ariaLabel={text(`Quantity for ${line.skuCode}`, `${line.skuCode} 的数量`)}
                         />
                       </label>
                     ) : (
@@ -374,7 +379,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                 </div>
                 <p className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
                   <span>{text('Reference prices only.', '仅为参考报价。')}</span>
-                  <HelpTooltip label="Reference pricing details" align="right">
+                  <HelpTooltip label={text('Reference pricing details', '参考价格说明')} align="right">
                     {detail.priceNote}
                   </HelpTooltip>
                 </p>
@@ -428,7 +433,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                       </span>
                       <span>{event.reason}</span>
                       {'actorLabel' in event && (
-                        <span className="text-slate-400">by {event.actorLabel}</span>
+                        <span className="text-slate-400">{text('by', '由')} {event.actorLabel}</span>
                       )}
                       <span className="ml-auto text-slate-400">{formatEnglishDate(event.createdAt)}</span>
                     </div>

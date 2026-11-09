@@ -3,6 +3,7 @@ import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EnglishDateField } from '../src/components/ui/EnglishDateField';
+import { SearchableCombobox } from '../src/components/ui/SearchableCombobox';
 import { formatEnglishDate } from '../src/utils/dateDisplay';
 import {
   INVENTORY_TEMPLATE_CSV,
@@ -60,6 +61,94 @@ describe('customer English dates', () => {
   });
 });
 
+
+describe('destination combobox selection integrity', () => {
+  const options = [
+    { value: 'USA', label: 'USA — United States' },
+    { value: 'GBR', label: 'GBR — United Kingdom' },
+  ];
+
+  function Harness({ strict = true }: { strict?: boolean }) {
+    const [value, setValue] = React.useState('USA');
+    return (
+      <>
+        <SearchableCombobox
+          options={options}
+          value={value}
+          onChange={setValue}
+          ariaLabel="Destination"
+          testId="combo"
+          clearOnUnselectedQuery={strict}
+        />
+        <output data-testid="value">{value}</output>
+      </>
+    );
+  }
+
+  it('clears a saved destination when an unmatched query is abandoned by blur', () => {
+    render(<Harness />);
+    const input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'ZZZ' } });
+    fireEvent.blur(input);
+    expect(screen.getByTestId('value').textContent).toBe('');
+    expect(input.value).toBe('');
+  });
+
+  it('clears on an outside pointer press before the submit click', () => {
+    render(<Harness />);
+    const input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'ZZZ' } });
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByTestId('value').textContent).toBe('');
+  });
+
+  it('clears on Escape after typing, but keeps the selection when Escape only closes the menu', () => {
+    const { unmount } = render(<Harness />);
+    let input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'ZZZ' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.getByTestId('value').textContent).toBe('');
+    unmount();
+
+    render(<Harness />);
+    input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.getByTestId('value').textContent).toBe('USA');
+  });
+
+  it('supports pointer and keyboard selection', () => {
+    const { unmount } = render(<Harness />);
+    let input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'United Kingdom' } });
+    const option = screen.getByRole('option', { name: /GBR/ });
+    fireEvent.pointerDown(option);
+    fireEvent.click(option);
+    expect(screen.getByTestId('value').textContent).toBe('GBR');
+    unmount();
+
+    render(<Harness />);
+    input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'GBR' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('value').textContent).toBe('GBR');
+  });
+
+  it('restores the previous selection after an abandoned query when strict mode is off', () => {
+    render(<Harness strict={false} />);
+    const input = screen.getByTestId('combo') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'ZZZ' } });
+    fireEvent.blur(input);
+    expect(screen.getByTestId('value').textContent).toBe('USA');
+    expect(input.value).toBe('USA — United States');
+  });
+});
 
 describe('real shipping draft compatibility', () => {
   it('defaults to Sea for empty and malformed drafts', () => {
@@ -140,6 +229,10 @@ describe('shared internal language', () => {
     expect(translateInternalText('Stock import / 库存导入', 'en')).toBe('Stock import');
     expect(translateInternalText('没有匹配的 SKU', 'en')).toBe('No matching SKU');
     expect(translateInternalText('没有匹配的 SKU', 'zh')).toBe('没有匹配的 SKU');
+    expect(translateInternalText('Colour ZH', 'zh')).toBe('颜色中文');
+    expect(translateInternalText('No series', 'zh')).toBe('无系列');
+    expect(translateInternalText('库存视图', 'en')).toBe('Inventory view');
+    expect(translateInternalText('Prepare registration', 'zh')).toBe('准备登记');
   });
 
   it('translates rendered host text and attributes in Chinese mode', () => {

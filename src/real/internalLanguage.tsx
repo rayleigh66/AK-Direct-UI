@@ -148,6 +148,84 @@ const EN_TO_ZH: Record<string, string> = {
   'Validation': '数据校验',
   'Sample price': '示例价格',
   'Preview price': '预览价格',
+  '% OFF': '% 折扣',
+  // Round 2 review: remaining internal static labels and feedback.
+  'SKU DIRECTORY': 'SKU 目录',
+  'No series': '无系列',
+  'Creating…': '正在创建…',
+  'Uploading…': '正在上传…',
+  'Reading…': '正在读取…',
+  'Committing…': '正在提交…',
+  'Registering…': '正在登记…',
+  'Loading order detail…': '正在加载订单详情…',
+  'PRIMARY': '主图',
+  'Set primary': '设为主图',
+  'Move up': '上移',
+  'Remove': '移除',
+  'Reason': '原因',
+  'Register': '登记',
+  'Save adjustment': '保存调整',
+  'On hand (old → new)': '在手（旧 → 新）',
+  'Unsellable (old → new)': '不可售（旧 → 新）',
+  'No warehouse or stock is seeded. Create the real warehouse code before registering stock.':
+    '未预置仓库或库存。请先创建真实仓库编码，再登记库存。',
+  'Warehouse bilingual names updated.': '仓库中英文名称已更新。',
+  'Warehouse updated.': '仓库已更新。',
+  'Code (e.g. WH-SH)': '编码（如 WH-SH）',
+  'Code (e.g. WATERPROOF)': '编码（如 WATERPROOF）',
+  'Warehouse created.': '仓库已创建。',
+  'Series updated.': '系列已更新。',
+  'Series created.': '系列已创建。',
+  'Tags and series cannot be deleted; deactivate them instead. Existing product links remain.':
+    '功能标签与系列不可删除，请改为停用；已有商品关联保持不变。',
+  'Tag updated.': '功能标签已更新。',
+  'Tag created.': '功能标签已创建。',
+  'SKU code': 'SKU 编码',
+  'Colour EN': '颜色英文',
+  'Colour ZH': '颜色中文',
+  'USD price': '美元价格',
+  'Colour hex': '颜色色值',
+  'SKU image': 'SKU 图片',
+  'Use product image': '使用商品图片',
+  'SKU created.': 'SKU 已创建。',
+  'SKU saved.': 'SKU 已保存。',
+  'Price USD': '价格（美元）',
+  'Discontinue': '停用',
+  'Reactivate': '重新启用',
+  'SKU status updated.': 'SKU 状态已更新。',
+  'SKU discontinued and affected pending orders cancelled.':
+    'SKU 已停用，受影响的待确认订单已取消。',
+  'Discontinuing this SKU cancels every pending-confirmation order that contains it.':
+    '停用此 SKU 将取消所有包含它的待确认订单。',
+  'The order-impact preview failed.': '待确认订单影响预览失败。',
+  'Unpublishing this product cancels every pending-confirmation order that contains it.':
+    '下架此商品将取消所有包含它的待确认订单。',
+  'No images yet. Publishing requires at least one image.':
+    '暂无图片。上架至少需要一张图片。',
+  'Image order saved.': '图片顺序已保存。',
+  'Image removed.': '图片已移除。',
+  'The backend re-checks this exact set inside the transaction. If another order is submitted or cancelled first, the action is rejected and you must review again. Customers and their assigned salesperson receive a pending notification record; no email is sent in this phase.':
+    '后端会在事务内重新校验这一组订单。若期间有其他订单被提交或取消，操作将被拒绝，需重新查看后确认。客户及其业务员会收到一条待处理通知记录；本阶段不发送邮件。',
+  'CSV or XLSX with sku_code, warehouse_code, on_hand, unsellable. Maximum 500 rows and 1 MB. The server re-validates every row and commits all-or-nothing.':
+    'CSV 或 XLSX，列包含 sku_code、warehouse_code、on_hand、unsellable。最多 500 行、1 MB。服务器会重新校验每一行并整批提交。',
+  'Header-only file, ready for Excel. Downloading never writes inventory.':
+    '仅表头文件，可直接用 Excel 打开。下载不会写入库存。',
+  'Values below come from PostgreSQL. Confirming locks each row and rejects the whole batch if anything changed.':
+    '以下数值来自 PostgreSQL。确认时会锁定每一行；如任一数据已变化，整批将被拒绝。',
+  'Clear file': '清除文件',
+  'Import preview failed.': '导入预览失败。',
+  'Import commit failed.': '导入提交失败。',
+  'Repeated confirmation with the same preview does not change stock again.':
+    '使用同一预览重复确认不会再次变更库存。',
+  'Create a product with an SKU and an active warehouse before registering stock.':
+    '请先创建带 SKU 的商品与启用仓库，再登记库存。',
+  'Refresh failed.': '刷新失败。',
+  'Edit names': '编辑名称',
+  'Both the Chinese and English warehouse names are required.':
+    '中英文仓库名称均为必填。',
+  'Unable to save warehouse names.': '无法保存仓库名称。',
+  'Close registration dialog': '关闭登记窗口',
+  'Reference pricing details': '参考价格说明',
 };
 
 const ZH_TO_EN: Record<string, string> = {
@@ -237,6 +315,20 @@ const ZH_TO_EN: Record<string, string> = {
   "重置预览": 'Reset preview',
   "预览更新仅在本浏览器生效，未写入数据库或真实订单。":
     'Preview updated in this browser only. Nothing was written to the database or applied to orders.',
+  // Round 2 review: remaining internal Chinese labels and feedback.
+  "库存视图": 'Inventory view',
+  "清除仓库筛选": 'Clear warehouse filter',
+  "颜色中文": 'Colour ZH',
+  "关闭登记窗口": 'Close registration dialog',
+  "查询失败，请重试。": 'The lookup failed. Please retry.',
+  "请填写 0–100000000 的整数数量、有效不可售数量及登记原因。":
+    'Enter whole quantities from 0–100000000, a valid unsellable quantity, and a registration reason.',
+  "提交结果尚未确认。请查询最新状态后再决定是否重新登记。":
+    'The submission result is unconfirmed. Query the latest status before deciding whether to register again.',
+  "已登记成功，列表刷新失败。请关闭后刷新查看，请勿重复登记。":
+    'Registration succeeded but the list refresh failed. Close and refresh to verify; do not register again.',
+  "登记该仓库实际盘点后的绝对库存数量。此操作不代表仓间调拨，也不会扣减其他仓库。":
+    'Register the absolute stock counted in this warehouse. This is not a warehouse transfer and does not deduct stock from other warehouses.',
 };
 
 function hasCjk(value: string): boolean {

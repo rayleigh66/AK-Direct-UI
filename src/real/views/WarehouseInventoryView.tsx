@@ -4,7 +4,7 @@ import { SearchableCombobox } from '../../components/ui/SearchableCombobox';
 import { InventoryRegistrationDialog } from '../components/InventoryRegistrationDialog';
 import { WarehouseNameEditor } from '../components/WarehouseNameEditor';
 import type { InventoryRowDto, ProductDto, WarehouseDto } from '../types';
-import { Localized } from '../internalLanguage';
+import { Localized, useInternalLanguage } from '../internalLanguage';
 
 const skuMime = 'application/x-aoking-sku';
 export const WarehouseInventoryView: React.FC<{
@@ -14,6 +14,7 @@ export const WarehouseInventoryView: React.FC<{
   onViewWarehouse: (warehouse: WarehouseDto) => void;
   onRename: (warehouse: WarehouseDto, names: { name: string; nameEn: string }) => Promise<boolean>;
 }> = ({ rows, products, warehouses, onRegistered, onAdjust, onViewWarehouse, onRename }) => {
+  const { t } = useInternalLanguage();
   const [skuId, setSkuId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [hovered, setHovered] = useState('');
@@ -51,7 +52,7 @@ export const WarehouseInventoryView: React.FC<{
       </div>
     </section>
     <section className="min-w-0 space-y-3">
-      <div className="flex items-center gap-2 px-1"><Warehouse className="h-5 w-5 text-slate-500" /><h2 className="text-lg font-bold">仓库与库存记录</h2><span className="ml-auto text-xs text-slate-500">{warehouses.length} 个仓库</span></div>
+      <div className="flex items-center gap-2 px-1"><Warehouse className="h-5 w-5 text-slate-500" /><h2 className="text-lg font-bold">仓库与库存记录</h2><span className="ml-auto text-xs text-slate-500">{t(`${warehouses.length} warehouses`, `${warehouses.length} 个仓库`)}</span></div>
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {warehouses.map(warehouse => {
           const balances = rows.filter(row => row.warehouseId === warehouse.id);
@@ -63,13 +64,13 @@ export const WarehouseInventoryView: React.FC<{
             <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-sm font-bold">{warehouse.code}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${warehouse.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{warehouse.active ? '启用' : '已停用'}</span></div>
             <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-sm"><WarehouseNameEditor warehouse={warehouse} onSave={names => onRename(warehouse, names)} /></div>
             <div className="mt-4 border-t border-slate-100 pt-3">
-              <p className="mb-3 text-xs text-slate-500">{balances.length} 条 SKU 库存记录 · PCS</p>
+              <p className="mb-3 text-xs text-slate-500">{t(`${balances.length} SKU inventory records · PCS`, `${balances.length} 条 SKU 库存记录 · PCS`)}</p>
               {balances.slice(0, 4).map(row => <div key={row.skuId} className="border-t border-slate-100 py-3 first:border-0 first:pt-0">
                 <p className="break-all font-mono text-xs font-semibold">{row.skuCode}</p>
                 <dl className="mt-2 grid grid-cols-4 gap-2 text-right tabular-nums">
                   {([['在手', row.onHand], ['预占', row.reserved], ['不可售', row.unsellable], ['可用', row.available]] as const).map(([label, value]) => <div key={label}><dt className="text-[11px] text-slate-500">{label}</dt><dd className="mt-1 text-sm font-semibold">{value.toLocaleString()}</dd></div>)}
                 </dl>
-                <button type="button" onClick={() => onAdjust(row)} className="mt-2 min-h-11 text-xs font-semibold text-slate-700 underline underline-offset-4">查看／独立调整 · v{row.version}</button>
+                <button type="button" onClick={() => onAdjust(row)} className="mt-2 min-h-11 text-xs font-semibold text-slate-700 underline underline-offset-4">{t(`View / adjust · v${row.version}`, `查看／独立调整 · v${row.version}`)}</button>
               </div>)}
               {!balances.length && <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">尚无库存记录。</p>}
               <button type="button" onClick={() => onViewWarehouse(warehouse)} className="mt-3 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-xs font-semibold">查看该仓库全部记录</button>

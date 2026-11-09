@@ -40,13 +40,14 @@ const TIERS: Record<
 interface TierBadgeProps {
   tier: TierRule | undefined;
   testId?: string;
+  language?: 'en' | 'zh';
 }
 
 /**
  * Customer-level tag driven only by the existing tier rule level. No tier is
  * inferred or invented when the rule is missing.
  */
-export const TierBadge: React.FC<TierBadgeProps> = ({ tier, testId }) => {
+export const TierBadge: React.FC<TierBadgeProps> = ({ tier, testId, language = 'en' }) => {
   if (!tier) return null;
   const meta = TIERS[tier.tier_level];
   if (!meta) return null;
@@ -58,7 +59,7 @@ export const TierBadge: React.FC<TierBadgeProps> = ({ tier, testId }) => {
       title={`${meta.zh} / ${meta.label}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
-      {meta.label}
+      {language === 'zh' ? meta.zh : meta.label}
     </span>
   );
 };

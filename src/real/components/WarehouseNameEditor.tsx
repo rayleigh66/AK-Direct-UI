@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Localized } from '../internalLanguage';
+import { Localized, useInternalLanguage } from '../internalLanguage';
 import type { WarehouseDto } from '../types';
 import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 
@@ -8,6 +8,7 @@ export const WarehouseNameEditor: React.FC<{
   warehouse: WarehouseDto;
   onSave: (names: { name: string; nameEn: string }) => Promise<boolean>;
 }> = ({ warehouse, onSave }) => {
+  const { t, language } = useInternalLanguage();
   const [editing, setEditing] = useState(false);
   const [names, setNames] = useState({ name: '', nameEn: '' });
   const [busy, setBusy] = useState(false);
@@ -35,10 +36,17 @@ export const WarehouseNameEditor: React.FC<{
       className="h-11 rounded-lg bg-slate-900 px-3 text-xs font-bold text-white disabled:opacity-50"
       onClick={async () => {
         if (busy) return;
-        if (!names.name.trim() || !names.nameEn.trim()) { setError('Both the Chinese and English warehouse names are required.'); return; }
+        if (!names.name.trim() || !names.nameEn.trim()) { setError(t('Both the Chinese and English warehouse names are required.', '中英文仓库名称均为必填。')); return; }
         setBusy(true); setError('');
         try { if (await onSave({ name: names.name.trim(), nameEn: names.nameEn.trim() })) setEditing(false); }
-        catch (err) { setError(err instanceof Error ? err.message : 'Unable to save warehouse names.'); }
+        catch (err) {
+          const message = err instanceof Error ? err.message : '';
+          setError(
+            language === 'zh' && message && !/[㐀-鿿]/.test(message)
+              ? t('Unable to save warehouse names.', '无法保存仓库名称。')
+              : message || t('Unable to save warehouse names.', '无法保存仓库名称。')
+          );
+        }
         finally { setBusy(false); }
       }}>Save</button>
     <button type="button" data-testid="warehouse-edit-cancel" disabled={busy} onClick={() => setEditing(false)}

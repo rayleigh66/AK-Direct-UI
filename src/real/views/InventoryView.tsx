@@ -12,7 +12,7 @@ import {
 import type { InventoryRowDto, ProductDto, WarehouseDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { WarehouseInventoryView } from './WarehouseInventoryView';
-import { Localized } from '../internalLanguage';
+import { Localized, useInternalLanguage } from '../internalLanguage';
 
 const inputClass =
   'w-full h-10 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -22,6 +22,7 @@ export const InventoryView: React.FC<{
   canRead: boolean;
   internal: boolean;
 }> = ({ canManage, canRead, internal }) => {
+  const { t } = useInternalLanguage();
   const [rows, setRows] = useState<InventoryRowDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [products, setProducts] = useState<ProductDto[]>([]);
@@ -88,7 +89,7 @@ export const InventoryView: React.FC<{
   if (!canRead) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl p-8 text-sm text-slate-500 text-center">
-        You do not have inventory access. / 无库存查看权限。
+        {t('You do not have inventory access.', '无库存查看权限。')}
       </div>
     );
   }
@@ -155,7 +156,7 @@ export const InventoryView: React.FC<{
           )}
         </div>
         {warehouseFilter && <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-          <span>仓库 · {warehouses.find(item => item.id === warehouseFilter)?.code}</span>
+          <span>{t('Warehouse', '仓库')} · {warehouses.find(item => item.id === warehouseFilter)?.code}</span>
           <button type="button" onClick={() => setWarehouseFilter(null)} className="min-h-11 rounded-lg border border-slate-300 px-3 font-semibold">清除仓库筛选</button>
         </div>}
         <p className="text-[11px] text-slate-500">
@@ -388,9 +389,10 @@ const AdjustForm: React.FC<{
   row: InventoryRowDto;
   onSubmit: (input: Record<string, unknown>) => Promise<void>;
 }> = ({ row, onSubmit }) => {
+  const { t } = useInternalLanguage();
   const [onHand, setOnHand] = useState(String(row.onHand));
   const [unsellable, setUnsellable] = useState(String(row.unsellable));
-  const [reason, setReason] = useState('Stock count adjustment');
+  const [reason, setReason] = useState(t('Stock count adjustment', '库存盘点调整'));
   const [busy, setBusy] = useState(false);
 
   return (
@@ -413,7 +415,7 @@ const AdjustForm: React.FC<{
       }}
     >
       <div className="font-mono text-[11px] text-slate-500 w-full">
-        {row.skuCode} @ {row.warehouseCode} · version {row.version}
+        {row.skuCode} @ {row.warehouseCode} · {t(`version ${row.version}`, `版本 ${row.version}`)}
       </div>
       <label className="font-semibold text-slate-700">
         On hand

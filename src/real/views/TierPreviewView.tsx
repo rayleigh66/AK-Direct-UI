@@ -11,8 +11,16 @@ import { Localized, useInternalLanguage } from '../internalLanguage';
 
 const ORIGINAL = APPROVED_TIER_RULES.map(rule => ({ ...rule }));
 
+/** Use the approved Chinese part of the model name; no new tier naming. */
+function tierNameZh(name: string): string {
+  return name
+    .replace(/^Tier \d+\s*/, '')
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .trim();
+}
+
 export const TierPreviewView: React.FC = () => {
-  const { t } = useInternalLanguage();
+  const { t, language } = useInternalLanguage();
   const [rules, setRules] = useState<TierRule[]>(ORIGINAL.map(rule => ({ ...rule })));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState({ threshold: '', discount: '' });
@@ -165,12 +173,18 @@ export const TierPreviewView: React.FC = () => {
                 <article key={rule.id} className="grid gap-3 p-4 sm:grid-cols-[1fr_160px_150px_130px] sm:items-center" data-testid={`tier-preview-row-${rule.tier_level}`}>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <TierBadge tier={rule} testId={`tier-preview-badge-${rule.tier_level}`} />
+                      <TierBadge
+                        tier={rule}
+                        language={language}
+                        testId={`tier-preview-badge-${rule.tier_level}`}
+                      />
                       <span className="text-sm font-bold">
-                        {rule.tier_level} · {rule.name_en ?? rule.name}
+                        {rule.tier_level} ·{' '}
+                        {language === 'zh'
+                          ? tierNameZh(rule.name)
+                          : rule.name_en ?? rule.name}
                       </span>
                     </div>
-                    <div className="mt-1 text-[11px] text-[var(--muted)]">{rule.name}</div>
                   </div>
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">

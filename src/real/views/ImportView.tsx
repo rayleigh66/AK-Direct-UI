@@ -4,7 +4,8 @@ import { parseCsv, parseInventoryTable, type InventoryImportLine } from '../../u
 import { commitImport, previewImport } from '../api';
 import type { CommitImportResultDto, ImportPreviewDto } from '../types';
 import { ErrorBlock } from '../RealWorkspace';
-import { Localized } from '../internalLanguage';
+import { Localized, useInternalLanguage } from '../internalLanguage';
+import { formatEnglishDateTime } from '../../utils/dateDisplay';
 import {
   INVENTORY_TEMPLATE_CSV,
   INVENTORY_TEMPLATE_HEADERS,
@@ -14,6 +15,7 @@ import {
 const MAX_FILE_BYTES = 1024 * 1024;
 
 export const ImportView: React.FC = () => {
+  const { t } = useInternalLanguage();
   const fileInput = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
   const [lines, setLines] = useState<InventoryImportLine[]>([]);
@@ -129,7 +131,7 @@ export const ImportView: React.FC = () => {
           </label>
           {fileName && (
             <span className="text-xs text-slate-500 flex items-center gap-1">
-              {fileName} · {lines.length} rows
+              {fileName} · {t(`${lines.length} rows`, `${lines.length} 行`)}
               <button type="button" onClick={reset} aria-label="Clear file">
                 <X className="w-4 h-4" />
               </button>
@@ -221,8 +223,10 @@ export const ImportView: React.FC = () => {
             {result.alreadyCommitted ? 'Already imported (idempotent)' : 'Import committed'}
           </div>
           <p>
-            {result.rows.length} rows applied at {new Date(result.committedAt).toLocaleString()}.
-            Repeated confirmation with the same preview does not change stock again.
+            {t(
+              `${result.rows.length} rows applied at ${formatEnglishDateTime(result.committedAt)}. Repeated confirmation with the same preview does not change stock again.`,
+              `${result.rows.length} 行已应用，时间 ${formatEnglishDateTime(result.committedAt)}。使用同一预览重复确认不会再次变更库存。`
+            )}
           </p>
           <button
             type="button"

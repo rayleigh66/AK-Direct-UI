@@ -2,7 +2,7 @@
 
 **Baseline:** PR #15 head `e76fcade22c9e2ce4ed2b7daa2f79ba343d8e28e`
 **Branch:** `feat/factoryos3-uat-round2`
-**Final local head:** `0151a34eee8ef28b703d70731aaa258a7a73ae7c`
+**Final local head:** see the Draft PR head at review time
 
 **Scope:** presentation and interaction only. No order state-machine, permission, frozen business rule or Phase 4B-05 change.
 
@@ -29,6 +29,7 @@ The Real workspace shell is now a light FactoryOS-style top bar with a compact b
 
 - Real cart destination is a `SearchableCombobox` over `ISO_COUNTRIES`: search by English name or ISO3 code; the option label is English-only.
 - The selected value is stored as the uppercase ISO3 code. Client validation resolves it against the same dictionary and the API still validates the assigned ISO3 set.
+- The destination combobox runs in an explicit-selection mode: once a customer types a new search and closes the menu without choosing (blur, outside pointer/touch press, or Escape), the previous ISO3 is cleared. A submit then fails with **Select a valid destination country from the ISO alpha-3 list.** instead of silently reusing the earlier country. Opening/closing the menu without typing keeps the saved value. Other admin comboboxes keep their existing restore behavior.
 - New Real drafts default to `Sea`; a valid saved draft selection wins; an empty/invalid old draft falls back to `Sea`.
 - Mock already defaulted to `Sea`; its saved-method path is now normalized against the approved methods too.
 - `Express`, `Air`, `Sea`, `Customer Pickup` and `Other` remain available where already supported.
@@ -37,9 +38,11 @@ The Real workspace shell is now a light FactoryOS-style top bar with a compact b
 
 - `src/real/internalLanguage.tsx` provides one context, per-user `localStorage` preference, a top global `中文 / EN` toggle, a shared dictionary, and `Localized` for host text/attribute translation.
 - The Real shell, Products, Inventory, Warehouse cards, registration dialog, Import, Setup, Orders and the new tier preview use the same language state.
+- Static labels cover the full internal surface, including product forms and image/SKU editors, import preview columns, setup forms, order history labels, dialog copy, action notices and errors. Dynamic counts (warehouses, inventory records, products, import rows, SKU/image counts, impact order count, version) are composed with `t()` rather than concatenated English text. `LoadingBlock` translates its label in place.
+- SKU codes, product/colour names, customer names, warehouse codes, free-text reasons and other user data are never translated.
 - A language change does not reset `activeTab`, filters, drafts, open dialogs or form state because the provider rerenders in place.
 - Customer-visible Real copy is English-only; customer pages do not expose the internal toggle.
-- Known API failures display a Chinese error summary with an expandable raw technical detail in Chinese mode; dynamic server text is not silently presented as a translated success.
+- Known API failures display a Chinese error summary with an expandable raw technical detail in Chinese mode; the registration dialog follows the same pattern.
 
 ## 5. Admin requirements
 
@@ -93,25 +96,26 @@ Proposed contract for a later, separately approved backend:
 
 ## 7. Tests
 
-- `tests/round2Ui.test.tsx` — English date formatter/closed-state field, shipping draft fallback/override, CSV template/parser, shared language translation, tier preview validation and honest preview messaging.
+- `tests/round2Ui.test.tsx` — English date formatter/closed-state field, shipping draft fallback/override, CSV template/parser, shared language translation, tier preview validation and honest preview messaging, plus destination-combobox explicit-selection coverage (pointer, keyboard, Escape, blur, outside pointer and non-strict admin restore).
 - `tests/e2e/round2-customer.spec.ts` — Chromium context with `locale: zh-CN`; English date display and ISO internal value, `Sea` default, submit success and 375/390/430/768 overflow checks.
-- `tests/e2e-real/round2-admin.spec.ts` — admin default Products, Chinese/English shell and page switching, persistence across reload, CSV download/header, tier preview, Grid/List state retention and responsive grids.
-- Updated real E2E covers Sales default Orders, global language across Orders/Inventory, ISO3 combobox selection/invalid text rejection, Sea default and saved-choice reload.
+- `tests/e2e-real/round2-admin.spec.ts` — admin default Products, Chinese/English shell and page switching, persistence across reload, CSV download/header, tier preview, Grid/List state retention and responsive grids. A second page-level test walks Products, Inventory, Warehouse, Import, Setup, Orders and Tiers in `中文` and `EN` at 1440 and 390, asserting key labels, absence of the other language's static labels, dynamic counts and no horizontal overflow.
+- `tests/e2e-real/real-orders.spec.ts` — ISO3 combobox selection/invalid rejection, explicit re-selection after an abandoned search (submit and blur paths, including a touch tap on the mobile project), Sea default and saved-choice reload.
+- Updated real E2E covers Sales default Orders and global language across Orders/Inventory.
 - Existing PR #14 and #15 suites remain in place, including hover wheel, per-focus selection, status colours, tooltips, warehouse registration, duplicate 409, inventory concurrency and restricted permissions.
 
-Screenshots: `docs/ui-review/round2/` (admin products grid/list at 1440/768/430/390/375, tier preview, customer order list with English date at 1440/768/430/390/375) plus refreshed Real catalogue/cart/orders/warehouse captures.
+Screenshots: `docs/ui-review/round2/` — admin products grid/list at 1440/768/430/390/375, tier preview (Chinese), customer order list with English date at 1440/768/430/390/375, and the new `language-zh/en-{products,warehouse,tiers}-{1440,390}` page-language captures.
 
 ### Local results
 
 | Check | Result |
 | --- | --- |
 | `npm run lint` | PASS |
-| `npm test` | **21 files / 150 tests passed** |
-| `npm run test:e2e` (dedicated port, strict reuse off) | **101 passed / 35 skipped** |
+| `npm test` | **21 files / 155 tests passed** |
+| `npm run test:e2e` (dedicated PR16 port, strict reuse off) | **101 passed / 35 skipped** |
 | `npm run test:e2e:preview` | **1 passed** |
 | `npm run api:lint` / `api:build` | PASS (no API change) |
 | PostgreSQL integration suite on isolated DB | **6 files / 101 tests passed** |
-| Isolated Real-auth Playwright suite | **8 passed / 1 skipped** (desktop 1440, mobile 390/430) |
+| Isolated Real-auth Playwright suite | **10 passed / 1 skipped** (desktop 1440, mobile 390/430) |
 
 ## 8. Not implemented / deliberate limits
 

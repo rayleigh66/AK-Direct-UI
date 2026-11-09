@@ -28,7 +28,7 @@ import type {
 } from '../types';
 import { usdFromCents } from '../cart';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
-import { Localized } from '../internalLanguage';
+import { Localized, useInternalLanguage } from '../internalLanguage';
 
 const inputClass =
   'w-full h-10 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -378,6 +378,7 @@ const ProductCard: React.FC<{
   onToggle: () => void;
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
 }> = ({ layout, product, brands, series, tags, canWrite, expanded, onToggle, run }) => {
+  const { t } = useInternalLanguage();
   const primary = product.images.find(image => image.isPrimary) ?? product.images[0];
   const activeSkus = product.skus.filter(sku => sku.sellableStatus === 'active').length;
   const [impact, setImpact] = useState<
@@ -438,9 +439,12 @@ const ProductCard: React.FC<{
         </div>
         <div className={`text-[11px] text-slate-500 ${layout === 'grid' ? 'flex w-full items-center justify-between text-left' : 'hidden text-right sm:block'}`}>
           <div>
-            {product.skus.length} SKU · {activeSkus} active
+            {t(
+              `${product.skus.length} SKU · ${activeSkus} active`,
+              `${product.skus.length} 个 SKU · ${activeSkus} 个启用`
+            )}
           </div>
-          <div>{product.images.length} images</div>
+          <div>{t(`${product.images.length} images`, `${product.images.length} 张图片`)}</div>
         </div>
         <span
           className={`text-[10px] font-bold px-2 py-1 rounded-full border ${
@@ -557,8 +561,10 @@ const ProductCard: React.FC<{
                     className="min-h-[42px] px-4 rounded-xl bg-rose-600 text-white text-xs font-bold"
                     data-testid="impact-confirm"
                   >
-                    Confirm and cancel {impact.preview.affectedOrders.length} order(s)
-                  </button>
+                    {t(
+                      `Confirm and cancel ${impact.preview.affectedOrders.length} order(s)`,
+                      `确认取消 ${impact.preview.affectedOrders.length} 个订单`
+                    )}                  </button>
                 </div>
               </div>
             </div>
@@ -852,6 +858,7 @@ const SkuManager: React.FC<{
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
   requestDestructive: (request: DestructiveRequest) => Promise<void>;
 }> = ({ product, canWrite, run, requestDestructive }) => {
+  const { t } = useInternalLanguage();
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
     skuCode: '',
@@ -981,7 +988,7 @@ const SkuManager: React.FC<{
               <option value="">Use product image</option>
               {product.images.map((image, index) => (
                 <option key={image.id} value={image.id}>
-                  Image {index + 1}
+                  {t(`Image ${index + 1}`, `图片 ${index + 1}`)}
                 </option>
               ))}
             </select>
@@ -1006,6 +1013,7 @@ const SkuRow: React.FC<{
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
   requestDestructive: (request: DestructiveRequest) => Promise<void>;
 }> = ({ sku, canWrite, run, requestDestructive }) => {
+  const { t } = useInternalLanguage();
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(usd(sku.basePriceCents));
 
@@ -1027,7 +1035,11 @@ const SkuRow: React.FC<{
               : 'bg-slate-50 text-slate-500 border-slate-200'
           }`}
         >
-          {sku.sellableStatus}
+          {sku.sellableStatus === 'active'
+            ? t('active', '启用')
+            : sku.sellableStatus === 'discontinued'
+              ? t('discontinued', '停用')
+              : sku.sellableStatus}
         </span>
         {canWrite && (
           <button

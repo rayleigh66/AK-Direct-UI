@@ -178,13 +178,37 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   );
   // Invalid free text cannot become a destination; the field is a select-only combobox.
   const country = page.getByTestId('delivery-country');
+  const destinationError = page.getByText(
+    'Select a valid destination country from the ISO alpha-3 list.'
+  );
+  const chooseUsa = async () => {
+    await country.fill('USA');
+    const option = page.getByRole('option').filter({ hasText: 'USA' }).first();
+    if (mobile) await option.tap();
+    else await option.click();
+  };
   await country.fill('ZZZ');
   await page.getByTestId('cart-submit-open').click();
-  await expect(page.getByText('Select a valid destination country from the ISO alpha-3 list.')).toBeVisible();
-  await country.fill('USA');
-  await page.getByRole('option').filter({ hasText: 'USA' }).first().click();
+  await expect(destinationError).toBeVisible();
+  await chooseUsa();
   await page.getByTestId('delivery-date').fill(expectedDate);
   await expect(page.getByTestId('delivery-date-display')).toHaveText(/[A-Z][a-z]{2} \d{1,2}, \d{4}/);
+
+  // An abandoned search must clear the saved USA instead of silently reusing it.
+  await country.fill('ZZZ');
+  await page.getByTestId('cart-submit-open').click();
+  await expect(destinationError).toBeVisible();
+  await expect(page.getByTestId('cart-submit-confirm')).toHaveCount(0);
+  await expect(country).toHaveValue('');
+  await chooseUsa();
+  await expect(country).toHaveValue(/USA/);
+
+  // Blur also abandons the query and requires an explicit new selection.
+  await country.fill('ZZZ');
+  await page.getByTestId('delivery-requirements').click();
+  await expect(country).toHaveValue('');
+  await chooseUsa();
+
   // A valid saved selection wins over the Sea fallback across a reload.
   await page.locator('[data-testid="delivery-method"][data-method="Air"]').click();
   await page.reload();

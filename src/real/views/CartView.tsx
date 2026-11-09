@@ -512,6 +512,7 @@ export const CartView: React.FC<{
                 placeholder="Search by English name or ISO3 code"
                 emptyText="No matching country"
                 testId="delivery-country"
+                clearOnUnselectedQuery
                 className="mt-1"
               />
             </div>
