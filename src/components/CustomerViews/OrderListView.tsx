@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import { Order } from '../../types';
 import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
+import { QuantityField } from '../ui/QuantityField';
+import { HelpTooltip } from '../ui/HelpTooltip';
 
 function shippingDraftKey(companyId?: string) {
   return `aoking-shipping-draft:${companyId ?? 'guest'}`;
@@ -250,10 +252,12 @@ export const OrderListView: React.FC = () => {
           <p className="text-xs font-mono font-semibold text-slate-500 mt-1">
             {submittedOrder.order_no}
           </p>
-          <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
-            Your wholesale request has been sent to the assigned sales representative. They will
-            verify lead time and multi-warehouse availability, then create a
-            <strong> 72-hour demo stock reservation</strong> and issue a proforma invoice.
+          <p className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-xs text-slate-500">
+            <span>Sent to your sales representative for final confirmation.</span>
+            <HelpTooltip label="What happens after submission" align="right">
+              They will verify lead time and multi-warehouse availability, then create a 72-hour
+              demo stock reservation and issue a proforma invoice.
+            </HelpTooltip>
           </p>
         </div>
 
@@ -411,15 +415,14 @@ export const OrderListView: React.FC = () => {
                         >
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <input
-                          type="number"
-                          aria-label={`Quantity for ${item.sku.sku_code}`}
-                          data-testid={`cart-quantity-${item.skuId}`}
+                        <QuantityField
+                          ariaLabel={`Quantity for ${item.sku.sku_code}`}
+                          testId={`cart-quantity-${item.skuId}`}
                           min={SKU_MOQ}
                           max={item.availableStock}
                           value={quantityDrafts[item.skuId] ?? String(item.quantity)}
-                          onChange={e =>
-                            setQuantityDrafts(prev => ({ ...prev, [item.skuId]: e.target.value }))
+                          onValueChange={value =>
+                            setQuantityDrafts(prev => ({ ...prev, [item.skuId]: value }))
                           }
                           onBlur={() => commitQuantityDraft(item.skuId)}
                           onKeyDown={e => {
@@ -471,8 +474,13 @@ export const OrderListView: React.FC = () => {
           {/* PRD Non-Instant Notice */}
           <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs text-amber-900 leading-relaxed">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <strong>Order request, not an instant sale:</strong> submitting does not lock stock. A sales representative verifies quantities and availability before the demo whole-order reservation is created. This is not a database transaction.
+            <div className="flex flex-wrap items-center gap-1.5">
+              <strong>Order request, not an instant sale.</strong>
+              <HelpTooltip label="Order request and reservation details">
+                Submitting does not lock stock. A sales representative verifies quantities and
+                availability before the demo whole-order reservation is created. This is not a
+                database transaction.
+              </HelpTooltip>
             </div>
           </div>
         </div>

@@ -217,6 +217,25 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.getByTestId('order-detail')).toContainText(orderNo);
   await expect(page.getByTestId('sales-confirm-disabled')).toBeVisible();
   await expect(page.getByTestId('sales-confirm-disabled')).toContainText('Phase 4B-05');
+
+  // Real internal order language mode + shared status badge vocabulary.
+  const orderStatus = page
+    .getByTestId('order-detail')
+    .locator('[data-order-status="PENDING_CONFIRMATION"]');
+  await expect(orderStatus).toHaveText('Pending confirmation');
+  await page.getByTestId('internal-order-language').getByRole('button', { name: '中文' }).click();
+  await expect(orderStatus).toHaveText('待确认');
+  await page
+    .getByTestId('internal-order-language')
+    .getByRole('button', { name: 'EN' })
+    .click();
+  await expect(orderStatus).toHaveText('Pending confirmation');
+  if (!mobile) {
+    await page.setViewportSize({ width: 430, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'sales-pending-orders-real-430');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
   await expectNoHorizontalOverflow(page);
   await screenshot(page, `sales-pending-orders-${testInfo.project.name}`);
   await signOut(page);

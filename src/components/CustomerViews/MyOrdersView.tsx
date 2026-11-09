@@ -11,6 +11,7 @@ import {
   customerStatus,
 } from '../../utils/customerDisplay';
 import { Order, OrderStatus } from '../../types';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import {
   Clock,
   CheckCircle2,
@@ -530,7 +531,7 @@ export const MyOrdersView: React.FC = () => {
 
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-slate-400">New qty:</span>
-                      <input
+                      <SelectAllOnFocusInput
                         type="number"
                         min={10}
                         value={modifyLines[l.sku_id] || l.quantity}

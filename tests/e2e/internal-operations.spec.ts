@@ -55,13 +55,13 @@ test('sales can confirm, record payment and ship a customer order on mobile or d
 }) => {
   const orderNo = await customerOrder(page);
   await switchRole(page, /AK000123A/, 'Sales (Tom Miller)');
-  await page.getByRole('button', { name: '待确认核准 (Pending)' }).click();
+  await page.getByRole('button', { name: '待确认' }).click();
   const pending = page.locator('div.bg-white.rounded-2xl', { hasText: orderNo }).first();
   await expect(pending).toBeVisible();
   await pending.getByTestId('confirm-order').click();
   await expect(page.getByText(/订单确认成功/)).toBeVisible();
 
-  await page.getByRole('button', { name: '已确认·预占中 (Reserved)' }).click();
+  await page.getByRole('button', { name: '已确认·预占中' }).click();
   const confirmed = page.locator('div.bg-white.rounded-2xl', { hasText: orderNo }).first();
   await confirmed.getByRole('button', { name: /登记到账入账/ }).click();
   await page.getByTestId('payment-amount').fill('342');
@@ -69,7 +69,7 @@ test('sales can confirm, record payment and ship a customer order on mobile or d
   await page.getByTestId('submit-payment').click();
   await expect(page.getByText(/付款核验登记成功/)).toBeVisible();
 
-  await page.getByRole('button', { name: '已收款待发货 (Paid)' }).click();
+  await page.getByRole('button', { name: '已收款待发货' }).click();
   const paid = page.locator('div.bg-white.rounded-2xl', { hasText: orderNo }).first();
   await paid.getByRole('button', { name: /录入整单发货物流/ }).click();
   await page.getByTestId('shipment-carrier').fill('DHL Express');
@@ -78,7 +78,7 @@ test('sales can confirm, record payment and ship a customer order on mobile or d
   await page.getByTestId('shipment-eta').fill('2026-11-10');
   await page.getByTestId('submit-shipment').click();
   await expect(page.getByText(/整单发货记录更新成功/)).toBeVisible();
-  await page.getByRole('button', { name: '已整单发货 (Shipped)' }).click();
+  await page.getByRole('button', { name: '已整单发货' }).click();
   await expect(page.locator('div.bg-white.rounded-2xl', { hasText: orderNo }).first()).toContainText(
     'DHL-MOBILE-001'
   );

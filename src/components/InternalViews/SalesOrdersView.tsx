@@ -8,6 +8,10 @@ import { useApp } from '../../context/AppContext';
 import { AccessBoundary } from '../AccessBoundary';
 import { Order, OrderStatus } from '../../types';
 import { calculateSKUAvailableStock } from '../../utils/rules';
+import { shippingMethodLabel, type OrderLanguage } from '../../utils/orderStatus';
+import { LanguageToggle } from '../ui/LanguageToggle';
+import { OrderStatusBadge } from '../ui/OrderStatusBadge';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import {
   CheckCircle2,
   Clock,
@@ -40,6 +44,11 @@ export const SalesOrdersView: React.FC = () => {
 
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [language, setLanguage] = useState<OrderLanguage>('zh');
+  const isZh = language === 'zh';
+  const text = (zh: string, en: string) => (isZh ? zh : en);
+  const actionError = (error?: string) =>
+    isZh ? error ?? '操作失败。' : 'The action could not be completed.';
 
   // Payment Recording Modal State
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
@@ -74,10 +83,15 @@ export const SalesOrdersView: React.FC = () => {
   const handleConfirm = (orderId: string) => {
     const res = salesConfirmOrder(orderId);
     if (res.success) {
-      setActionMessage('订单确认成功！已完成整单模拟预占（Demo，非数据库事务），并生成 72 小时预占期与客户邮件草稿。');
+      setActionMessage(
+        text(
+          '订单确认成功！已完成整单模拟预占（Demo，非数据库事务），并生成 72 小时预占期与客户邮件草稿。',
+          'Order confirmed. A 72-hour demo reservation and the customer email draft were created; this is not a database transaction.'
+        )
+      );
       setTimeout(() => setActionMessage(''), 4000);
     } else {
-      alert(res.error);
+      alert(actionError(res.error));
     }
   };
 
@@ -86,11 +100,16 @@ export const SalesOrdersView: React.FC = () => {
     if (!paymentOrder) return;
     const res = salesRecordPayment(paymentOrder.id, paymentAmount, paymentReference);
     if (res.success) {
-      setActionMessage(`付款核验登记成功！USD $${paymentAmount} 已入账并更新客户历史有效采购额。`);
+      setActionMessage(
+        text(
+          `付款核验登记成功！USD $${paymentAmount} 已入账并更新客户历史有效采购额。`,
+          `Payment of USD $${paymentAmount} recorded and the customer's effective spend updated.`
+        )
+      );
       setPaymentOrder(null);
       setTimeout(() => setActionMessage(''), 4000);
     } else {
-      alert(res.error);
+      alert(actionError(res.error));
     }
   };
 
@@ -106,10 +125,15 @@ export const SalesOrdersView: React.FC = () => {
       internalNote,
     });
     if (!res.success) {
-      alert(res.error);
+      alert(actionError(res.error));
       return;
     }
-    setActionMessage('整单发货记录更新成功！原仓库预占库存已扣减出库。');
+    setActionMessage(
+      text(
+        '整单发货记录更新成功！原仓库预占库存已扣减出库。',
+        'Whole-order shipment recorded and the reserved stock was consumed.'
+      )
+    );
     setShipmentOrder(null);
     setTimeout(() => setActionMessage(''), 4000);
   };
@@ -117,38 +141,47 @@ export const SalesOrdersView: React.FC = () => {
   const handleRelease = (orderId: string) => {
     const res = salesReleaseReservation(orderId, '未在期限内付款或客户协商释放');
     if (res.success) {
-      setActionMessage('预占库存已按原仓库分配释放。');
+      setActionMessage(
+        text('预占库存已按原仓库分配释放。', 'The reservation was released by warehouse allocation.')
+      );
       setTimeout(() => setActionMessage(''), 4000);
     } else {
-      alert(res.error);
+      alert(actionError(res.error));
     }
   };
 
   const handleExtend = (orderId: string) => {
     const res = salesExtendReservation(orderId, 48);
     if (res.success) {
-      setActionMessage('预占期已延长 48 小时。');
+      setActionMessage(text('预占期已延长 48 小时。', 'The reservation was extended by 48 hours.'));
       setTimeout(() => setActionMessage(''), 4000);
     } else {
-      alert(res.error);
+      alert(actionError(res.error));
     }
   };
 
   const handleChangeRequest = (orderId: string, approve: boolean) => {
     const res = salesHandleChangeRequest(orderId, approve);
     if (res.success) {
-      setActionMessage(approve ? '变更申请已核准并完成库存调整。' : '变更申请已驳回，订单与库存不变。');
+      setActionMessage(
+        approve
+          ? text('变更申请已核准并完成库存调整。', 'Change approved and inventory adjusted.')
+          : text('变更申请已驳回，订单与库存不变。', 'Change rejected; order and inventory unchanged.')
+      );
       setTimeout(() => setActionMessage(''), 4000);
     } else {
-      alert(res.error);
+      alert(actionError(res.error));
     }
   };
 
   if (currentRole === 'customer') {
     return (
       <AccessBoundary
-        title="业务员订单处理不对客户开放"
-        message="客户只能查看自己的订单，不能进入内部订单处理界面。这是前端视图守卫；正式权限必须在后端再次校验。"
+        title={text('业务员订单处理不对客户开放', 'Sales order processing is internal')}
+        message={text(
+          '客户只能查看自己的订单，不能进入内部订单处理界面。这是前端视图守卫；正式权限必须在后端再次校验。',
+          'Customers can only view their own orders. This is a front-end view guard; the backend must re-check permissions.'
+        )}
       />
     );
   }
@@ -156,13 +189,23 @@ export const SalesOrdersView: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-lg font-bold text-slate-900">业务员订单处理台 (Sales Order Processing)</h1>
+          <h1 className="text-lg font-bold text-slate-900">
+            {text('业务员订单处理台', 'Sales order processing')}
+          </h1>
           <p className="text-xs text-slate-500">
-            负责业务员: <span className="font-semibold text-slate-800">{currentSalesUser.name}</span> ({currentSalesUser.internal_email}) · 支持触屏快速操作
+            {text('负责业务员', 'Salesperson')}:{' '}
+            <span className="font-semibold text-slate-800">{currentSalesUser.name}</span> (
+            {currentSalesUser.internal_email}) · {text('支持触屏快速操作', 'touch-friendly actions')}
           </p>
         </div>
+        <LanguageToggle
+          value={language}
+          onChange={setLanguage}
+          label={text('订单界面语言', 'Order screen language')}
+          testId="sales-order-language"
+        />
       </div>
 
       {actionMessage && (
@@ -175,12 +218,12 @@ export const SalesOrdersView: React.FC = () => {
       {/* Filter Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
         {[
-          { id: 'all', label: '全部订单' },
-          { id: 'pending', label: '待确认核准 (Pending)' },
-          { id: 'confirmed', label: '已确认·预占中 (Reserved)' },
-          { id: 'paid', label: '已收款待发货 (Paid)' },
-          { id: 'shipped', label: '已整单发货 (Shipped)' },
-          { id: 'change_requests', label: '客户变更申请 (Changes)' },
+          { id: 'all', label: text('全部订单', 'All orders') },
+          { id: 'pending', label: text('待确认', 'Pending') },
+          { id: 'confirmed', label: text('已确认·预占中', 'Confirmed / reserved') },
+          { id: 'paid', label: text('已收款待发货', 'Paid / ready to ship') },
+          { id: 'shipped', label: text('已整单发货', 'Shipped') },
+          { id: 'change_requests', label: text('客户变更申请', 'Change requests') },
         ].map(tab => (
           <button
             key={tab.id}
@@ -220,29 +263,34 @@ export const SalesOrdersView: React.FC = () => {
                     <span className="font-mono font-bold text-slate-900 text-sm">
                       {order.order_no}
                     </span>
-                    <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700">
-                      {order.status}
-                    </span>
+                    <OrderStatusBadge
+                      status={order.status}
+                      language={language}
+                      testId={`sales-order-status-${order.id}`}
+                    />
                     {order.change_request && order.change_request.status === 'pending' && (
                       <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900">
-                        待审批: {order.change_request.request_type === 'cancel_order' ? '申请取消' : '申请改量'}
+                        {text('待审批', 'Pending review')}:{' '}
+                        {order.change_request.request_type === 'cancel_order'
+                          ? text('申请取消', 'cancellation')
+                          : text('申请改量', 'quantity change')}
                       </span>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 flex flex-wrap items-center gap-2">
-                    <span>客户: <strong className="text-slate-800">{comp?.short_name}</strong> ({comp?.customer_code} / {order.destination_country_alpha3})</span>
+                    <span>{text('客户', 'Customer')}: <strong className="text-slate-800">{comp?.short_name}</strong> ({comp?.customer_code} / {order.destination_country_alpha3})</span>
                     {comp?.internal_nickname && (
                       <span className="text-indigo-600 font-medium">[{comp.internal_nickname}]</span>
                     )}
                     <span>·</span>
-                    <span>下单人: {order.created_by_username}</span>
+                    <span>{text('下单人', 'Buyer')}: {order.created_by_username}</span>
                     <span>·</span>
-                    <span>提交时间: {order.created_at}</span>
+                    <span>{text('提交时间', 'Submitted')}: {order.created_at}</span>
                   </div>
                 </div>
 
                 <div className="text-left md:text-right">
-                  <div className="text-xs text-slate-400">订购总数 / 金额</div>
+                  <div className="text-xs text-slate-400">{text('订购总数 / 金额', 'Pieces / amount')}</div>
                   <div className="font-mono font-bold text-sm text-slate-900">
                     {totalPcs} PCS · USD ${order.total_quoted_usd.toFixed(2)}
                   </div>
@@ -278,12 +326,12 @@ export const SalesOrdersView: React.FC = () => {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] font-semibold">
                     <tr>
-                      <th className="p-2.5 pl-3">SKU 编号</th>
-                      <th className="p-2.5">商品名称 / 颜色</th>
-                      <th className="p-2.5 text-center">需求数量 (MOQ ≥ 10)</th>
-                      <th className="p-2.5 text-center">当前可订库存</th>
-                      <th className="p-2.5 text-right">参考单价</th>
-                      <th className="p-2.5 pr-3 text-right">小计 (USD)</th>
+                      <th className="p-2.5 pl-3">{text('SKU 编号', 'SKU')}</th>
+                      <th className="p-2.5">{text('商品名称 / 颜色', 'Product / colour')}</th>
+                      <th className="p-2.5 text-center">{text('需求数量 (MOQ ≥ 10)', 'Qty (MOQ ≥ 10)')}</th>
+                      <th className="p-2.5 text-center">{text('当前可订库存', 'Available')}</th>
+                      <th className="p-2.5 text-right">{text('参考单价', 'Unit price')}</th>
+                      <th className="p-2.5 pr-3 text-right">{text('小计 (USD)', 'Line total (USD)')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -321,22 +369,27 @@ export const SalesOrdersView: React.FC = () => {
               {order.change_request && order.change_request.status === 'pending' && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-2">
                   <div className="font-bold text-amber-900 flex items-center justify-between">
-                    <span>收到客户变更申请: {order.change_request.request_type === 'cancel_order' ? '申请取消整单' : '申请修改数量'}</span>
+                    <span>
+                      {text('收到客户变更申请', 'Customer change request')}:{' '}
+                      {order.change_request.request_type === 'cancel_order'
+                        ? text('申请取消整单', 'cancel the order')
+                        : text('申请修改数量', 'change quantities')}
+                    </span>
                     <span className="text-[10px] text-amber-700">{order.change_request.requested_at}</span>
                   </div>
-                  <div className="text-amber-800">申请原因: {order.change_request.reason}</div>
+                  <div className="text-amber-800">{text('申请原因', 'Reason')}: {order.change_request.reason}</div>
                   <div className="flex gap-2 pt-1">
                     <button
                       onClick={() => handleChangeRequest(order.id, true)}
                       className="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700"
                     >
-                      同意申请 (释放/调整预占)
+                      {text('同意申请 (释放/调整预占)', 'Approve (release / adjust reservation)')}
                     </button>
                     <button
                       onClick={() => handleChangeRequest(order.id, false)}
                       className="px-3 py-1 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
                     >
-                      驳回申请
+                      {text('驳回申请', 'Reject request')}
                     </button>
                   </div>
                 </div>
@@ -345,31 +398,38 @@ export const SalesOrdersView: React.FC = () => {
               {/* Order Notes & Status Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <div>
-                  <span className="text-slate-400 block text-[10px]">运输方式与客户要求:</span>
+                  <span className="text-slate-400 block text-[10px]">
+                    {text('运输方式与客户要求', 'Shipping method and customer requirements')}:
+                  </span>
                   <div className="text-slate-700">
-                    {order.shipping_method} · 期望交期: {order.expected_ship_date}
+                    {shippingMethodLabel(order.shipping_method, language)} ·{' '}
+                    {text('期望交期', 'Expected ship date')}: {order.expected_ship_date}
                   </div>
                   <div className="text-slate-600 mt-0.5">{order.shipping_requirements}</div>
                 </div>
 
                 <div>
-                  <span className="text-slate-400 block text-[10px]">内部业务备注 (仅业务员与管理员可见):</span>
-                  <div className="text-slate-700 font-medium">{order.internal_note || '暂无内部备注'}</div>
+                  <span className="text-slate-400 block text-[10px]">
+                    {text('内部业务备注 (仅业务员与管理员可见)', 'Internal note (sales/admin only)')}:
+                  </span>
+                  <div className="text-slate-700 font-medium">
+                    {order.internal_note || text('暂无内部备注', 'No internal note')}
+                  </div>
                 </div>
               </div>
 
               {order.tracking_no && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
-                    <span className="text-emerald-700/70 block text-[10px]">承运商</span>
+                    <span className="text-emerald-700/70 block text-[10px]">{text('承运商', 'Carrier')}</span>
                     <strong>{order.carrier}</strong>
                   </div>
                   <div>
-                    <span className="text-emerald-700/70 block text-[10px]">运单号</span>
+                    <span className="text-emerald-700/70 block text-[10px]">{text('运单号', 'Tracking')}</span>
                     <strong className="font-mono">{order.tracking_no}</strong>
                   </div>
                   <div>
-                    <span className="text-emerald-700/70 block text-[10px]">发货 / 预计到达</span>
+                    <span className="text-emerald-700/70 block text-[10px]">{text('发货 / 预计到达', 'Shipped / ETA')}</span>
                     <strong>{order.actual_ship_date} → {order.estimated_delivery_date}</strong>
                   </div>
                 </div>
@@ -380,12 +440,12 @@ export const SalesOrdersView: React.FC = () => {
                 <div className="text-xs text-slate-500">
                   {order.reservation_expires_at && order.status === 'CONFIRMED' && (
                     <span className="text-sky-800 font-medium">
-                      预占有效期截止: {order.reservation_expires_at.slice(0, 16).replace('T', ' ')} UTC (已延期 {order.reservation_extended_count || 0} 次)
+                      {text('预占有效期截止', 'Reservation expires')}: {order.reservation_expires_at.slice(0, 16).replace('T', ' ')} UTC ({text('已延期', 'extended')} {order.reservation_extended_count || 0} {text('次', 'times')})
                     </span>
                   )}
                   {order.payment_recorded_at && (
                     <span className="text-emerald-700 font-medium">
-                      实收已入账: USD ${order.payment_amount_usd} ({order.payment_reference})
+                      {text('实收已入账', 'Payment recorded')}: USD ${order.payment_amount_usd} ({order.payment_reference})
                     </span>
                   )}
                 </div>
@@ -397,7 +457,7 @@ export const SalesOrdersView: React.FC = () => {
                       {hasInsufficientStock ? (
                         <div className="text-xs text-rose-600 font-semibold flex items-center gap-1">
                           <AlertTriangle className="w-4 h-4" />
-                          <span>库存不足，无法完成整单模拟预占（PRD 5.2/T08）</span>
+                          <span>{text('库存不足，无法完成整单模拟预占（PRD 5.2/T08）', 'Insufficient stock: the whole-order reservation cannot be created (PRD 5.2/T08).')}</span>
                         </div>
                       ) : (
                         <button
@@ -406,7 +466,7 @@ export const SalesOrdersView: React.FC = () => {
                           className="min-h-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-sm"
                         >
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>确认订单并整单模拟预占 (72h)</span>
+                          <span>{text('确认订单并整单模拟预占 (72h)', 'Confirm order and create 72h demo reservation')}</span>
                         </button>
                       )}
                     </>
@@ -418,16 +478,16 @@ export const SalesOrdersView: React.FC = () => {
                       <button
                         onClick={() => handleExtend(order.id)}
                         className="min-h-[44px] px-3 py-2 border border-slate-300 bg-white text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50"
-                        title="延长 48 小时预占期"
+                        title={text('延长 48 小时预占期', 'Extend the reservation by 48 hours')}
                       >
-                        延期预占 (+48h)
+                        {text('延期预占 (+48h)', 'Extend (+48h)')}
                       </button>
 
                       <button
                         onClick={() => handleRelease(order.id)}
                         className="min-h-[44px] px-3 py-2 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold hover:bg-rose-100"
                       >
-                        释放预占库存
+                        {text('释放预占库存', 'Release reservation')}
                       </button>
 
                       <button
@@ -439,7 +499,7 @@ export const SalesOrdersView: React.FC = () => {
                         className="min-h-[44px] px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
                       >
                         <DollarSign className="w-4 h-4" />
-                        <span>登记到账入账 (Record Payment)</span>
+                        <span>{text('登记到账入账', 'Record payment')}</span>
                       </button>
                     </>
                   )}
@@ -454,7 +514,7 @@ export const SalesOrdersView: React.FC = () => {
                       className="min-h-[44px] px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 flex items-center gap-1.5 shadow-sm"
                     >
                       <PackageCheck className="w-4 h-4" />
-                      <span>录入整单发货物流 (Whole Order Ship)</span>
+                      <span>{text('录入整单发货物流', 'Record whole-order shipment')}</span>
                     </button>
                   )}
                 </div>
@@ -471,24 +531,28 @@ export const SalesOrdersView: React.FC = () => {
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <DollarSign className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-sm font-bold">实际付款核对与等级入账登记</h3>
+                <h3 className="text-sm font-bold">
+                  {text('实际付款核对与等级入账登记', 'Payment verification and posting')}
+                </h3>
               </div>
               <button onClick={() => setPaymentOrder(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
 
             <form onSubmit={handleRecordPaymentSubmit} className="p-5 space-y-4">
               <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
-                <div>订单号: <strong className="font-mono">{paymentOrder.order_no}</strong></div>
-                <div>确认应收总额: <strong className="font-mono text-slate-900">USD ${(paymentOrder.total_confirmed_usd ?? paymentOrder.total_quoted_usd).toFixed(2)}</strong></div>
-                <div className="text-amber-700">本 Demo 只接受整单全额付款，不支持部分付款。</div>
-                <div>结算方式: 线下电汇 (T/T Bank Wire Transfer)</div>
+                <div>{text('订单号', 'Order')}: <strong className="font-mono">{paymentOrder.order_no}</strong></div>
+                <div>{text('确认应收总额', 'Confirmed amount due')}: <strong className="font-mono text-slate-900">USD ${(paymentOrder.total_confirmed_usd ?? paymentOrder.total_quoted_usd).toFixed(2)}</strong></div>
+                <div className="text-amber-700">
+                  {text('本 Demo 只接受整单全额付款，不支持部分付款。', 'This demo accepts full payment only; partial payment is not supported.')}
+                </div>
+                <div>{text('结算方式', 'Settlement')}: {text('线下电汇', 'offline T/T bank wire')}</div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  实际核验到账金额 (USD)
+                  {text('实际核验到账金额 (USD)', 'Verified amount received (USD)')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="number"
                   step="0.01"
                   min="1"
@@ -502,21 +566,25 @@ export const SalesOrdersView: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  银行汇款水单编号 / 索引凭据 (Reference No.)
+                  {text('银行汇款水单编号 / 索引凭据', 'Bank wire reference')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={paymentReference}
                   data-testid="payment-reference"
                   onChange={e => setPaymentReference(e.target.value)}
-                  placeholder="例如：WIRE-20261101-CITI8819"
+                  placeholder={text('例如：WIRE-20261101-CITI8819', 'e.g. WIRE-20261101-CITI8819')}
                   className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-slate-900"
                   required
                 />
               </div>
 
               <div className="p-3 bg-emerald-50 rounded-xl text-[11px] text-emerald-900 leading-relaxed">
-                <strong>PRD 7.1 入账联动逻辑:</strong> 登记付款后，订单将锁定为【已付款】不可取消状态；该笔金额将实时计入客户公司的<strong>历史累计有效采购额</strong>，并立即重置未采购计时，恢复或提升客户采购等级！
+                {text('PRD 7.1 入账联动逻辑: ', 'PRD 7.1 posting rule: ')}
+                {text(
+                  '登记付款后，订单将锁定为【已付款】不可取消状态；该笔金额将实时计入客户公司的历史累计有效采购额，并立即重置未采购计时，恢复或提升客户采购等级！',
+                  'Recording payment locks the order as paid and non-cancellable, adds the amount to the customer company effective spend, resets the inactivity clock and may restore or raise the customer tier.'
+                )}
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -525,14 +593,14 @@ export const SalesOrdersView: React.FC = () => {
                   onClick={() => setPaymentOrder(null)}
                   className="flex-1 h-11 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50"
                 >
-                  取消
+                  {text('取消', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   data-testid="submit-payment"
                   className="flex-1 h-11 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
                 >
-                  确认到账并入账
+                  {text('确认到账并入账', 'Confirm and post payment')}
                 </button>
               </div>
             </form>
@@ -547,21 +615,26 @@ export const SalesOrdersView: React.FC = () => {
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Truck className="w-5 h-5 text-indigo-400" />
-                <h3 className="text-sm font-bold">整单发货录入 (Whole Order Shipment)</h3>
+                <h3 className="text-sm font-bold">
+                  {text('整单发货录入', 'Record whole-order shipment')}
+                </h3>
               </div>
               <button onClick={() => setShipmentOrder(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
 
             <form onSubmit={handleShipmentSubmit} className="p-5 space-y-4">
               <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
-                <div>订单号: <strong className="font-mono">{shipmentOrder.order_no}</strong></div>
-                <div>目的国家: <strong>{shipmentOrder.destination_country_alpha3}</strong> · 发货原则: 严格整单发货，不支持部分发货 (PRD D11)</div>
+                <div>{text('订单号', 'Order')}: <strong className="font-mono">{shipmentOrder.order_no}</strong></div>
+                <div>
+                  {text('目的国家', 'Destination')}: <strong>{shipmentOrder.destination_country_alpha3}</strong> ·{' '}
+                  {text('发货原则: 严格整单发货，不支持部分发货 (PRD D11)', 'Whole-order shipment only; partial shipment is not supported (PRD D11).')}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">承运商 (Carrier)</label>
-                  <input
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">{text('承运商', 'Carrier')}</label>
+                  <SelectAllOnFocusInput
                     type="text"
                     value={carrier}
                     data-testid="shipment-carrier"
@@ -571,8 +644,8 @@ export const SalesOrdersView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">国际运单号 (Tracking No.)</label>
-                  <input
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">{text('国际运单号', 'Tracking number')}</label>
+                  <SelectAllOnFocusInput
                     type="text"
                     value={trackingNo}
                     data-testid="shipment-tracking"
@@ -585,7 +658,7 @@ export const SalesOrdersView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">实际发货日期</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">{text('实际发货日期', 'Actual ship date')}</label>
                   <input
                     type="date"
                     value={actualShipDate}
@@ -596,7 +669,7 @@ export const SalesOrdersView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">预计到达日期</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">{text('预计到达日期', 'Estimated delivery date')}</label>
                   <input
                     type="date"
                     value={estimatedDelivery}
@@ -610,9 +683,9 @@ export const SalesOrdersView: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  客户可见备注说明 (Customer Visible Note)
+                  {text('客户可见备注说明', 'Customer-visible note')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={customerVisibleNote}
                   onChange={e => setCustomerVisibleNote(e.target.value)}
@@ -623,9 +696,9 @@ export const SalesOrdersView: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  内部业务备注 (Internal Note — 绝对隔离不向客户展示)
+                  {text('内部业务备注 (绝对隔离不向客户展示)', 'Internal note (never shown to the customer)')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={internalNote}
                   onChange={e => setInternalNote(e.target.value)}
@@ -640,14 +713,14 @@ export const SalesOrdersView: React.FC = () => {
                   onClick={() => setShipmentOrder(null)}
                   className="flex-1 h-11 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50"
                 >
-                  取消
+                  {text('取消', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   data-testid="submit-shipment"
                   className="flex-1 h-11 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
                 >
-                  确认出库发货
+                  {text('确认出库发货', 'Confirm shipment')}
                 </button>
               </div>
             </form>

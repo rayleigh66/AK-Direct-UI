@@ -5,6 +5,10 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { SearchableCombobox } from '../ui/SearchableCombobox';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
+import { TierBadge } from '../ui/TierBadge';
+import { ISO_COUNTRIES, countrySearchText } from '../../data/isoCountries';
 import {
   Building2,
   UserPlus,
@@ -24,6 +28,7 @@ export const CompanyAccountsView: React.FC = () => {
     currentRole,
     companies,
     customerUsers,
+    tierRules,
     brands,
     brandGrants,
     adminCreateCompany,
@@ -36,6 +41,11 @@ export const CompanyAccountsView: React.FC = () => {
   const [customerCode, setCustomerCode] = useState('C000888');
   const [shortName, setShortName] = useState('Nordic Travel Gear AS');
   const [countryAlpha3, setCountryAlpha3] = useState('NOR');
+  const countryOptions = ISO_COUNTRIES.map(country => ({
+    value: country.code,
+    label: `${country.code} — ${country.nameEn} / ${country.nameZh}`,
+    keywords: countrySearchText(country),
+  }));
   const [internalNickname, setInternalNickname] = useState('北欧挪威核心分销');
 
   // Security Credentials Dialog
@@ -145,7 +155,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   内部客户编号 (必填, C+6位)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={customerCode}
                   onChange={e => setCustomerCode(e.target.value.toUpperCase())}
@@ -160,7 +170,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   公司商业简称 (必填)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={shortName}
                   onChange={e => setShortName(e.target.value)}
@@ -172,25 +182,27 @@ export const CompanyAccountsView: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  国家代码 (ISO 3166-1 Alpha-3)
+                  国家/地区 (ISO 3166-1 Alpha-3)
                 </label>
-                <input
-                  type="text"
+                <SearchableCombobox
+                  options={countryOptions}
                   value={countryAlpha3}
-                  onChange={e => setCountryAlpha3(e.target.value.toUpperCase())}
-                  placeholder="如 USA, DEU, JPN"
-                  maxLength={3}
-                  className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-xs uppercase focus:ring-2 focus:ring-slate-900 focus:outline-none"
-                  required
+                  onChange={setCountryAlpha3}
+                  ariaLabel="搜索并选择客户国家或地区"
+                  placeholder="搜索中文名、英文名或三位代码"
+                  emptyText="没有匹配的国家或地区"
+                  testId="company-country-combobox"
                 />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">标准 3 位英文大写代码</span>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  支持中文、英文名称与三位代码检索
+                </span>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   内部专属昵称 (选填, 仅内部可见)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={internalNickname}
                   onChange={e => setInternalNickname(e.target.value)}
@@ -235,6 +247,7 @@ export const CompanyAccountsView: React.FC = () => {
           {companies.map(comp => {
             const accounts = customerUsers.filter(u => u.company_id === comp.id);
             const myGrants = brandGrants.filter(g => g.company_id === comp.id);
+            const tier = tierRules.find(rule => rule.id === comp.tier_id);
 
             return (
               <div key={comp.id} className="p-5 space-y-4">
@@ -244,6 +257,7 @@ export const CompanyAccountsView: React.FC = () => {
                       <span className="font-mono font-bold text-slate-900 text-sm">
                         {comp.customer_code}
                       </span>
+                      <TierBadge tier={tier} testId={`company-tier-${comp.customer_code}`} />
                       <span className="font-bold text-slate-900 text-sm">
                         {comp.short_name}
                       </span>

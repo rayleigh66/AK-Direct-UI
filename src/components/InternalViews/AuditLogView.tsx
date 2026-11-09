@@ -6,6 +6,8 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AccessBoundary } from '../AccessBoundary';
+import { auditActionLabel, auditDetailsLabel, auditSearchText } from '../../utils/auditDisplay';
+import type { AuditLog } from '../../types';
 import {
   ClipboardList,
   ShieldCheck,
@@ -13,6 +15,21 @@ import {
   Lock,
   Search,
 } from 'lucide-react';
+
+const AuditRawDetails: React.FC<{ log: AuditLog }> = ({ log }) => (
+  <details className="mt-1.5" data-testid={`audit-raw-details-${log.id}`}>
+    <summary className="w-fit cursor-pointer select-none rounded text-[10px] font-medium text-slate-500 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900">
+      查看原始明细
+    </summary>
+    <div className="mt-1.5 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[10px] leading-relaxed text-slate-600">
+      <div>
+        <span className="text-slate-400">action code: </span>
+        {log.action}
+      </div>
+      <pre className="whitespace-pre-wrap break-all font-mono">{log.details}</pre>
+    </div>
+  </details>
+);
 
 export const AuditLogView: React.FC = () => {
   const { currentRole, auditLogs } = useApp();
@@ -22,12 +39,7 @@ export const AuditLogView: React.FC = () => {
   const filteredLogs = auditLogs.filter(log => {
     if (!filterQuery.trim()) return true;
     const q = filterQuery.toLowerCase();
-    return (
-      log.actor.toLowerCase().includes(q) ||
-      log.action.toLowerCase().includes(q) ||
-      log.target.toLowerCase().includes(q) ||
-      log.details.toLowerCase().includes(q)
-    );
+    return auditSearchText(log).includes(q);
   });
 
   const handleRunPrivacyScan = () => {
@@ -110,13 +122,18 @@ export const AuditLogView: React.FC = () => {
             <div key={log.id} className="p-4 space-y-2 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[10px] text-slate-400">{log.timestamp}</span>
-                <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
-                  {log.action}
+                <span
+                  title={log.action}
+                  data-action-code={log.action}
+                  className="font-bold text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded"
+                >
+                  {auditActionLabel(log.action)}
                 </span>
               </div>
               <div className="font-semibold text-slate-800">{log.actor}</div>
               <div className="font-mono text-[11px] text-slate-500">{log.target}</div>
-              <div className="text-slate-600 leading-relaxed">{log.details}</div>
+              <div className="text-slate-600 leading-relaxed">{auditDetailsLabel(log.details)}</div>
+              <AuditRawDetails log={log} />
             </div>
           ))}
         </div>
@@ -141,15 +158,20 @@ export const AuditLogView: React.FC = () => {
                     {log.actor}
                   </td>
                   <td className="p-3">
-                    <span className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
-                      {log.action}
+                    <span
+                      title={log.action}
+                      data-action-code={log.action}
+                      className="font-bold text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded"
+                    >
+                      {auditActionLabel(log.action)}
                     </span>
                   </td>
                   <td className="p-3 font-mono font-medium text-slate-700 whitespace-nowrap">
                     {log.target}
                   </td>
                   <td className="p-3 pr-4 text-slate-600 leading-normal">
-                    {log.details}
+                    <div>{auditDetailsLabel(log.details)}</div>
+                    <AuditRawDetails log={log} />
                   </td>
                 </tr>
               ))}

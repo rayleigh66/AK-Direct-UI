@@ -146,7 +146,9 @@ const WorkspaceShell: React.FC<{
       </header>
 
       <main className="flex-1 w-full max-w-[1660px] mx-auto px-3 sm:px-6 lg:px-10 py-5 sm:py-8">
-        {activeTab === 'catalog' && <CustomerCatalogView />}
+        {activeTab === 'catalog' && (
+          <CustomerCatalogView onOpenCart={() => setActiveTab('cart')} />
+        )}
         {activeTab === 'cart' && isCustomer && (
           <CartView
             user={user}

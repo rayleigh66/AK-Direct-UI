@@ -36,7 +36,11 @@ import {
   PackageCheck,
   RefreshCw,
   SlidersHorizontal,
+  ShoppingCart,
 } from 'lucide-react';
+import { QuantityField } from '../ui/QuantityField';
+import { HelpTooltip } from '../ui/HelpTooltip';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 
 export const CatalogView: React.FC = () => {
   const {
@@ -68,6 +72,7 @@ export const CatalogView: React.FC = () => {
   const [restockSku, setRestockSku] = useState<{ product: Product; sku: ProductSKU } | null>(null);
   const [restockQty, setRestockQty] = useState<number>(50);
   const [restockSuccessMsg, setRestockSuccessMsg] = useState<string>('');
+  const [quickQuantityDrafts, setQuickQuantityDrafts] = useState<Record<string, string>>({});
 
   const tierDiscount = currentCompanyTierInfo?.currentTier.discount_rate ?? 0;
 
@@ -197,23 +202,27 @@ export const CatalogView: React.FC = () => {
     }, 0);
   }, [authorizedActiveSkus, inventory]);
 
-  const handleQuickAdd = (sku: ProductSKU, e: React.MouseEvent) => {
+  const cartPieces = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const handleQuickSet = (sku: ProductSKU, e: React.MouseEvent) => {
     e.stopPropagation();
-    const existing = cart.find(item => item.sku_id === sku.id)?.quantity ?? 0;
+    const raw = quickQuantityDrafts[sku.id];
+    const quantity = Number(raw);
     const { totalAvailable } = calculateSKUAvailableStock(sku.id, inventory);
-    const nextQuantity = existing + SKU_MOQ;
-    if (nextQuantity > totalAvailable) {
-      addToast(
-        `Only ${totalAvailable} PCS available. Your existing ${existing} PCS were kept.`,
-        'warn'
-      );
+    if (!Number.isInteger(quantity) || quantity < SKU_MOQ) {
+      addToast(`Minimum ${SKU_MOQ} whole PCS per SKU.`, 'warn');
       return;
     }
-    const res = addToCart(sku.id, nextQuantity);
+    if (quantity > totalAvailable) {
+      addToast(`Only ${totalAvailable} PCS available. The order list was not changed.`, 'warn');
+      return;
+    }
+    const res = addToCart(sku.id, quantity);
     if (res.success) {
-      addToast(`10 PCS added. ${nextQuantity} PCS of ${sku.sku_code} now in your order list.`);
+      setQuickQuantityDrafts(prev => ({ ...prev, [sku.id]: String(quantity) }));
+      addToast(`${quantity} PCS of ${sku.sku_code} set in your order list.`);
     } else {
-      addToast(res.message ?? 'Could not add this SKU.', 'warn');
+      addToast(res.message ?? 'Could not update this SKU.', 'warn');
     }
   };
 
@@ -264,18 +273,33 @@ export const CatalogView: React.FC = () => {
           <h1 className="text-2xl sm:text-[31px] font-extrabold text-[#151515] tracking-tight mt-1 mb-1 leading-tight">
             Shop in-stock wholesale
           </h1>
-          <p className="text-xs text-[#8c8e8e] leading-relaxed">
-            Browse by SKU, compare available stock across warehouses, and meet the 10 PCS MOQ per
-            colour. Prices are in USD.
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-[#8c8e8e] leading-relaxed">
+            <span>Live warehouse stock · 10 PCS MOQ · USD pricing.</span>
+            <HelpTooltip label="Catalogue and MOQ guidance">
+              Browse by SKU and compare available stock across warehouses. Each colour has a
+              10 PCS minimum order quantity. Prices are reference wholesale prices in USD.
+            </HelpTooltip>
           </p>
         </div>
 
         <div className="grid grid-cols-2 sm:flex items-center gap-2.5">
           <button
             onClick={() => setActiveTab('cart')}
-            className="min-h-[44px] border border-[#e8e8e6] bg-white text-[#343434] text-xs font-semibold px-4 py-2.5 rounded-[9px] hover:border-[#ccc] transition-all flex items-center justify-center gap-2 shadow-2xs whitespace-nowrap shrink-0"
+            data-testid="catalog-cart-entry"
+            className="relative min-h-[44px] border border-[#e8e8e6] bg-white text-[#343434] text-xs font-semibold px-4 py-2.5 rounded-[9px] hover:border-[#ccc] transition-all flex items-center justify-center gap-2 shadow-2xs whitespace-nowrap shrink-0"
           >
-            <span>View order list</span>
+            <span className="relative inline-flex">
+              <ShoppingCart className="w-4 h-4" aria-hidden="true" />
+              {cartPieces > 0 && (
+                <span
+                  data-testid="catalog-cart-count"
+                  className="absolute -right-2.5 -top-2.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-[#ff681e] px-1 text-[9px] font-bold leading-none text-white"
+                >
+                  {cartPieces > 99 ? '99+' : cartPieces}
+                </span>
+              )}
+            </span>
+            <span>Order list</span>
           </button>
           <button
             onClick={() => setActiveTab('orders')}
@@ -300,10 +324,12 @@ export const CatalogView: React.FC = () => {
           <h2 className="text-xl sm:text-[28px] font-extrabold tracking-tight leading-snug m-0">
             Precise stock. <b>Human-approved reservations.</b>
           </h2>
-          <p className="text-xs text-[#aaa] leading-relaxed max-w-lg">
-            Your order request does not lock stock. A sales representative reviews quantity and
-            availability before creating a 72-hour demo reservation. No phone, email or street
-            address is collected.
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-[#aaa] leading-relaxed">
+            <span>Order requests do not lock stock.</span>
+            <HelpTooltip label="Reservation and privacy details" className="text-[#aaa]">
+              A sales representative reviews quantity and availability before creating a 72-hour
+              demo reservation. No phone, email or street address is collected.
+            </HelpTooltip>
           </p>
         </div>
 
@@ -677,13 +703,39 @@ export const CatalogView: React.FC = () => {
                         </div>
 
                         {totalAvailable >= SKU_MOQ ? (
-                          <button
-                            onClick={e => handleQuickAdd(primarySku, e)}
-                            data-testid="quick-add"
-                            className="mt-1 px-3 py-1.5 bg-[#171717] text-white rounded-[7px] text-xs font-bold hover:bg-[#ff681e] transition-colors"
+                          <div
+                            className="mt-1.5 flex items-center justify-end gap-1"
+                            onClick={event => event.stopPropagation()}
                           >
-                            +10 PCS
-                          </button>
+                            <QuantityField
+                              value={
+                                quickQuantityDrafts[primarySku.id] ??
+                                String(
+                                  cart.find(item => item.sku_id === primarySku.id)?.quantity ??
+                                    SKU_MOQ
+                                )
+                              }
+                              min={SKU_MOQ}
+                              max={totalAvailable}
+                              onValueChange={value =>
+                                setQuickQuantityDrafts(prev => ({
+                                  ...prev,
+                                  [primarySku.id]: value,
+                                }))
+                              }
+                              ariaLabel={`Quantity for ${primarySku.sku_code}`}
+                              testId="quick-quantity"
+                              className="h-8 w-16 rounded-[7px] border border-[#d8d8d4] bg-white px-1 text-center font-mono text-[11px] font-bold outline-none focus:border-[#ff681e] focus:ring-2 focus:ring-[#ff681e]/20"
+                            />
+                            <button
+                              type="button"
+                              onClick={e => handleQuickSet(primarySku, e)}
+                              data-testid="quick-add"
+                              className="min-h-[32px] px-2.5 bg-[#171717] text-white rounded-[7px] text-[11px] font-bold hover:bg-[#ff681e] transition-colors"
+                            >
+                              Set
+                            </button>
+                          </div>
                         ) : (
                           <button
                             onClick={e => {
@@ -744,7 +796,7 @@ export const CatalogView: React.FC = () => {
                 <label className="block text-xs font-bold text-[#707273] mb-1">
                   Requested quantity (PCS)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="number"
                   min={SKU_MOQ}
                   value={restockQty}
@@ -756,10 +808,12 @@ export const CatalogView: React.FC = () => {
 
               <div className="p-3.5 bg-[#fff7e5] rounded-[10px] text-[11px] text-[#aa750e] leading-relaxed flex items-start gap-2 border border-[#ffe9d9]">
                 <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-[#aa750e]" />
-                <div>
-                  <strong>How restock requests work:</strong> your request is sent to the assigned
-                  sales representative. When available stock reaches the 10 PCS MOQ, the demo
-                  account receives a notification. <em>A restock notification does not reserve stock.</em>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <strong>Restock requests go to your sales representative.</strong>
+                  <HelpTooltip label="How restock requests work" align="right">
+                    When available stock reaches the 10 PCS MOQ, the demo account receives a
+                    notification. A restock notification does not reserve stock.
+                  </HelpTooltip>
                 </div>
               </div>
 

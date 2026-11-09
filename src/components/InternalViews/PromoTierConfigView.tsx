@@ -6,6 +6,8 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AccessBoundary } from '../AccessBoundary';
+import { SearchableCombobox } from '../ui/SearchableCombobox';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import { Promotion } from '../../types';
 import {
   Sparkles,
@@ -29,6 +31,17 @@ export const PromoTierConfigView: React.FC = () => {
 
   // Promotion Form state
   const [selectedSkuId, setSelectedSkuId] = useState(products[0]?.skus[0]?.id || '');
+  const skuOptions = products.flatMap(product =>
+    product.skus.map(sku => ({
+      value: sku.id,
+      label: `${sku.sku_code} — ${product.product_code} — ${product.title} / ${
+        product.title_en ?? ''
+      } — ${sku.color_name}${sku.color_name_en ? ` / ${sku.color_name_en}` : ''}`,
+      keywords: `${sku.sku_code} ${product.product_code} ${product.title} ${
+        product.title_en ?? ''
+      } ${sku.color_name} ${sku.color_name_en ?? ''}`,
+    }))
+  );
   const [promoPrice, setPromoPrice] = useState(29.9);
   const [startDate, setStartDate] = useState('2026-11-01');
   const [endDate, setEndDate] = useState('2026-12-15');
@@ -116,26 +129,22 @@ export const PromoTierConfigView: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 选择促销 SKU
               </label>
-              <select
+              <SearchableCombobox
+                options={skuOptions}
                 value={selectedSkuId}
-                onChange={e => setSelectedSkuId(e.target.value)}
-                className="w-full h-11 px-3 rounded-xl border border-slate-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
-              >
-                {products.flatMap(p =>
-                  p.skus.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.sku_code} — {p.title} ({s.color_name}) [原价 ${s.base_price_usd}]
-                    </option>
-                  ))
-                )}
-              </select>
+                onChange={setSelectedSkuId}
+                ariaLabel="搜索并选择促销 SKU"
+                placeholder="搜索 SKU 编码、产品款号或中英文名称"
+                emptyText="没有匹配的 SKU"
+                testId="promo-sku-combobox"
+              />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 促销批发价 USD
               </label>
-              <input
+              <SelectAllOnFocusInput
                 type="number"
                 step="0.1"
                 min="0.01"
@@ -300,7 +309,7 @@ export const PromoTierConfigView: React.FC = () => {
                     <td className="p-3 font-semibold text-slate-800">{tier.name}</td>
                     <td className="p-3 text-right font-mono">
                       {isEditing ? (
-                        <input
+                        <SelectAllOnFocusInput
                           type="number"
                           min={0}
                           value={editThreshold}
@@ -313,7 +322,7 @@ export const PromoTierConfigView: React.FC = () => {
                     </td>
                     <td className="p-3 text-right font-mono text-emerald-700 font-bold">
                       {isEditing ? (
-                        <input
+                        <SelectAllOnFocusInput
                           type="number"
                           min={0}
                           max={100}

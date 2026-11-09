@@ -55,7 +55,7 @@ test('customer can browse, choose a colour, edit quantity, submit and view the o
   expect(await page.locator('body').innerText()).not.toMatch(/[\u4e00-\u9fff]/);
 });
 
-test('catalog quick add accumulates the existing quantity', async ({ page }) => {
+test('catalog quick set replaces the existing quantity directly', async ({ page }) => {
   await openCatalog(page);
   await page.locator('[data-testid="product-card"]').first().click();
   const detail = page.getByTestId('product-detail');
@@ -63,14 +63,15 @@ test('catalog quick add accumulates the existing quantity', async ({ page }) => 
   await detail.locator('[data-testid="add-to-order"]').click();
   await expect(detail.getByText('Added to your order list.')).toBeVisible();
   await detail.getByRole('button', { name: 'Close product details' }).click();
+  await page.getByTestId('quick-quantity').first().fill('22');
   await page.locator('[data-testid="quick-add"]').first().click();
-  await expect(page.getByText(/22 PCS of AK-9042-BLK now in your order list/)).toBeVisible();
+  await expect(page.getByText(/22 PCS of AK-9042-BLK set in your order list/)).toBeVisible();
   await navTo(page, 'Order list');
   await expect(page.locator('[data-testid="cart-quantity-sku-9042-blk"]')).toHaveValue('22');
   await expect(page.getByText('$752.40').first()).toBeVisible();
 });
 
-test('quick add keeps the existing quantity when stock would be exceeded', async ({ page }) => {
+test('quick set keeps the existing quantity when stock would be exceeded', async ({ page }) => {
   await openCatalog(page);
   await page.locator('[data-testid="product-card"]').first().click();
   const detail = page.getByTestId('product-detail');
@@ -78,11 +79,23 @@ test('quick add keeps the existing quantity when stock would be exceeded', async
   await detail.locator('[data-testid="add-to-order"]').click();
   await expect(detail.getByText('Added to your order list.')).toBeVisible();
   await detail.getByRole('button', { name: 'Close product details' }).click();
+  await page.getByTestId('quick-quantity').first().fill('231');
   await page.locator('[data-testid="quick-add"]').first().click();
-  await expect(page.getByText(/Only 230 PCS available\. Your existing 225 PCS were kept\./)).toBeVisible();
+  await expect(
+    page.getByText(/Only 230 PCS available\. The order list was not changed\./)
+  ).toBeVisible();
   await navTo(page, 'Order list');
   await expect(page.locator('[data-testid="cart-quantity-sku-9042-blk"]')).toHaveValue('225');
   await expect(page.getByText('$7695.00').first()).toBeVisible();
+});
+
+test('quick set enforces the 10 PCS MOQ on a product card', async ({ page }) => {
+  await openCatalog(page);
+  await page.getByTestId('quick-quantity').first().fill('5');
+  await page.locator('[data-testid="quick-add"]').first().click();
+  await expect(page.getByText('Minimum 10 whole PCS per SKU.')).toBeVisible();
+  await navTo(page, 'Order list');
+  await expect(page.getByText('Your order list is empty')).toBeVisible();
 });
 
 test('customer catalog combines series and feature-tag filters', async ({ page }) => {
@@ -200,7 +213,7 @@ test('confirmed order actions return after a change request is resolved', async 
   const sidebar = page.locator('aside');
   await sidebar.getByRole('button', { name: /AK000123A/ }).click();
   await page.getByText('Sales (Tom Miller)', { exact: true }).click();
-  await page.getByRole('button', { name: '客户变更申请 (Changes)' }).click();
+  await page.getByRole('button', { name: '客户变更申请' }).click();
   const salesCard = page.locator('div.bg-white.rounded-2xl', { hasText: 'ORD-20261028-001' }).first();
   await salesCard.getByRole('button', { name: '同意申请 (释放/调整预占)' }).click();
   await expect(page.getByText('变更申请已核准并完成库存调整。')).toBeVisible();
