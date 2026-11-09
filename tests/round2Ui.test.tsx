@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EnglishDateField } from '../src/components/ui/EnglishDateField';
 import { SearchableCombobox } from '../src/components/ui/SearchableCombobox';
 import { formatEnglishDate } from '../src/utils/dateDisplay';
+import { formatCartBadge } from '../src/utils/cartCount';
 import {
   INVENTORY_TEMPLATE_CSV,
   INVENTORY_TEMPLATE_HEADERS,
@@ -35,29 +36,82 @@ describe('customer English dates', () => {
     expect(formatEnglishDate('2026-11-09')).not.toMatch(/[年月日]/);
   });
 
-  it('shows the English closed-state value while keeping the ISO input value', () => {
-    let value = '2026-11-09';
-    const { rerender } = render(
-      <EnglishDateField
-        value={value}
-        onChange={next => {
-          value = next;
-        }}
-        ariaLabel="Expected ship date"
-        testId="date"
-      />
+  function DateHarness({ initial = '2026-11-09' }: { initial?: string }) {
+    const [value, setValue] = React.useState(initial);
+    return (
+      <>
+        <EnglishDateField
+          value={value}
+          onChange={setValue}
+          ariaLabel="Expected ship date"
+          testId="date"
+        />
+        <output data-testid="value">{value}</output>
+      </>
     );
+  }
+
+  it('opens a real calendar and updates the ISO value from a day click', () => {
+    render(<DateHarness />);
     expect(screen.getByTestId('date-display').textContent).toBe('Nov 9, 2026');
-    expect((screen.getByTestId('date') as HTMLInputElement).value).toBe('2026-11-09');
-    fireEvent.change(screen.getByTestId('date'), { target: { value: '2026-12-01' } });
-    expect(value).toBe('2026-12-01');
-    rerender(<EnglishDateField value="2026-12-01" onChange={() => undefined} ariaLabel="Expected ship date" testId="date" />);
-    expect(screen.getByTestId('date-display').textContent).toBe('Dec 1, 2026');
+    expect(screen.getByTestId('date').getAttribute('data-value')).toBe('2026-11-09');
+
+    fireEvent.click(screen.getByTestId('date'));
+    expect(screen.getByTestId('date-calendar')).toBeTruthy();
+    expect(screen.getByTestId('date-month').textContent).toBe('November 2026');
+    fireEvent.click(screen.getByTestId('date-day-2026-11-20'));
+    expect(screen.getByTestId('value').textContent).toBe('2026-11-20');
+    expect(screen.getByTestId('date-display').textContent).toBe('Nov 20, 2026');
+    expect(screen.queryByTestId('date-calendar')).toBeNull();
   });
 
-  it('uses an English placeholder before a date is chosen', () => {
-    render(<EnglishDateField value="" onChange={() => undefined} ariaLabel="Expected ship date" testId="date" />);
+  it('supports next month, clear and cancel without changing the value on cancel', () => {
+    render(<DateHarness />);
+    fireEvent.click(screen.getByTestId('date'));
+    fireEvent.click(screen.getByTestId('date-next-month'));
+    expect(screen.getByTestId('date-month').textContent).toBe('December 2026');
+    fireEvent.click(screen.getByTestId('date-day-2026-12-01'));
+    expect(screen.getByTestId('value').textContent).toBe('2026-12-01');
+    expect(screen.getByTestId('date-display').textContent).toBe('Dec 1, 2026');
+
+    fireEvent.click(screen.getByTestId('date'));
+    fireEvent.click(screen.getByTestId('date-clear'));
+    expect(screen.getByTestId('value').textContent).toBe('');
     expect(screen.getByTestId('date-display').textContent).toBe('Select date');
+
+    fireEvent.click(screen.getByTestId('date'));
+    fireEvent.click(screen.getByTestId('date-next-month'));
+    fireEvent.click(screen.getByTestId('date-cancel'));
+    expect(screen.getByTestId('value').textContent).toBe('');
+    expect(screen.queryByTestId('date-calendar')).toBeNull();
+  });
+
+  it('moves with arrow keys and selects with Enter, while Escape cancels', async () => {
+    render(<DateHarness />);
+    fireEvent.click(screen.getByTestId('date'));
+    const start = screen.getByTestId('date-day-2026-11-09');
+    await waitFor(() => expect(document.activeElement).toBe(start));
+    fireEvent.keyDown(start, { key: 'ArrowRight' });
+    const next = screen.getByTestId('date-day-2026-11-10');
+    await waitFor(() => expect(document.activeElement).toBe(next));
+    fireEvent.keyDown(next, { key: 'Enter' });
+    expect(screen.getByTestId('value').textContent).toBe('2026-11-10');
+    expect(screen.queryByTestId('date-calendar')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('date'));
+    const day = screen.getByTestId('date-day-2026-11-10');
+    fireEvent.keyDown(day, { key: 'Escape' });
+    expect(screen.queryByTestId('date-calendar')).toBeNull();
+    expect(screen.getByTestId('value').textContent).toBe('2026-11-10');
+  });
+
+  it('uses an English placeholder and today selection before a date is chosen', () => {
+    render(<DateHarness initial="" />);
+    expect(screen.getByTestId('date-display').textContent).toBe('Select date');
+    fireEvent.click(screen.getByTestId('date'));
+    fireEvent.click(screen.getByTestId('date-today'));
+    expect(screen.getByTestId('value').textContent).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(screen.getByTestId('date-display').textContent).toMatch(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
   });
 });
 
@@ -150,6 +204,17 @@ describe('destination combobox selection integrity', () => {
   });
 });
 
+describe('cart badge count', () => {
+  it('shows total PCS and abbreviates above 99 without changing the cart total', () => {
+    expect(formatCartBadge(0)).toBe('0');
+    expect(formatCartBadge(10)).toBe('10');
+    expect(formatCartBadge(40)).toBe('40');
+    expect(formatCartBadge(99)).toBe('99');
+    expect(formatCartBadge(100)).toBe('99+');
+    expect(formatCartBadge(1500)).toBe('99+');
+  });
+});
+
 describe('real shipping draft compatibility', () => {
   it('defaults to Sea for empty and malformed drafts', () => {
     expect(readShippingDraft('C000001').shippingMethod).toBe('Sea');
@@ -206,7 +271,21 @@ describe('inventory CSV template', () => {
       'on_hand',
       'unsellable',
     ]);
-    const filled = `${INVENTORY_TEMPLATE_CSV}AKT-0001-BLK,WH-SH,120,0\n`;
+    expect(INVENTORY_TEMPLATE_CSV).toBe(
+      'sku_code,warehouse_code,on_hand,unsellable\nEXAMPLE-SKU,EXAMPLE-WH,100,0\n'
+    );
+    const templateParsed = parseInventoryTable(parseCsv(INVENTORY_TEMPLATE_CSV));
+    expect(templateParsed.errors).toEqual([]);
+    expect(templateParsed.lines[0]).toMatchObject({
+      skuCode: 'EXAMPLE-SKU',
+      warehouseCode: 'EXAMPLE-WH',
+      onHand: 100,
+      unsellable: 0,
+    });
+    const filled = INVENTORY_TEMPLATE_CSV.replace(
+      'EXAMPLE-SKU,EXAMPLE-WH,100,0',
+      'AKT-0001-BLK,WH-SH,120,0'
+    );
     const parsed = parseInventoryTable(parseCsv(filled));
     expect(parsed.errors).toEqual([]);
     expect(parsed.lines[0]).toMatchObject({
@@ -215,9 +294,6 @@ describe('inventory CSV template', () => {
       onHand: 120,
       unsellable: 0,
     });
-    const headerOnly = parseInventoryTable(parseCsv(INVENTORY_TEMPLATE_CSV));
-    expect(headerOnly.errors.join(' ')).not.toContain('Missing required column');
-    expect(headerOnly.errors.join(' ')).toContain('No data rows');
   });
 });
 

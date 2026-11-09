@@ -38,27 +38,63 @@ test('English date display and Sea default survive a Chinese system locale', asy
   const sea = page.getByRole('button', { name: 'Sea freight' });
   await expect(sea).toHaveClass(/border-slate-900/);
 
-  const dateInput = page.getByTestId('expected-ship-date');
+  const dateTrigger = page.getByTestId('expected-ship-date');
   const dateDisplay = page.getByTestId('expected-ship-date-display');
-  const iso = await dateInput.inputValue();
-  expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  const initialIso = await dateTrigger.getAttribute('data-value');
+  expect(initialIso).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   await expect(dateDisplay).toHaveText(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
   expect(await dateDisplay.innerText()).not.toMatch(/[年月日]/);
 
-  await dateInput.fill('2026-12-01');
-  await expect(dateDisplay).toHaveText('Dec 1, 2026');
-  await expect(dateInput).toHaveValue('2026-12-01');
+  const now = new Date();
+  const targetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const targetIso = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-01`;
+  const targetMonth = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+  }).format(targetDate);
+  const targetDisplay = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(targetDate);
+  const goToTargetMonth = async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if ((await page.getByTestId('expected-ship-date-month').innerText()) === targetMonth) return;
+      await page.getByTestId('expected-ship-date-next-month').click();
+    }
+    throw new Error(`Could not reach ${targetMonth}.`);
+  };
+
+  // A real click opens the calendar and a real day click updates the value.
+  await dateTrigger.click();
+  await expect(page.getByTestId('expected-ship-date-calendar')).toBeVisible();
+  await goToTargetMonth();
+  await expect(page.getByTestId('expected-ship-date-month')).toHaveText(targetMonth);
+  await page.getByTestId(`expected-ship-date-day-${targetIso}`).click();
+  await expect(dateDisplay).toHaveText(targetDisplay);
+  await expect(dateTrigger).toHaveAttribute('data-value', targetIso);
+
+  // Clear and reselect, still without typing a native date value.
+  await dateTrigger.click();
+  await page.getByTestId('expected-ship-date-clear').click();
+  await expect(dateDisplay).toHaveText('Select date');
+  await expect(dateTrigger).toHaveAttribute('data-value', '');
+  await dateTrigger.click();
+  await goToTargetMonth();
+  await page.getByTestId(`expected-ship-date-day-${targetIso}`).click();
+  await expect(dateDisplay).toHaveText(targetDisplay);
+  await expect(dateTrigger).toHaveAttribute('data-value', targetIso);
   await capture(page, 'customer-order-list-english-date-1440');
   for (const width of [768, 430, 390, 375]) {
     await page.setViewportSize({ width, height: 900 });
     await overflow(page);
-    await expect(dateDisplay).toHaveText('Dec 1, 2026');
+    await expect(dateDisplay).toHaveText(targetDisplay);
     await capture(page, `customer-order-list-english-date-${width}`);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
 
   await page.getByTestId('submit-order').click();
   await expect(page.getByRole('heading', { name: 'Order request submitted' })).toBeVisible();
-  await expect(page.getByTestId('success-expected-ship')).toHaveText('Dec 1, 2026');
+  await expect(page.getByTestId('success-expected-ship')).toHaveText(targetDisplay);
   expect(await page.getByTestId('success-expected-ship').innerText()).not.toMatch(/[年月日]/);
 });

@@ -155,6 +155,9 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await cartItem.getByTestId('cart-quantity-input').fill('12');
   await cartItem.getByTestId('cart-quantity-save').click();
   await expect(page.getByTestId('cart-pieces')).toContainText('12 PCS');
+  await expect(page.getByTestId('cart-badge-count')).toHaveText('12');
+  await expect(page.getByTestId('real-user-meta')).toContainText(customerB);
+  await expect(page.getByTestId('real-user-meta')).not.toContainText(/C\d{6}/);
   await expectNoHorizontalOverflow(page);
   await screenshot(page, `shared-cart-${testInfo.project.name}`);
   if (!mobile) {
@@ -191,8 +194,37 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await page.getByTestId('cart-submit-open').click();
   await expect(destinationError).toBeVisible();
   await chooseUsa();
-  await page.getByTestId('delivery-date').fill(expectedDate);
-  await expect(page.getByTestId('delivery-date-display')).toHaveText(/[A-Z][a-z]{2} \d{1,2}, \d{4}/);
+  const dateTrigger = page.getByTestId('delivery-date');
+  const expectedDateObject = new Date(`${expectedDate}T00:00:00Z`);
+  const expectedDisplay = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(expectedDateObject);
+  const expectedMonth = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(expectedDateObject);
+  const chooseExpectedDate = async () => {
+    await dateTrigger.click();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if ((await page.getByTestId('delivery-date-month').innerText()) === expectedMonth) break;
+      await page.getByTestId('delivery-date-next-month').click();
+    }
+    await page.getByTestId(`delivery-date-day-${expectedDate}`).click();
+    await expect(dateTrigger).toHaveAttribute('data-value', expectedDate);
+  };
+  await chooseExpectedDate();
+  await expect(page.getByTestId('delivery-date-display')).toHaveText(expectedDisplay);
+
+  // Clear and re-select through the visible calendar.
+  await dateTrigger.click();
+  await page.getByTestId('delivery-date-clear').click();
+  await expect(page.getByTestId('delivery-date-display')).toHaveText('Select date');
+  await chooseExpectedDate();
+  await expect(page.getByTestId('delivery-date-display')).toHaveText(expectedDisplay);
 
   // An abandoned search must clear the saved USA instead of silently reusing it.
   await country.fill('ZZZ');
@@ -217,6 +249,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
     /border-slate-900/
   );
   await expect(country).toHaveValue(/USA/);
+  await expect(page.getByTestId('delivery-date')).toHaveAttribute('data-value', expectedDate);
   await page.locator('[data-testid="delivery-method"][data-method="Sea"]').click();
   await page
     .getByTestId('delivery-requirements')

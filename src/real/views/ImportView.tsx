@@ -7,8 +7,9 @@ import { ErrorBlock } from '../RealWorkspace';
 import { Localized, useInternalLanguage } from '../internalLanguage';
 import { formatEnglishDateTime } from '../../utils/dateDisplay';
 import {
+  INVENTORY_TEMPLATE_COLUMNS,
   INVENTORY_TEMPLATE_CSV,
-  INVENTORY_TEMPLATE_HEADERS,
+  INVENTORY_TEMPLATE_EXAMPLE,
   downloadInventoryTemplate,
 } from '../../utils/inventoryTemplate';
 
@@ -140,13 +141,37 @@ export const ImportView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--subtle-bg)] p-3 text-[11px] text-[var(--muted)]">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 space-y-2">
             <div className="font-bold text-[var(--ink)]">Download CSV template / 下载 CSV 模板</div>
-            <code title={INVENTORY_TEMPLATE_CSV.trim()} className="mt-1 block break-all font-mono text-[10px]">
-              {INVENTORY_TEMPLATE_HEADERS.join(',')}
+            <code
+              title={INVENTORY_TEMPLATE_CSV.trim()}
+              className="block whitespace-pre-wrap break-all font-mono text-[10px]"
+              data-testid="import-template-preview"
+            >
+              {INVENTORY_TEMPLATE_CSV.trim()}
             </code>
-            <div className="mt-1">
-              Header-only file, ready for Excel. Downloading never writes inventory.
+            <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2" data-testid="import-template-guide">
+              {INVENTORY_TEMPLATE_COLUMNS.map(column => (
+                <div key={column.key} className="flex gap-2">
+                  <dt className="shrink-0 font-mono font-bold text-[var(--ink)]">{column.key}</dt>
+                  <dd>{t(column.en, column.zh)}</dd>
+                </div>
+              ))}
+            </dl>
+            <div
+              data-testid="import-template-warning"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-semibold text-amber-900"
+            >
+              {t(
+                `Replace the example SKU (${INVENTORY_TEMPLATE_EXAMPLE.sku_code}) and warehouse code (${INVENTORY_TEMPLATE_EXAMPLE.warehouse_code}) before uploading. The example row is never written automatically; the server validates every real SKU and warehouse.`,
+                `上传前请替换示例 SKU（${INVENTORY_TEMPLATE_EXAMPLE.sku_code}）与仓库编码（${INVENTORY_TEMPLATE_EXAMPLE.warehouse_code}）。示例行不会自动写入；服务器会校验每个真实 SKU 与仓库。`
+              )}
+            </div>
+            <div>
+              {t(
+                'Header plus one example row, ready for Excel. Downloading never writes inventory.',
+                '表头加一行示例，可直接用 Excel 打开。下载不会写入库存。'
+              )}
             </div>
           </div>
           <button

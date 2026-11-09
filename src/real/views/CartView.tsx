@@ -279,7 +279,7 @@ export const CartView: React.FC<{
           <ShoppingBag className="w-5 h-5 text-[#ff681e]" />
           <h2 className="text-base font-extrabold">Company shared cart</h2>
           <span className="text-[11px] text-slate-500">
-            Every account of {user.companyName ?? user.companyCode ?? 'your company'} sees this cart.
+            Every account of {user.companyName ?? 'your company'} sees this cart.
           </span>
           <span
             className="ml-auto text-[11px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-700"

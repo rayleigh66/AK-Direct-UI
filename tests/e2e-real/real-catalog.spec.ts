@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
@@ -131,12 +131,24 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await screenshot(page, `inventory-${testInfo.project.name}`);
 
   await page.getByTestId('real-tab-import').click();
+  await expect(page.getByTestId('import-template-guide')).toContainText('sku_code');
+  await expect(page.getByTestId('import-template-warning')).toContainText('EXAMPLE-SKU');
+  const templateDownloadPromise = page.waitForEvent('download');
+  await page.getByTestId('import-template-download').click();
+  const templateDownload = await templateDownloadPromise;
+  const templatePath = path.join(testInfo.outputDir, 'inventory-template.csv');
+  await templateDownload.saveAs(templatePath);
+  const template = await readFile(templatePath, 'utf8');
+  expect(template.split(/\r?\n/)[0]).toBe('sku_code,warehouse_code,on_hand,unsellable');
+  expect(template).toContain('EXAMPLE-SKU,EXAMPLE-WH,100,0');
+  const filledTemplate = template.replace(
+    'EXAMPLE-SKU,EXAMPLE-WH,100,0',
+    `${skuCode},${warehouseCode},25,2`
+  );
   await page.getByTestId('import-file').setInputFiles({
     name: 'stock.csv',
     mimeType: 'text/csv',
-    buffer: Buffer.from(
-      `sku_code,warehouse_code,on_hand,unsellable\n${skuCode},${warehouseCode},25,2\n`
-    ),
+    buffer: Buffer.from(filledTemplate),
   });
   const previewRow = page.getByTestId('import-row').filter({ hasText: skuCode });
   await expect(previewRow).toBeVisible({ timeout: 20_000 });
@@ -162,7 +174,11 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.getByRole('button', { name: /Save password/ }).click();
 
   await expect(page.getByTestId('catalog-search')).toBeVisible();
-  await expect(page.getByTestId('real-catalog-cart-entry')).toBeVisible();
+  await expect(page.getByTestId('real-user-meta')).toContainText(customerUsername);
+  await expect(page.getByTestId('real-user-meta')).not.toContainText(/C\d{6}/);
+  await expect(page.getByTestId('real-catalog-cart-entry')).toHaveCount(0);
+  await expect(page.getByTestId('real-tab-cart')).toBeVisible();
+  await expect(page.getByTestId('cart-badge')).toBeVisible();
   const productCard = page.getByTestId('catalog-product-card').filter({ hasText: productTitle });
   await expect(productCard).toBeVisible({ timeout: 20_000 });
   await expect(productCard).toContainText('$38.00');

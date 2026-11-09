@@ -22,6 +22,7 @@ import { OrdersView } from './views/OrdersView';
 import { TierPreviewView } from './views/TierPreviewView';
 import { RealCartProvider, useRealCart } from './cart';
 import { LanguageToggle } from '../components/ui/LanguageToggle';
+import { formatCartBadge } from '../utils/cartCount';
 import {
   InternalLanguageProvider,
   translateInternalText,
@@ -52,23 +53,28 @@ const TAB_LABELS: Record<TabKey, { en: string; zh: string; icon: React.ReactNode
 const CartBadge: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
   const { cart } = useRealCart();
   const count = cart?.totalQuantity ?? 0;
+  const badge = formatCartBadge(count);
   if (!cart) return null;
   return (
     <button
       type="button"
       onClick={onOpen}
       data-testid="cart-badge"
+      aria-label={`Cart, ${count} PCS`}
       className="fo-btn flex min-h-[42px] items-center gap-2 border-[var(--line)] bg-white text-[var(--ink)]"
     >
       <span className="relative">
         <ShoppingCart className="w-4 h-4" />
-        {cart.itemCount > 0 && (
-          <span className="absolute -right-2 -top-2 grid h-4 min-w-[16px] place-items-center rounded-full bg-[var(--orange)] px-1 text-[9px] font-bold text-[var(--ink)]">
-            {cart.itemCount}
+        {count > 0 && (
+          <span
+            data-testid="cart-badge-count"
+            className="absolute -right-2 -top-2 grid h-4 min-w-[16px] place-items-center rounded-full bg-[var(--orange)] px-1 text-[9px] font-bold text-[var(--ink)]"
+          >
+            {badge}
           </span>
         )}
       </span>
-      <span>{count} PCS</span>
+      <span className="hidden sm:inline">Cart</span>
     </button>
   );
 };
@@ -130,15 +136,12 @@ const WorkspaceShell: React.FC<{
                 testId="internal-language-toggle"
               />
             )}
-            <div className="max-w-[180px] text-right text-[11px] leading-tight sm:max-w-none">
+            <div
+              data-testid="real-user-meta"
+              className="max-w-[180px] text-right text-[11px] leading-tight sm:max-w-none"
+            >
               <div className="truncate font-semibold">{user.displayName}</div>
-              {isCustomer ? (
-                <div className="truncate text-[var(--muted)]">
-                  {user.companyName} ({user.companyCode})
-                </div>
-              ) : (
-                <div className="truncate font-mono text-[var(--muted)]">{user.username}</div>
-              )}
+              <div className="truncate font-mono text-[var(--muted)]">{user.username}</div>
             </div>
             <button
               type="button"
@@ -189,7 +192,7 @@ const WorkspaceShell: React.FC<{
 
       <main className="mx-auto w-full max-w-[1660px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
         {activeTab === 'catalog' && (
-          <CustomerCatalogView onOpenCart={() => setActiveTab('cart')} />
+          <CustomerCatalogView />
         )}
         {activeTab === 'cart' && isCustomer && (
           <CartView

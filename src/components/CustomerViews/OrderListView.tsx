@@ -203,6 +203,14 @@ export const OrderListView: React.FC = () => {
       setErrorMessage('Your order list is empty.');
       return;
     }
+    if (!expectedDate) {
+      setErrorMessage('Choose an expected ship date.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expectedDate)) {
+      setErrorMessage('Expected ship date must be a valid date.');
+      return;
+    }
     if (privacyCheck.hasViolation) {
       setErrorMessage(privacyCheck.message ?? 'Privacy check failed.');
       return;

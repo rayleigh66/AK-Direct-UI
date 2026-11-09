@@ -51,6 +51,8 @@ test('round 2 admin visual, language, CSV, product views and tier preview', asyn
 
   await page.getByTestId('real-tab-import').click();
   await expect(page.getByText('下载 CSV 模板', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('import-template-guide')).toBeVisible();
+  await expect(page.getByTestId('import-template-warning')).toContainText('EXAMPLE-SKU');
   const downloadPromise = page.waitForEvent('download');
   await page.getByTestId('import-template-download').click();
   const download = await downloadPromise;
@@ -58,7 +60,9 @@ test('round 2 admin visual, language, CSV, product views and tier preview', asyn
   await download.saveAs(downloadPath);
   const template = await fs.readFile(downloadPath, 'utf8');
   expect(template.split(/\r?\n/)[0]).toBe('sku_code,warehouse_code,on_hand,unsellable');
-  expect(template).toBe('sku_code,warehouse_code,on_hand,unsellable\n');
+  expect(template).toBe(
+    'sku_code,warehouse_code,on_hand,unsellable\nEXAMPLE-SKU,EXAMPLE-WH,100,0\n'
+  );
 
   await page.getByTestId('real-tab-setup').click();
   await expect(page.getByText('仓库', { exact: true }).first()).toBeVisible();

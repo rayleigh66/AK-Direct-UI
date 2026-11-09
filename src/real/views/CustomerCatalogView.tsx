@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Search, ShoppingBag, ShoppingCart, X } from 'lucide-react';
+import { Check, Search, ShoppingBag, X } from 'lucide-react';
 import { listCustomerBrands, listCustomerProducts, listCustomerSeries, listCustomerTags } from '../api';
 import { useRealCart, usdFromCents } from '../cart';
 import type { CustomerProductDto, CustomerBrandDto, SeriesDto, TagDto } from '../types';
@@ -9,7 +9,7 @@ import { HelpTooltip } from '../../components/ui/HelpTooltip';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-export const CustomerCatalogView: React.FC<{ onOpenCart?: () => void }> = ({ onOpenCart }) => {
+export const CustomerCatalogView: React.FC = () => {
   const [products, setProducts] = useState<CustomerProductDto[]>([]);
   const [brands, setBrands] = useState<CustomerBrandDto[]>([]);
   const [series, setSeries] = useState<SeriesDto[]>([]);
@@ -110,29 +110,9 @@ export const CustomerCatalogView: React.FC<{ onOpenCart?: () => void }> = ({ onO
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-base font-extrabold">Wholesale catalogue</h2>
-          <p className="text-[11px] text-slate-500">Authorised products · reference USD prices</p>
-        </div>
-        {onOpenCart && (
-          <button
-            type="button"
-            onClick={onOpenCart}
-            data-testid="real-catalog-cart-entry"
-            className="relative inline-flex min-h-[42px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-800"
-          >
-            <span className="relative inline-flex">
-              <ShoppingCart className="h-4 w-4" aria-hidden="true" />
-              {(cart?.totalQuantity ?? 0) > 0 && (
-                <span className="absolute -right-2.5 -top-2.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-[#ff681e] px-1 text-[9px] font-bold leading-none text-white">
-                  {(cart?.totalQuantity ?? 0) > 99 ? '99+' : cart?.totalQuantity}
-                </span>
-              )}
-            </span>
-            Order list
-          </button>
-        )}
+      <div>
+        <h2 className="text-base font-extrabold">Wholesale catalogue</h2>
+        <p className="text-[11px] text-slate-500">Authorised products · reference USD prices</p>
       </div>
       <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap items-center gap-2">

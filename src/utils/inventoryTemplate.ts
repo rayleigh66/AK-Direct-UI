@@ -6,8 +6,26 @@ export const INVENTORY_TEMPLATE_HEADERS = [
   'unsellable',
 ] as const;
 
-/** Header-only so a filled copy cannot be mistaken for committed stock. */
-export const INVENTORY_TEMPLATE_CSV = `${INVENTORY_TEMPLATE_HEADERS.join(',')}\n`;
+export const INVENTORY_TEMPLATE_EXAMPLE = {
+  sku_code: 'EXAMPLE-SKU',
+  warehouse_code: 'EXAMPLE-WH',
+  on_hand: 100,
+  unsellable: 0,
+} as const;
+
+/**
+ * One clearly fake example row explains the shape without being importable:
+ * the server rejects the unknown EXAMPLE-SKU/EXAMPLE-WH on preview, so a
+ * download can never write stock by itself.
+ */
+export const INVENTORY_TEMPLATE_CSV = `${INVENTORY_TEMPLATE_HEADERS.join(',')}\n${INVENTORY_TEMPLATE_EXAMPLE.sku_code},${INVENTORY_TEMPLATE_EXAMPLE.warehouse_code},${INVENTORY_TEMPLATE_EXAMPLE.on_hand},${INVENTORY_TEMPLATE_EXAMPLE.unsellable}\n`;
+
+export const INVENTORY_TEMPLATE_COLUMNS = [
+  { key: 'sku_code', en: 'SKU code', zh: 'SKU 编码' },
+  { key: 'warehouse_code', en: 'Warehouse code', zh: '仓库编码' },
+  { key: 'on_hand', en: 'On-hand quantity', zh: '在手数量' },
+  { key: 'unsellable', en: 'Unsellable quantity', zh: '不可售数量' },
+] as const;
 
 export function downloadInventoryTemplate(): void {
   const blob = new Blob([INVENTORY_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' });
