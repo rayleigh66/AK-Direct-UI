@@ -7,9 +7,11 @@ import {
   listInventory,
   listWarehouses,
   registerInventory,
+  updateWarehouse,
 } from '../api';
 import type { InventoryRowDto, ProductDto, WarehouseDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
+import { WarehouseInventoryView } from './WarehouseInventoryView';
 
 const inputClass =
   'w-full h-10 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -23,11 +25,13 @@ export const InventoryView: React.FC<{
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [products, setProducts] = useState<ProductDto[]>([]);
   const [search, setSearch] = useState('');
+  const [warehouseFilter, setWarehouseFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [adjusting, setAdjusting] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [view, setView] = useState<'list' | 'warehouse'>('list');
 
   const load = () => {
     setLoading(true);
@@ -62,20 +66,23 @@ export const InventoryView: React.FC<{
       await refresh();
       setNotice(success);
       setAdjusting(null);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The request failed.');
+      return false;
     }
   };
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter(row =>
+    const warehouseRows = warehouseFilter ? rows.filter(row => row.warehouseId === warehouseFilter) : rows;
+    if (!needle) return warehouseRows;
+    return warehouseRows.filter(row =>
       `${row.skuCode} ${row.productCode} ${row.productTitle} ${row.warehouseCode}`
         .toLowerCase()
         .includes(needle)
     );
-  }, [rows, search]);
+  }, [rows, search, warehouseFilter]);
 
   if (!canRead) {
     return (
@@ -95,6 +102,26 @@ export const InventoryView: React.FC<{
         </div>
       )}
 
+      {canManage && <div className="flex flex-wrap items-center gap-2" aria-label="库存视图">
+        <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')} className={`min-h-11 rounded-xl px-4 text-sm font-semibold ${view === 'list' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-300'}`}>库存列表</button>
+        <button type="button" aria-pressed={view === 'warehouse'} onClick={() => { setView('warehouse'); setRegisterOpen(false); }} className={`min-h-11 rounded-xl px-4 text-sm font-semibold ${view === 'warehouse' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-300'}`}>仓库视图</button>
+      </div>}
+      {view === 'warehouse' && canManage ? <WarehouseInventoryView rows={rows} warehouses={warehouses} products={products}
+        onRegistered={async row => {
+          setRows(current => [...current.filter(item => item.skuId !== row.skuId || item.warehouseId !== row.warehouseId), row]);
+          await refresh();
+          setNotice('库存已登记，流水与审计由服务器记录。');
+        }}
+        onAdjust={row => {
+          setRows(current => [...current.filter(item => item.skuId !== row.skuId || item.warehouseId !== row.warehouseId), row]);
+          setSearch(''); setWarehouseFilter(null); setAdjusting(`${row.skuId}:${row.warehouseId}`); setView('list');
+        }}
+        onViewWarehouse={warehouse => { setSearch(''); setWarehouseFilter(warehouse.id); setAdjusting(null); setView('list'); }}
+        onRename={async (warehouse, names) => {
+          const saved = await updateWarehouse(warehouse.id, names);
+          setWarehouses(current => current.map(item => item.id === saved.id ? saved : item));
+          return true;
+        }} /> : <>
       <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 h-10 px-3 rounded-xl border border-slate-300 text-sm flex-1 min-w-[220px]">
@@ -109,7 +136,7 @@ export const InventoryView: React.FC<{
           </label>
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => { void refresh().catch(err => setError(err instanceof Error ? err.message : 'Refresh failed.')); }}
             className="h-10 px-3 rounded-xl border border-slate-300 text-xs font-semibold flex items-center gap-1.5"
           >
             <RefreshCw className="w-4 h-4" /> Refresh
@@ -125,6 +152,10 @@ export const InventoryView: React.FC<{
             </button>
           )}
         </div>
+        {warehouseFilter && <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span>仓库 · {warehouses.find(item => item.id === warehouseFilter)?.code}</span>
+          <button type="button" onClick={() => setWarehouseFilter(null)} className="min-h-11 rounded-lg border border-slate-300 px-3 font-semibold">清除仓库筛选</button>
+        </div>}
         <p className="text-[11px] text-slate-500">
           {canManage
             ? 'Administrator view: on hand, reserved and unsellable per SKU and warehouse.'
@@ -135,8 +166,7 @@ export const InventoryView: React.FC<{
             products={products}
             warehouses={warehouses}
             onSubmit={async input => {
-              await run(() => registerInventory(input), 'Inventory registered.');
-              setRegisterOpen(false);
+              if (await run(() => registerInventory(input), 'Inventory registered.')) setRegisterOpen(false);
             }}
           />
         )}
@@ -220,6 +250,7 @@ export const InventoryView: React.FC<{
               />
             ))}
       </div>
+      </>}
       {!internal && null}
     </div>
   );
@@ -237,9 +268,9 @@ const RegisterForm: React.FC<{
   const [warehouseId, setWarehouseId] = useState(
     warehouses.find(item => item.active)?.id ?? ''
   );
-  const [onHand, setOnHand] = useState('0');
+  const [onHand, setOnHand] = useState('');
   const [unsellable, setUnsellable] = useState('0');
-  const [reason, setReason] = useState('Initial registration');
+  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (!skus.length || !warehouses.length) {
@@ -309,6 +340,9 @@ const RegisterForm: React.FC<{
           value={onHand}
           onChange={event => setOnHand(event.target.value)}
           className={`${inputClass} mt-1`}
+          required
+          max={100_000_000}
+          step={1}
           data-testid="inventory-register-onhand"
         />
       </label>
@@ -326,6 +360,9 @@ const RegisterForm: React.FC<{
         Reason
         <input
           value={reason}
+          required
+          maxLength={500}
+          data-testid="inventory-register-reason"
           onChange={event => setReason(event.target.value)}
           className={`${inputClass} mt-1`}
         />

@@ -123,6 +123,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
     .getAttribute('value');
   await warehouseSelect.selectOption(warehouseValue!);
   await page.getByTestId('inventory-register-onhand').fill('60');
+  await page.getByTestId('inventory-register-reason').fill('Initial physical count for real E2E');
   await page.getByTestId('inventory-register-submit').click();
   await expect(page.getByTestId('inventory-row').filter({ hasText: skuCode })).toBeVisible();
   await signOut(page);

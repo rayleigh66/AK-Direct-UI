@@ -125,6 +125,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
     .getAttribute('value');
   await warehouseSelect.selectOption(warehouseValue!);
   await page.getByTestId('inventory-register-onhand').fill('20');
+  await page.getByTestId('inventory-register-reason').fill('Initial physical count for real E2E');
   await page.getByTestId('inventory-register-submit').click();
   await expect(page.getByTestId('inventory-row').filter({ hasText: skuCode })).toBeVisible();
   await screenshot(page, `inventory-${testInfo.project.name}`);

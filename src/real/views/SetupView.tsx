@@ -14,6 +14,7 @@ import {
 } from '../api';
 import type { SeriesDto, TagDto, WarehouseDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
+import { WarehouseNameEditor } from '../components/WarehouseNameEditor';
 
 const inputClass =
   'w-full h-9 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -25,8 +26,6 @@ export const SetupView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [editingWarehouseId, setEditingWarehouseId] = useState<string | null>(null);
-  const [warehouseNames, setWarehouseNames] = useState({ name: '', nameEn: '' });
 
   const refresh = async () => {
     const [warehouseItems, seriesItems, tagItems] = await Promise.all([
@@ -63,27 +62,6 @@ export const SetupView: React.FC = () => {
     }
   };
 
-  const startWarehouseEdit = (warehouse: WarehouseDto) => {
-    setEditingWarehouseId(warehouse.id);
-    setWarehouseNames({ name: warehouse.name, nameEn: warehouse.nameEn });
-  };
-
-  const saveWarehouseNames = async (warehouse: WarehouseDto) => {
-    if (!warehouseNames.name.trim() || !warehouseNames.nameEn.trim()) {
-      setError('Both the Chinese and English warehouse names are required.');
-      return;
-    }
-    const saved = await run(
-      () =>
-        updateWarehouse(warehouse.id, {
-          name: warehouseNames.name.trim(),
-          nameEn: warehouseNames.nameEn.trim(),
-        }),
-      'Warehouse bilingual names updated.'
-    );
-    if (saved) setEditingWarehouseId(null);
-  };
-
   if (loading) return <LoadingBlock label="Loading setup…" />;
 
   return (
@@ -108,63 +86,9 @@ export const SetupView: React.FC = () => {
               data-testid="warehouse-row"
             >
               <span className="font-mono font-bold">{warehouse.code}</span>
-              {editingWarehouseId === warehouse.id ? (
-                <div className="flex min-w-[240px] flex-1 flex-wrap items-end gap-2">
-                  <label className="min-w-[120px] flex-1 text-[10px] font-semibold text-slate-600">
-                    中文名称
-                    <SelectAllOnFocusInput
-                      value={warehouseNames.name}
-                      onChange={event =>
-                        setWarehouseNames(prev => ({ ...prev, name: event.target.value }))
-                      }
-                      className="mt-1 h-9 w-full rounded-lg border border-slate-300 px-2 text-xs"
-                      data-testid="warehouse-edit-name-zh"
-                      required
-                    />
-                  </label>
-                  <label className="min-w-[120px] flex-1 text-[10px] font-semibold text-slate-600">
-                    English name
-                    <SelectAllOnFocusInput
-                      value={warehouseNames.nameEn}
-                      onChange={event =>
-                        setWarehouseNames(prev => ({ ...prev, nameEn: event.target.value }))
-                      }
-                      className="mt-1 h-9 w-full rounded-lg border border-slate-300 px-2 text-xs"
-                      data-testid="warehouse-edit-name-en"
-                      required
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => void saveWarehouseNames(warehouse)}
-                    className="h-9 rounded-lg bg-slate-900 px-3 text-[10px] font-bold text-white"
-                    data-testid="warehouse-edit-save"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingWarehouseId(null)}
-                    className="h-9 rounded-lg border border-slate-300 px-3 text-[10px] font-semibold text-slate-700"
-                    data-testid="warehouse-edit-cancel"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <span className="font-semibold">{warehouse.nameEn}</span>
-                  <span className="text-slate-500">{warehouse.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => startWarehouseEdit(warehouse)}
-                    className="px-2 py-1 rounded-lg border border-slate-300 text-[10px] font-semibold"
-                    data-testid="warehouse-edit"
-                  >
-                    Edit names
-                  </button>
-                </>
-              )}
+              <WarehouseNameEditor warehouse={warehouse} onSave={names => run(
+                () => updateWarehouse(warehouse.id, names), 'Warehouse bilingual names updated.'
+              )} />
               <span
                 className={`ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                   warehouse.active
