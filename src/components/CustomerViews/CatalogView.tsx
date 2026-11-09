@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { QuantityField } from '../ui/QuantityField';
 import { HelpTooltip } from '../ui/HelpTooltip';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 
 export const CatalogView: React.FC = () => {
   const {
@@ -795,7 +796,7 @@ export const CatalogView: React.FC = () => {
                 <label className="block text-xs font-bold text-[#707273] mb-1">
                   Requested quantity (PCS)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="number"
                   min={SKU_MOQ}
                   value={restockQty}

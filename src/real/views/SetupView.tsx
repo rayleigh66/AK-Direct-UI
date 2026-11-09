@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 import {
   createSeries,
   createTag,
@@ -111,7 +112,7 @@ export const SetupView: React.FC = () => {
                 <div className="flex min-w-[240px] flex-1 flex-wrap items-end gap-2">
                   <label className="min-w-[120px] flex-1 text-[10px] font-semibold text-slate-600">
                     中文名称
-                    <input
+                    <SelectAllOnFocusInput
                       value={warehouseNames.name}
                       onChange={event =>
                         setWarehouseNames(prev => ({ ...prev, name: event.target.value }))
@@ -123,7 +124,7 @@ export const SetupView: React.FC = () => {
                   </label>
                   <label className="min-w-[120px] flex-1 text-[10px] font-semibold text-slate-600">
                     English name
-                    <input
+                    <SelectAllOnFocusInput
                       value={warehouseNames.nameEn}
                       onChange={event =>
                         setWarehouseNames(prev => ({ ...prev, nameEn: event.target.value }))
@@ -326,7 +327,7 @@ const SimpleCreate: React.FC<{
       {fields.map(field => (
         <label key={field.key} className="text-[11px] font-semibold text-slate-600 flex-1 min-w-[130px]">
           {field.label}
-          <input
+          <SelectAllOnFocusInput
             value={values[field.key] ?? ''}
             onChange={event => setValues({ ...values, [field.key]: event.target.value })}
             className={`${inputClass} mt-1`}

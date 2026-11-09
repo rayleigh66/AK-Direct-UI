@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { SearchableCombobox } from '../ui/SearchableCombobox';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import { TierBadge } from '../ui/TierBadge';
 import { ISO_COUNTRIES, countrySearchText } from '../../data/isoCountries';
 import {
@@ -154,7 +155,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   内部客户编号 (必填, C+6位)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={customerCode}
                   onChange={e => setCustomerCode(e.target.value.toUpperCase())}
@@ -169,7 +170,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   公司商业简称 (必填)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={shortName}
                   onChange={e => setShortName(e.target.value)}
@@ -201,7 +202,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   内部专属昵称 (选填, 仅内部可见)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={internalNickname}
                   onChange={e => setInternalNickname(e.target.value)}

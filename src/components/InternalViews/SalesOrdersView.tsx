@@ -11,6 +11,7 @@ import { calculateSKUAvailableStock } from '../../utils/rules';
 import { shippingMethodLabel, type OrderLanguage } from '../../utils/orderStatus';
 import { LanguageToggle } from '../ui/LanguageToggle';
 import { OrderStatusBadge } from '../ui/OrderStatusBadge';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import {
   CheckCircle2,
   Clock,
@@ -551,7 +552,7 @@ export const SalesOrdersView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {text('实际核验到账金额 (USD)', 'Verified amount received (USD)')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="number"
                   step="0.01"
                   min="1"
@@ -567,7 +568,7 @@ export const SalesOrdersView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {text('银行汇款水单编号 / 索引凭据', 'Bank wire reference')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={paymentReference}
                   data-testid="payment-reference"
@@ -633,7 +634,7 @@ export const SalesOrdersView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">{text('承运商', 'Carrier')}</label>
-                  <input
+                  <SelectAllOnFocusInput
                     type="text"
                     value={carrier}
                     data-testid="shipment-carrier"
@@ -644,7 +645,7 @@ export const SalesOrdersView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">{text('国际运单号', 'Tracking number')}</label>
-                  <input
+                  <SelectAllOnFocusInput
                     type="text"
                     value={trackingNo}
                     data-testid="shipment-tracking"
@@ -684,7 +685,7 @@ export const SalesOrdersView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {text('客户可见备注说明', 'Customer-visible note')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={customerVisibleNote}
                   onChange={e => setCustomerVisibleNote(e.target.value)}
@@ -697,7 +698,7 @@ export const SalesOrdersView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {text('内部业务备注 (绝对隔离不向客户展示)', 'Internal note (never shown to the customer)')}
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={internalNote}
                   onChange={e => setInternalNote(e.target.value)}

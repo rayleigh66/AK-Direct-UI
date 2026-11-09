@@ -74,13 +74,30 @@ test('customer catalogue exposes the cart badge, help tooltip and direct quantit
   await page.keyboard.type('12');
   await expect(quantity).toHaveValue('12');
 
-  // Wheel adjustment is damped but still changes one step while focused.
-  await quantity.evaluate(element => element.focus());
-  await quantity.dispatchEvent('wheel', { deltaY: 120 });
-  await expect(quantity).toHaveValue('13');
+  // A new focus session selects the existing value again; typing replaces it.
+  await page.getByRole('heading', { name: 'Shop in-stock wholesale' }).click();
+  await quantity.click();
+  await page.keyboard.type('15');
+  await expect(quantity).toHaveValue('15');
+
+  // Wheel adjustment works from pointer hover alone, without focusing first.
+  await quantity.blur();
+  await quantity.hover();
+  await page.mouse.wheel(0, 120);
+  await expect(quantity).toHaveValue('16');
+  // A small damped delta does not jump another PCS step.
+  await page.mouse.wheel(0, 5);
+  await expect(quantity).toHaveValue('16');
+
+  // Outside the numeric field the same wheel gesture scrolls the page.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.getByRole('heading', { name: 'Shop in-stock wholesale' }).hover();
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   await page.locator('[data-testid="quick-add"]').first().click();
-  await expect(page.getByTestId('catalog-cart-count')).toHaveText('13');
+  await expect(page.getByTestId('catalog-cart-count')).toHaveText('16');
   await expect(page.getByTestId('catalog-cart-entry')).toContainText('Order list');
   await expectNoHorizontalOverflow(page);
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -158,6 +175,16 @@ test('promotion SKU search, ISO country search, tier tags and Chinese audit disp
   const auditAction = page.locator('[data-action-code="CREATE_COMPANY"]').first();
   await expect(auditAction).toHaveText('创建客户公司');
   await expect(page.locator('table').getByText(/已登记客户公司/).first()).toBeVisible();
+
+  // The raw audit record remains available even when a Chinese summary exists.
+  const rawDetails = page
+    .locator('table details')
+    .filter({ hasText: 'Company registered with ISO' })
+    .first();
+  await rawDetails.locator('summary').click();
+  await expect(rawDetails).toHaveAttribute('open', '');
+  await expect(rawDetails).toContainText('action code: CREATE_COMPANY');
+  await expect(rawDetails.locator('pre')).toContainText('Company registered with ISO');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.locator('main').screenshot({
     path: 'docs/ui-review/ui-polish/admin-audit-1440.png',
@@ -166,6 +193,14 @@ test('promotion SKU search, ISO country search, tier tags and Chinese audit disp
   for (const width of [390, 430]) {
     await page.setViewportSize({ width, height: 900 });
     await closeOverlayNavigation(page);
+    const mobileRawDetails = page
+      .locator('div.sm\\:hidden details')
+      .filter({ hasText: 'Company registered with ISO' })
+      .first();
+    if (!(await mobileRawDetails.getAttribute('open'))) {
+      await mobileRawDetails.locator('summary').click();
+    }
+    await expect(mobileRawDetails.locator('pre')).toContainText('Company registered with ISO');
     await expectNoHorizontalOverflow(page);
   }
 });

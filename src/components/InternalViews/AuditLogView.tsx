@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AccessBoundary } from '../AccessBoundary';
 import { auditActionLabel, auditDetailsLabel, auditSearchText } from '../../utils/auditDisplay';
+import type { AuditLog } from '../../types';
 import {
   ClipboardList,
   ShieldCheck,
@@ -14,6 +15,21 @@ import {
   Lock,
   Search,
 } from 'lucide-react';
+
+const AuditRawDetails: React.FC<{ log: AuditLog }> = ({ log }) => (
+  <details className="mt-1.5" data-testid={`audit-raw-details-${log.id}`}>
+    <summary className="w-fit cursor-pointer select-none rounded text-[10px] font-medium text-slate-500 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900">
+      查看原始明细
+    </summary>
+    <div className="mt-1.5 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[10px] leading-relaxed text-slate-600">
+      <div>
+        <span className="text-slate-400">action code: </span>
+        {log.action}
+      </div>
+      <pre className="whitespace-pre-wrap break-all font-mono">{log.details}</pre>
+    </div>
+  </details>
+);
 
 export const AuditLogView: React.FC = () => {
   const { currentRole, auditLogs } = useApp();
@@ -117,6 +133,7 @@ export const AuditLogView: React.FC = () => {
               <div className="font-semibold text-slate-800">{log.actor}</div>
               <div className="font-mono text-[11px] text-slate-500">{log.target}</div>
               <div className="text-slate-600 leading-relaxed">{auditDetailsLabel(log.details)}</div>
+              <AuditRawDetails log={log} />
             </div>
           ))}
         </div>
@@ -153,7 +170,8 @@ export const AuditLogView: React.FC = () => {
                     {log.target}
                   </td>
                   <td className="p-3 pr-4 text-slate-600 leading-normal">
-                    {auditDetailsLabel(log.details)}
+                    <div>{auditDetailsLabel(log.details)}</div>
+                    <AuditRawDetails log={log} />
                   </td>
                 </tr>
               ))}

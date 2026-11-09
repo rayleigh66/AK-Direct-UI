@@ -22,10 +22,11 @@ const clamp = (value: number, min: number, max: number | undefined) => {
 };
 
 /**
- * Quantity input shared by the customer surfaces. It selects all on first
- * focus, keeps normal editing afterwards, and turns a damped mouse-wheel motion
- * into single-step changes only while the field is focused (never hijacking
- * page scroll from a hovered card).
+ * Quantity input shared by the customer surfaces. It selects all whenever it is
+ * entered from a blurred state, keeps normal editing on repeated clicks, and
+ * turns a damped wheel motion over the numeric field into single-step changes.
+ * The wheel listener is scoped to the field, so the rest of the page scrolls
+ * normally.
  */
 export const QuantityField: React.FC<QuantityFieldProps> = ({
   value,
@@ -67,9 +68,10 @@ export const QuantityField: React.FC<QuantityFieldProps> = ({
     let lastStepAt = 0;
 
     const handleWheel = (event: WheelEvent) => {
-      // Only adjust a focused quantity field; hovering a card must still scroll
-      // the catalogue on trackpads and touch devices.
-      if (document.activeElement !== input || event.deltaY === 0) return;
+      // The listener is attached to the input itself, so a wheel gesture only
+      // steps the quantity while the pointer is over the numeric field. Moving
+      // the pointer away lets the page scroll normally.
+      if (event.deltaY === 0) return;
       event.preventDefault();
 
       accumulated += event.deltaY;
