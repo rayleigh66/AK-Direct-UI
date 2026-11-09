@@ -181,7 +181,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
     '下载 CSV 模板'
   );
   await expect(
-    page.getByText('仅表头文件，可直接用 Excel 打开。下载不会写入库存。', { exact: true })
+    page.getByText('表头加一行示例，可直接用 Excel 打开。下载不会写入库存。', { exact: true })
   ).toBeVisible();
   await expect(page.getByTestId('import-file')).toBeHidden();
 
@@ -247,7 +247,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
     'Download CSV template'
   );
   await expect(
-    page.getByText('Header-only file, ready for Excel. Downloading never writes inventory.', {
+    page.getByText('Header plus one example row, ready for Excel. Downloading never writes inventory.', {
       exact: true,
     })
   ).toBeVisible();
