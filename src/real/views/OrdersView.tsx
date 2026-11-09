@@ -521,7 +521,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                         type="button"
                         onClick={() => openCustomer(detail)}
                         data-testid="admin-order-customer-detail"
-                        className="font-semibold text-left underline-offset-2 hover:underline"
+                        className="font-semibold text-left underline decoration-dotted underline-offset-2 hover:decoration-[#ff681e]"
                       >
                         {detail.company.customerCode} · {detail.company.shortName}
                       </button>
@@ -537,12 +537,17 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <div className="text-slate-400">{text('Current salesperson (access scope)', '当前销售负责人（访问范围）')}</div>
-                    <div className="font-mono text-[11px] break-all">
-                      {detail.currentAssignedSalesUserId ?? text('Unassigned', '未分配')}
+                    <div className="text-[11px] font-semibold break-all">
+                      {scope === 'admin'
+                        ? salesperson(detail.currentAssignedSalesUserId)
+                        : detail.currentAssignedSalesUserId ?? text('Unassigned', '未分配')}
                     </div>
                     <div className="text-[10px] text-slate-400 mt-1">
                       {text('Submitted under', '提交时归属')}{' '}
-                      {detail.assignedSalesUserId ?? text('no salesperson', '无销售')} ({text('audit snapshot', '审计快照')})
+                      {scope === 'admin'
+                        ? salesperson(detail.assignedSalesUserId)
+                        : detail.assignedSalesUserId ?? text('no salesperson', '无销售')}{' '}
+                      ({text('audit snapshot', '审计快照')})
                     </div>
                   </div>
                 </div>
