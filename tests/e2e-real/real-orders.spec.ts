@@ -393,4 +393,62 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.getByTestId('cart-empty')).toBeVisible();
   await grant(true);
   expect(errors).toEqual([]);
+
+  // Administrator order/customer drawers share one right-side container.
+  await signOut(page);
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await expect(page.getByTestId('real-tab-products')).toBeVisible();
+  await page.getByTestId('real-tab-orders').click();
+  const adminOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
+  await expect(adminOrder).toBeVisible({ timeout: 20_000 });
+  const customerLink = adminOrder.getByTestId('admin-order-customer-link');
+  const companyCode = await customerLink.getAttribute('data-company-code');
+  expect(companyCode).toMatch(/^C[0-9]{6}$/);
+
+  await adminOrder.click();
+  const orderDrawer = page.getByTestId('order-detail-drawer');
+  await expect(orderDrawer).toBeVisible();
+  await expect(orderDrawer).toContainText(orderNo);
+  await expect(orderDrawer).toContainText('Reference');
+  await expect(orderDrawer).toContainText('Cancelled');
+  await expect(orderDrawer).toContainText('Administrator supervision is read-only');
+  await expect(orderDrawer.getByTestId('sales-confirm-disabled')).toHaveCount(0);
+  const orderBox = await orderDrawer.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(orderBox).not.toBeNull();
+  if (viewport.width >= 640) {
+    expect(orderBox!.width).toBeGreaterThanOrEqual(480);
+    expect(orderBox!.width).toBeLessThanOrEqual(600);
+    expect(orderBox!.x).toBeGreaterThan(viewport.width / 2);
+  } else {
+    expect(orderBox!.width).toBeGreaterThanOrEqual(viewport.width - 1);
+  }
+  await screenshot(page, `admin-order-drawer-${testInfo.project.name}`);
+
+  await page.getByTestId('order-drawer-close').click();
+  await expect(orderDrawer).toBeHidden();
+  expect(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-order-no'))
+  ).toBe(orderNo);
+
+  // The list customer chip opens Customer Details without opening a second drawer.
+  await customerLink.click();
+  const customerDrawer = page.getByTestId('customer-detail-drawer');
+  await expect(customerDrawer).toBeVisible();
+  await expect(orderDrawer).toHaveCount(0);
+  await expect(customerDrawer.getByTestId('customer-detail')).toContainText(companyCode!);
+  await expect(customerDrawer.getByTestId('customer-detail')).toContainText('USA');
+  await expect(customerDrawer.getByTestId('customer-detail-order')).toContainText(orderNo);
+  await expect(customerDrawer.getByTestId('customer-detail-order')).toContainText(
+    customerA
+  );
+  await expect(customerDrawer.getByTestId('customer-detail-salesperson')).toContainText(
+    'E2E Sales'
+  );
+  await screenshot(page, `admin-customer-drawer-${testInfo.project.name}`);
+
+  await customerDrawer.getByTestId('customer-detail-back').click();
+  await expect(page.getByTestId('order-detail-drawer')).toContainText(orderNo);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('order-detail-drawer')).toBeHidden();
 });

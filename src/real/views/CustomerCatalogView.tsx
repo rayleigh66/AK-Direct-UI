@@ -1,11 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Search, ShoppingBag, X } from 'lucide-react';
+import { Check, Minus, Plus, Search, ShoppingBag } from 'lucide-react';
 import { listCustomerBrands, listCustomerProducts, listCustomerSeries, listCustomerTags } from '../api';
 import { useRealCart, usdFromCents } from '../cart';
-import type { CustomerProductDto, CustomerBrandDto, SeriesDto, TagDto } from '../types';
+import type {
+  CustomerProductDto,
+  CustomerBrandDto,
+  CustomerSkuDto,
+  SeriesDto,
+  TagDto,
+} from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { QuantityField } from '../../components/ui/QuantityField';
+import { SideDrawer } from '../../components/ui/SideDrawer';
 import { HelpTooltip } from '../../components/ui/HelpTooltip';
+import { stepQuantity } from '../../utils/quantity';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -21,6 +29,7 @@ export const CustomerCatalogView: React.FC = () => {
   const [seriesId, setSeriesId] = useState('');
   const [tagId, setTagId] = useState('');
   const [selected, setSelected] = useState<CustomerProductDto | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { cart, setItem } = useRealCart();
   const [skuQuantities, setSkuQuantities] = useState<Record<string, string>>({});
   const [addError, setAddError] = useState('');
@@ -63,23 +72,43 @@ export const CustomerCatalogView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  const addSku = async (skuId: string) => {
-    const quantity = Number(skuQuantities[skuId]);
+  const addSku = async (sku: CustomerSkuDto) => {
+    const quantity = Number(skuQuantities[sku.id]);
     if (!Number.isInteger(quantity) || quantity < 10) {
       setAddError('Minimum 10 whole PCS per SKU.');
       return;
     }
-    setAddingSku(skuId);
+    if (quantity > sku.available) {
+      setAddError(`Only ${sku.available} PCS are available for ${sku.skuCode}.`);
+      return;
+    }
+    setAddingSku(sku.id);
     setAddError('');
     setAddedSku(null);
     try {
-      await setItem(skuId, quantity);
-      setAddedSku(skuId);
+      await setItem(sku.id, quantity);
+      setAddedSku(sku.id);
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'The SKU could not be added to the cart.');
     } finally {
       setAddingSku(null);
     }
+  };
+
+  const openProduct = (product: CustomerProductDto) => {
+    setSelected(product);
+    setDrawerOpen(true);
+  };
+
+  const closeProduct = () => {
+    setDrawerOpen(false);
+  };
+
+  const stepSku = (sku: CustomerSkuDto, delta: number) => {
+    setSkuQuantities(prev => ({
+      ...prev,
+      [sku.id]: stepQuantity(prev[sku.id] ?? '10', delta, 10, sku.available),
+    }));
   };
 
   const visible = useMemo(() => {
@@ -129,6 +158,7 @@ export const CustomerCatalogView: React.FC = () => {
           <select
             value={brandId}
             onChange={event => setBrandId(event.target.value)}
+            data-testid="catalog-brand-filter"
             className="h-10 px-3 rounded-xl border border-slate-300 text-sm bg-white"
           >
             <option value="">All brands</option>
@@ -141,6 +171,7 @@ export const CustomerCatalogView: React.FC = () => {
           <select
             value={seriesId}
             onChange={event => setSeriesId(event.target.value)}
+            data-testid="catalog-series-filter"
             className="h-10 px-3 rounded-xl border border-slate-300 text-sm bg-white"
           >
             <option value="">All series</option>
@@ -153,6 +184,7 @@ export const CustomerCatalogView: React.FC = () => {
           <select
             value={tagId}
             onChange={event => setTagId(event.target.value)}
+            data-testid="catalog-tag-filter"
             className="h-10 px-3 rounded-xl border border-slate-300 text-sm bg-white"
           >
             <option value="">All features</option>
@@ -184,7 +216,10 @@ export const CustomerCatalogView: React.FC = () => {
             <button
               key={product.id}
               type="button"
-              onClick={() => setSelected(product)}
+              onClick={event => {
+                event.currentTarget.focus();
+                openProduct(product);
+              }}
               data-testid="catalog-product-card"
               className="text-left bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-[#ff681e] transition-colors"
             >
@@ -222,145 +257,154 @@ export const CustomerCatalogView: React.FC = () => {
         })}
       </div>
 
-      {selected && (
-        <div
-          className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          data-testid="catalog-detail"
-        >
-          <div className="bg-white w-full sm:max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl">
-            <div className="flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-slate-200">
-              <div>
-                <div className="text-[10px] font-mono text-slate-400">{selected.productCode}</div>
-                <h2 className="text-lg font-bold">{selected.titleEn}</h2>
-                <div className="text-xs text-slate-500">{selected.brandName}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                className="w-9 h-9 rounded-full border border-slate-200 grid place-items-center"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
+      <SideDrawer
+        open={drawerOpen}
+        onClose={closeProduct}
+        onClosed={() => setSelected(null)}
+        title={selected?.titleEn ?? 'Product details'}
+        subtitle={selected ? `${selected.productCode} · ${selected.brandName}` : undefined}
+        testId="catalog-detail"
+        closeTestId="catalog-detail-close"
+      >
+        {selected && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {selected.images.map(image => (
+                <img
+                  key={image.id}
+                  src={image.url}
+                  alt={selected.titleEn}
+                  className="aspect-square w-full rounded-xl border border-slate-200 object-cover"
+                />
+              ))}
             </div>
-            <div className="p-4 sm:p-5 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {selected.images.map(image => (
-                  <img
-                    key={image.id}
-                    src={image.url}
-                    alt={selected.titleEn}
-                    className="w-full aspect-square object-cover rounded-xl border border-slate-200"
-                  />
-                ))}
+            <p className="text-sm leading-relaxed text-slate-600">{selected.descriptionEn}</p>
+            <dl className="grid gap-2 text-xs sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <dt className="text-slate-400">Material</dt>
+                <dd className="font-semibold">{selected.material}</dd>
               </div>
-              <p className="text-sm text-slate-600 leading-relaxed">{selected.descriptionEn}</p>
-              <dl className="grid sm:grid-cols-2 gap-2 text-xs">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                  <dt className="text-slate-400">Material</dt>
-                  <dd className="font-semibold">{selected.material}</dd>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <dt className="text-slate-400">Size / capacity</dt>
+                <dd className="font-semibold">{selected.capacityOrSize}</dd>
+              </div>
+            </dl>
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-700">Colours</div>
+              {addError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-[11px] text-rose-800"
+                >
+                  {addError}
                 </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                  <dt className="text-slate-400">Size / capacity</dt>
-                  <dd className="font-semibold">{selected.capacityOrSize}</dd>
-                </div>
-              </dl>
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-700">Colours</div>
-                {addError && (
-                  <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-[11px] text-rose-800">
-                    {addError}
-                  </div>
-                )}
-                {selected.skus.map(sku => {
-                  const inCart = cart?.items.find(item => item.skuId === sku.id);
-                  const disabled = sku.available < 10;
-                  return (
-                    <div
-                      key={sku.id}
-                      className="p-3 rounded-xl border border-slate-200 space-y-2"
-                      data-testid="catalog-sku-row"
-                      data-sku-code={sku.skuCode}
-                    >
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span
-                          className="w-5 h-5 rounded-full border border-slate-300"
-                          style={{ backgroundColor: sku.colorHex }}
-                        />
-                        <span className="font-semibold">{sku.colorNameEn}</span>
-                        <span className="font-mono text-[10px] text-slate-400">{sku.skuCode}</span>
-                        {inCart && (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
-                            In cart: {inCart.quantity}
-                          </span>
-                        )}
-                        <span className="ml-auto text-right">
-                          <span className="font-bold">{usdFromCents(sku.basePriceCents)}</span>
-                          <span className="text-[10px] text-slate-400 ml-2">
-                            {sku.available} pcs available
-                          </span>
+              )}
+              {selected.skus.map(sku => {
+                const inCart = cart?.items.find(item => item.skuId === sku.id);
+                const disabled = sku.available < 10;
+                return (
+                  <div
+                    key={sku.id}
+                    className="space-y-2 rounded-xl border border-slate-200 p-3"
+                    data-testid="catalog-sku-row"
+                    data-sku-code={sku.skuCode}
+                  >
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span
+                        className="h-5 w-5 rounded-full border border-slate-300"
+                        style={{ backgroundColor: sku.colorHex }}
+                      />
+                      <span className="font-semibold">{sku.colorNameEn}</span>
+                      <span className="font-mono text-[10px] text-slate-400">{sku.skuCode}</span>
+                      {inCart && (
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          In cart: {inCart.quantity}
                         </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-[11px] text-slate-500">
-                          Quantity (MOQ 10)
-                          <QuantityField
-                            min={10}
-                            max={sku.available}
-                            value={skuQuantities[sku.id] ?? '10'}
-                            onValueChange={value =>
-                              setSkuQuantities(prev => ({ ...prev, [sku.id]: value }))
-                            }
-                            disabled={disabled}
-                            className="ml-2 w-24 h-9 px-2 rounded-lg border border-slate-300 text-center text-xs disabled:bg-slate-100"
-                            testId="catalog-add-qty"
-                            ariaLabel={`Quantity for ${sku.skuCode}`}
-                          />
-                        </label>
+                      )}
+                      <span className="ml-auto text-right">
+                        <span className="font-bold">{usdFromCents(sku.basePriceCents)}</span>
+                        <span className="ml-2 text-[10px] text-slate-400">
+                          {sku.available} pcs available
+                        </span>
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] text-slate-500">Quantity (MOQ 10)</span>
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          disabled={disabled || addingSku === sku.id}
-                          onClick={() => void addSku(sku.id)}
-                          data-testid="catalog-add-submit"
-                          className="min-h-[38px] px-3 rounded-xl bg-[#ff681e] text-white text-xs font-bold disabled:opacity-40"
+                          disabled={disabled}
+                          onClick={() => stepSku(sku, -1)}
+                          data-testid="catalog-qty-decrease"
+                          aria-label={`Decrease quantity for ${sku.skuCode}`}
+                          className="grid h-9 w-9 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 disabled:opacity-40"
                         >
-                          {addingSku === sku.id
-                            ? 'Saving…'
-                            : inCart
-                              ? 'Update cart'
-                              : 'Add to cart'}
+                          <Minus className="h-3.5 w-3.5" />
                         </button>
-                        {addedSku === sku.id && (
-                          <span className="text-[11px] text-emerald-700 flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" /> Added to the company shared cart
-                          </span>
-                        )}
-                        {disabled && (
-                          <span className="text-[11px] text-amber-700">
-                            Fewer than 10 PCS available.
-                          </span>
-                        )}
+                        <QuantityField
+                          min={10}
+                          max={sku.available}
+                          value={skuQuantities[sku.id] ?? '10'}
+                          onValueChange={value =>
+                            setSkuQuantities(prev => ({ ...prev, [sku.id]: value }))
+                          }
+                          disabled={disabled}
+                          className="h-9 w-16 rounded-lg border border-slate-300 px-1 text-center text-xs disabled:bg-slate-100"
+                          testId="catalog-add-qty"
+                          ariaLabel={`Quantity for ${sku.skuCode}`}
+                        />
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => stepSku(sku, 1)}
+                          data-testid="catalog-qty-increase"
+                          aria-label={`Increase quantity for ${sku.skuCode}`}
+                          className="grid h-9 w-9 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 disabled:opacity-40"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
                       </div>
+                      <button
+                        type="button"
+                        disabled={disabled || addingSku === sku.id}
+                        onClick={() => void addSku(sku)}
+                        data-testid="catalog-add-submit"
+                        className="min-h-[38px] rounded-xl bg-[#ff681e] px-3 text-xs font-bold text-white disabled:opacity-40"
+                      >
+                        {addingSku === sku.id
+                          ? 'Saving…'
+                          : inCart
+                            ? 'Update cart'
+                            : 'Add to cart'}
+                      </button>
+                      {addedSku === sku.id && (
+                        <span className="flex items-center gap-1 text-[11px] text-emerald-700">
+                          <Check className="h-3.5 w-3.5" /> Added to the company shared cart
+                        </span>
+                      )}
+                      {disabled && (
+                        <span className="text-[11px] text-amber-700">
+                          Fewer than 10 PCS available.
+                        </span>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
-              <div className="rounded-xl bg-[#fff7f2] border border-[#ffeadb] p-3 text-[11px] text-[#8a4d2c] flex items-start gap-2">
-                <ShoppingBag className="w-4 h-4 mt-0.5 shrink-0" />
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <span>Shared company cart · order requests do not reserve stock.</span>
-                  <HelpTooltip label="Shared cart and reservation details" align="right">
-                    The cart is shared by every account of your company. Submitting an order creates
-                    a pending request; it does not reserve stock.
-                  </HelpTooltip>
-                </span>
-              </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-start gap-2 rounded-xl border border-[#ffeadb] bg-[#fff7f2] p-3 text-[11px] text-[#8a4d2c]">
+              <ShoppingBag className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span>Shared company cart · order requests do not reserve stock.</span>
+                <HelpTooltip label="Shared cart and reservation details" align="right">
+                  The cart is shared by every account of your company. Submitting an order creates a
+                  pending request; it does not reserve stock.
+                </HelpTooltip>
+              </span>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </SideDrawer>
     </div>
   );
 };

@@ -1,5 +1,7 @@
 import { apiJson, apiUpload } from '../auth/api';
 import type {
+  AdminCustomerCompanyDto,
+  AdminSalesUserDto,
   BrandDto,
   CartDto,
   CommitImportResultDto,
@@ -347,4 +349,16 @@ export async function getPendingOrderImpact(
       `/api/admin/orders/impact?${params.toString()}`
     )
   ).impact;
+}
+
+/** Admin-only company projection behind the existing `companies.manage` permission. */
+export async function getAdminCompany(id: string): Promise<AdminCustomerCompanyDto> {
+  return (
+    await apiJson<{ company: AdminCustomerCompanyDto }>('GET', `/api/admin/companies/${id}`)
+  ).company;
+}
+
+/** Active salespeople for the assignment display; existing `companies.manage` route. */
+export async function listSalesUsers(): Promise<AdminSalesUserDto[]> {
+  return (await apiJson<{ users: AdminSalesUserDto[] }>('GET', '/api/admin/sales-users')).users;
 }
