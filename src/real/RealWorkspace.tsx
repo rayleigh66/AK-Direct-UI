@@ -10,10 +10,12 @@ import {
   Smartphone,
   Sparkles,
   Upload,
+  Users,
 } from 'lucide-react';
 import type { AuthUserDto } from '../auth/api';
 import { CustomerCatalogView } from './views/CustomerCatalogView';
 import { AdminCatalogView } from './views/AdminCatalogView';
+import { AdminCustomersView } from './views/AdminCustomersView';
 import { InventoryView } from './views/InventoryView';
 import { ImportView } from './views/ImportView';
 import { SetupView } from './views/SetupView';
@@ -38,7 +40,8 @@ type TabKey =
   | 'inventory'
   | 'import'
   | 'setup'
-  | 'tiers';
+  | 'tiers'
+  | 'customers';
 
 const TAB_LABELS: Record<TabKey, { en: string; zh: string; icon: React.ReactNode }> = {
   catalog: { en: 'Catalogue', zh: '商品目录', icon: <Package className="w-4 h-4" /> },
@@ -49,6 +52,7 @@ const TAB_LABELS: Record<TabKey, { en: string; zh: string; icon: React.ReactNode
   import: { en: 'Import', zh: '导入', icon: <Upload className="w-4 h-4" /> },
   setup: { en: 'Setup', zh: '基础设置', icon: <Settings2 className="w-4 h-4" /> },
   tiers: { en: 'Customer tiers', zh: '客户等级与折扣', icon: <Sparkles className="w-4 h-4" /> },
+  customers: { en: 'Customers', zh: '客户管理', icon: <Users className="w-4 h-4" /> },
 };
 
 const CartBadge: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
@@ -95,6 +99,7 @@ const WorkspaceShell: React.FC<{
     } else if (can('inventory.read') || can('inventory.manage')) {
       result.push('inventory');
     }
+    if (can('companies.manage')) result.push('customers');
     if (can('sales.read_all') || can('sales.read_assigned')) {
       // Sales land on Orders; administrators keep their catalogue workspace
       // first and see Orders after the configuration tabs.
@@ -202,6 +207,14 @@ const WorkspaceShell: React.FC<{
         {activeTab === 'import' && <ImportView />}
         {activeTab === 'setup' && <SetupView />}
         {activeTab === 'tiers' && <TierPreviewView />}
+        {activeTab === 'customers' && (
+          <AdminCustomersView
+            canManageCompanies={can('companies.manage')}
+            canManageAccounts={can('accounts.manage')}
+            canManageBrands={can('brands.manage')}
+            canReadCatalog={can('catalog.read') || can('catalog.manage')}
+          />
+        )}
       </main>
 
       <footer className="border-t border-[var(--line)] bg-white py-4 text-center text-[10px] tracking-wide text-[var(--muted)]">

@@ -287,6 +287,70 @@ export async function listAllCompanies(pool: DbPool): Promise<CompanyDto[]> {
   return result.rows.map(companyDto);
 }
 
+export interface CustomerAccountDto {
+  id: string;
+  username: string;
+  accountLetter: string;
+  status: 'active' | 'suspended';
+  mustChangePassword: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Admin-only read of a company's accounts. Password hashes and temporary
+ * passwords are never selected or returned.
+ */
+export async function listCompanyAccounts(
+  pool: DbPool,
+  companyId: string
+): Promise<CustomerAccountDto[]> {
+  const company = await pool.query('SELECT 1 FROM customer_companies WHERE id = $1', [companyId]);
+  if (!company.rowCount) throw new HttpError(404, 'company_not_found', 'Company not found.');
+  const result = await pool.query<{
+    id: string;
+    username: string;
+    account_letter: string;
+    status: 'active' | 'suspended';
+    must_change_password: boolean;
+    last_login_at: Date | null;
+    created_at: Date;
+    updated_at: Date;
+  }>(
+    `SELECT id, username, account_letter, status, must_change_password,
+            last_login_at, created_at, updated_at
+     FROM customer_users
+     WHERE company_id = $1
+     ORDER BY account_letter`,
+    [companyId]
+  );
+  return result.rows.map(row => ({
+    id: row.id,
+    username: row.username,
+    accountLetter: row.account_letter,
+    status: row.status,
+    mustChangePassword: row.must_change_password,
+    lastLoginAt: row.last_login_at ? new Date(row.last_login_at).toISOString() : undefined,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  }));
+}
+
+/** Admin-only read of the brand grants held by a company. */
+export async function listCompanyBrandIds(
+  pool: DbPool,
+  companyId: string
+): Promise<string[]> {
+  const company = await pool.query('SELECT 1 FROM customer_companies WHERE id = $1', [companyId]);
+  if (!company.rowCount) throw new HttpError(404, 'company_not_found', 'Company not found.');
+  const result = await pool.query<{ brand_id: string }>(
+    'SELECT brand_id FROM brand_grants WHERE company_id = $1 ORDER BY brand_id',
+    [companyId]
+  );
+  return result.rows.map(row => row.brand_id);
+}
+
 export async function listCompaniesForAuth(
   pool: DbPool,
   auth: AuthContext
