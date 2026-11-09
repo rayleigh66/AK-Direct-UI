@@ -447,6 +447,25 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   );
   await screenshot(page, `admin-customer-drawer-${testInfo.project.name}`);
 
+  if (!mobile) {
+    for (const width of [375, 390, 430, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(customerDrawer).toBeVisible();
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      expect(overflow).toBeLessThanOrEqual(1);
+      const box = await customerDrawer.boundingBox();
+      expect(box!.width).toBeLessThanOrEqual(width + 1);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  } else {
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  }
+
   await customerDrawer.getByTestId('customer-detail-back').click();
   await expect(page.getByTestId('order-detail-drawer')).toContainText(orderNo);
   await page.keyboard.press('Escape');
