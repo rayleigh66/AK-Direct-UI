@@ -242,6 +242,42 @@ describe('administrator warehouse registration', () => {
     expect(within(screen.getByTestId('inventory-row')).getByText('WH-A')).toBeTruthy();
   });
 
+  it.each(['zh', 'en'])('selects the warehouse %s name on each new focus, preserving a focused caret', async language => {
+    await openBoard();
+    const card = screen.getByTestId('warehouse-card-wh-b');
+    fireEvent.click(within(card).getByTestId('warehouse-edit'));
+    const field = within(card).getByTestId(`warehouse-edit-name-${language}`) as HTMLInputElement;
+    const other = within(card).getByTestId(`warehouse-edit-name-${language === 'zh' ? 'en' : 'zh'}`) as HTMLInputElement;
+    act(() => field.focus());
+    expect(field.selectionStart).toBe(0); expect(field.selectionEnd).toBe(field.value.length);
+    field.setSelectionRange(1, 1);
+    fireEvent.pointerDown(field); fireEvent.pointerUp(field); fireEvent.mouseUp(field);
+    expect(field.selectionStart).toBe(1); expect(field.selectionEnd).toBe(1);
+    act(() => other.focus()); act(() => field.focus());
+    expect(field.selectionStart).toBe(0); expect(field.selectionEnd).toBe(field.value.length);
+    expect(api.updateWarehouse).not.toHaveBeenCalled();
+  });
+
+  it('preserves warehouse validation, failed-save feedback and cancellation without changing identity', async () => {
+    await openBoard(); const card = screen.getByTestId('warehouse-card-wh-b');
+    fireEvent.click(within(card).getByTestId('warehouse-edit'));
+    const name = within(card).getByTestId('warehouse-edit-name-zh');
+    fireEvent.change(name, { target: { value: '  ' } });
+    fireEvent.click(within(card).getByTestId('warehouse-edit-save'));
+    expect(api.updateWarehouse).not.toHaveBeenCalled();
+    expect(within(card).getByRole('alert').textContent).toContain('required');
+    fireEvent.change(name, { target: { value: '未保存名称' } });
+    vi.mocked(api.updateWarehouse).mockRejectedValueOnce(new Error('Name update rejected.'));
+    fireEvent.click(within(card).getByTestId('warehouse-edit-save'));
+    await within(card).findByText('Name update rejected.');
+    expect((name as HTMLInputElement).value).toBe('未保存名称');
+    fireEvent.click(within(card).getByTestId('warehouse-edit-cancel'));
+    expect(within(card).queryByTestId('warehouse-edit-name-zh')).toBeNull();
+    expect(serverWarehouses[1]).toMatchObject({ id: 'wh-b', code: 'WH-B', name: '广州仓', nameEn: 'Guangzhou' });
+    fireEvent.click(within(card).getByTestId('warehouse-edit'));
+    expect((within(card).getByTestId('warehouse-edit-name-zh') as HTMLInputElement).value).toBe('广州仓');
+  });
+
   it('does not expose warehouse management or drag controls to read-only users', async () => {
     render(<InventoryView canManage={false} canRead internal />);
     await screen.findAllByTestId('inventory-row');

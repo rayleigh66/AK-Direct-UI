@@ -17,6 +17,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   const password = process.env.REAL_E2E_ADMIN_PASSWORD;
   test.skip(!email || !password, 'Requires the isolated real-auth stack and admin.');
   const mobile = info.project.name.includes('mobile');
+  const viewportName = mobile ? `mobile-${page.viewportSize()!.width}` : 'desktop-1440';
   const suffix = `${Date.now()}${mobile ? 'M' : 'D'}`;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -51,7 +52,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
     if (request.method() === 'PATCH' && request.url().includes('/api/admin/inventory/')) patches++;
   });
   await fits(page);
-  await capture(page, `warehouse-${mobile ? 'mobile-390' : 'desktop-1440'}`);
+  await capture(page, `warehouse-${viewportName}`);
   if (!mobile) {
     const dragSource = page.getByTestId('warehouse-sku-drag');
     const dropTarget = page.getByTestId(`warehouse-card-${target.id}`);
@@ -70,7 +71,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   expect(registrations).toBe(0); expect(patches).toBe(0);
   await expect(dialog.getByLabel('登记后在手数量', { exact: true })).toHaveValue('');
   await expect(dialog.getByLabel('登记原因', { exact: true })).toHaveValue('');
-  await capture(page, `warehouse-confirm-${mobile ? 'mobile-390' : 'desktop-1440'}`);
+  await capture(page, `warehouse-confirm-${viewportName}`);
   // Escape cancels without any POST; selection opens the exact same dialog again.
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible(); expect(registrations).toBe(0);
@@ -86,7 +87,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   await dialog.getByLabel('其中不可售数量', { exact: true }).fill('1');
   await dialog.getByLabel('登记原因', { exact: true }).fill('目标仓首次实物盘点');
   await fits(page);
-  await capture(page, `warehouse-filled-${mobile ? 'mobile-390' : 'desktop-1440'}`);
+  await capture(page, `warehouse-filled-${viewportName}`);
   await dialog.getByRole('button', { name: '确认登记', exact: true }).click();
   await expect(dialog).not.toBeVisible(); expect(registrations).toBe(1); expect(patches).toBe(0);
   const read = async () => (await (await page.request.get(`/api/admin/inventory?skuId=${sku.id}`)).json()).inventory;
@@ -111,10 +112,35 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   await page.getByTestId('inventory-adjust-submit').click();
   expect((await conflict).status()).toBe(409);
   expect((await read()).find((row: { warehouseId: string }) => row.warehouseId === target.id)).toMatchObject({ onHand: 9, version: 2 });
+  await page.getByRole('button', { name: /Retry/ }).click();
+  await expect(page.getByTestId('inventory-row').filter({ hasText: sku.skuCode })).toHaveCount(2);
+  await expect(page.getByTestId('inventory-adjust-onhand')).toHaveValue('9');
+  await page.getByTestId('inventory-adjust-onhand').fill('10');
+  const adjusted = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().includes(`/api/admin/inventory/${sku.id}/`));
+  await page.getByTestId('inventory-adjust-submit').click();
+  expect((await adjusted).status()).toBe(200);
+  await expect(page.getByTestId('inventory-adjust-onhand')).not.toBeVisible();
+  expect((await read()).find((row: { warehouseId: string }) => row.warehouseId === target.id)).toMatchObject({ onHand: 10, version: 3 });
   // Names reuse the name-only API; immutable identifiers and inventory stay intact.
   await page.getByRole('button', { name: '仓库视图', exact: true }).click();
   const card = page.getByTestId(`warehouse-card-${target.id}`);
   await card.getByTestId('warehouse-edit').click();
+  for (const language of ['zh', 'en']) {
+    const field = card.getByTestId(`warehouse-edit-name-${language}`);
+    const selection = () => field.evaluate((element: HTMLInputElement) => ({ start: element.selectionStart, end: element.selectionEnd, length: element.value.length }));
+    await card.getByTestId('warehouse-edit-save').focus();
+    if (mobile) await field.tap(); else await field.click();
+    await expect.poll(selection).toMatchObject({ start: 0, end: (await selection()).length });
+    // Another click in the same focus session can place a normal caret.
+    if (mobile) await field.tap({ position: { x: 15, y: 20 } });
+    else await field.click({ position: { x: 15, y: 20 } });
+    await expect.poll(async () => { const range = await selection(); return range.start === range.end; }).toBe(true);
+    await card.getByTestId('warehouse-edit-cancel').focus();
+    await field.focus();
+    await expect.poll(selection).toMatchObject({ start: 0, end: (await selection()).length });
+  }
+  await fits(page);
+  await capture(page, `warehouse-name-editor-${viewportName}`);
   await card.getByTestId('warehouse-edit-name-zh').fill('广州盘点仓');
   await card.getByTestId('warehouse-edit-name-en').fill('Guangzhou counted');
   await card.getByTestId('warehouse-edit-save').click();

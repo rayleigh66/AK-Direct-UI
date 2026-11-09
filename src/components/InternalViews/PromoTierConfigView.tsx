@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AccessBoundary } from '../AccessBoundary';
 import { SearchableCombobox } from '../ui/SearchableCombobox';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import { Promotion } from '../../types';
 import {
   Sparkles,
@@ -143,7 +144,7 @@ export const PromoTierConfigView: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 促销批发价 USD
               </label>
-              <input
+              <SelectAllOnFocusInput
                 type="number"
                 step="0.1"
                 min="0.01"
@@ -308,7 +309,7 @@ export const PromoTierConfigView: React.FC = () => {
                     <td className="p-3 font-semibold text-slate-800">{tier.name}</td>
                     <td className="p-3 text-right font-mono">
                       {isEditing ? (
-                        <input
+                        <SelectAllOnFocusInput
                           type="number"
                           min={0}
                           value={editThreshold}
@@ -321,7 +322,7 @@ export const PromoTierConfigView: React.FC = () => {
                     </td>
                     <td className="p-3 text-right font-mono text-emerald-700 font-bold">
                       {isEditing ? (
-                        <input
+                        <SelectAllOnFocusInput
                           type="number"
                           min={0}
                           max={100}

@@ -27,6 +27,7 @@ import type {
   SeriesDefinition,
 } from '../../types';
 import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 
 const TONES: FeatureTagTone[] = ['orange', 'blue', 'sky', 'green', 'grey', 'purple'];
 const CATEGORIES: Product['category'][] = [
@@ -622,7 +623,7 @@ export const ProductAdminView: React.FC = () => {
                         </label>
                         <label className="text-[11px] font-semibold text-slate-600">
                           基础批发价 (USD)
-                          <input
+                          <SelectAllOnFocusInput
                             type="number"
                             min="0.01"
                             step="0.01"

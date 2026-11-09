@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, ImagePlus, Plus, Search, Star, Trash2 } from 'lucide-react';
+import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 import {
   createProduct,
   createSku,
@@ -896,7 +897,7 @@ const SkuManager: React.FC<{
           </label>
           <label className="text-xs font-semibold text-slate-700">
             USD price
-            <input
+            <SelectAllOnFocusInput
               type="number"
               min="0.01"
               step="0.01"
@@ -997,7 +998,7 @@ const SkuRow: React.FC<{
         >
           <label className="text-[11px] font-semibold text-slate-600">
             Price USD
-            <input
+            <SelectAllOnFocusInput
               type="number"
               min="0.01"
               step="0.01"

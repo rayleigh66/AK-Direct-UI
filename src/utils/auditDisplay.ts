@@ -211,7 +211,9 @@ export function auditDetailsLabel(details: string): string {
     if (match) return pattern.render(match);
   }
   if (/[一-鿿]/.test(details)) return details;
-  return '业务明细已记录（原始审计字段保留）。';
+  // Never hide an unrecognised record behind a generic sentence. The audit view
+  // exposes the untouched raw action/details in an expandable block.
+  return '该业务明细尚未建立中文翻译，请展开“查看原始明细”核对原文。';
 }
 
 export function auditSearchText(log: AuditLog): string {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 import {
   createSeries,
   createTag,
@@ -250,7 +251,7 @@ const SimpleCreate: React.FC<{
       {fields.map(field => (
         <label key={field.key} className="text-[11px] font-semibold text-slate-600 flex-1 min-w-[130px]">
           {field.label}
-          <input
+          <SelectAllOnFocusInput
             value={values[field.key] ?? ''}
             onChange={event => setValues({ ...values, [field.key]: event.target.value })}
             className={`${inputClass} mt-1`}

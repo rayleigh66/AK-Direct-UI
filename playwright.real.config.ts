@@ -29,5 +29,16 @@ export default defineConfig({
         hasTouch: true,
       },
     },
+    {
+      name: 'real-mobile-430',
+      // Reuse the admin fixture; customer accounts remain isolated per existing project.
+      testMatch: '**/warehouse-registration.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 430, height: 932 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
   ],
 });

@@ -46,13 +46,16 @@ The stored values (`PENDING_CONFIRMATION`, `CANCELLED`, etc.), the order state m
 
 ### 1.3 Quantity editing
 
-`src/components/ui/SelectAllOnFocusInput.tsx` selects the existing value only on the first focus. Later clicks place the caret normally; copy, paste, keyboard editing and touch selection are untouched. A pointer focus suppresses the mouseup caret collapse once.
+`src/components/ui/SelectAllOnFocusInput.tsx` selects the existing value whenever the input is entered from a blurred state. Repeated pointer clicks while the same focus session is active place the caret normally, and copy, paste, keyboard editing, mobile selection and Chinese IME composition are untouched. The pointer-focus mouseup collapse is suppressed once per focus session. The control is used for quantity, promotion price, tier threshold/discount, company code/name/nickname, warehouse names, sales payment/shipping/note fields and catalogue price fields. It is deliberately **not** applied to passwords, search/filter fields, dates or checkboxes.
 
 `src/components/ui/QuantityField.tsx` adds:
 
-- a focused-only wheel listener, so hovering a card does not hijack page scroll;
-- a 30-unit damping accumulator and 90 ms rate limit, turning a wheel gesture into one PCS step;
-- clamping to MOQ/stock and normal keyboard editing.
+- a wheel listener scoped to the numeric field, so hovering it steps the draft quantity without requiring focus;
+- a 30-unit damping accumulator and 90 ms rate limit, turning a trackpad/wheel gesture into one PCS step;
+- clamping to MOQ/stock and normal keyboard editing;
+- normal page scrolling whenever the pointer is outside the numeric field;
+
+Wheel changes only call the existing draft `onValueChange`; they never bypass the existing save or confirmation flows.
 
 The Mock product card now has a visible quantity input plus **Set**, replacing the old `+10 PCS` accumulation. Invalid values keep the existing order list unchanged and show a toast.
 
@@ -63,7 +66,8 @@ The Mock product card now has a visible quantity input plus **Set**, replacing t
 - `role="combobox"` / `role="listbox"` / `role="option"` and `aria-activedescendant`;
 - ArrowUp/ArrowDown/Enter/Escape;
 - filtering over visible label + hidden keywords;
-- pointer selection with `onMouseDown` protection so the input does not blur before selection.
+- pointer selection with `onMouseDown` protection so the input does not blur before selection;
+- a touch regression test that taps options in a touch-capable browser context at 390 px and 430 px; the existing blur/mousedown ordering was reproduced and passed, so no interaction rewrite was needed.
 
 Promotion options expose SKU code, product code, Chinese product name, English product name and both colour names. Country options combine alpha-3, alpha-2, English name and Chinese name from `src/data/isoCountries.ts` (249 ISO 3166-1 entries; Chinese labels generated with `Intl.DisplayNames`).
 
@@ -71,7 +75,7 @@ Promotion options expose SKU code, product code, Chinese product name, English p
 
 `TierBadge` reads `CustomerCompany.tier_id` against the existing `tierRules`; it never invents a level. The five existing levels render as colored Bronze, Silver, Gold, Platinum and Diamond tags before the customer name in the Mock account list.
 
-`src/utils/auditDisplay.ts` is a presentation dictionary. The stored `action` code, actor, target and raw `details` are untouched; the view translates known action codes and the existing detail templates into Chinese. Unknown detail text falls back to a generic Chinese sentence while the raw record remains in place. Search still matches the raw action/details as well as the Chinese labels.
+`src/utils/auditDisplay.ts` is a presentation dictionary. The stored `action` code, actor, target and raw `details` are untouched; the view translates known action codes and the existing detail templates into Chinese. An untranslated (including unknown English) detail is labelled as untranslated and points the administrator to the raw record instead of being hidden by a generic sentence. Every row has a native, keyboard-accessible **查看原始明细** disclosure showing the raw action code and unmodified details; this adds no new permission and no raw audit record is mutated. Search still matches the raw action/details as well as the Chinese labels.
 
 ### 1.6 Real warehouse names
 
@@ -100,16 +104,17 @@ Real:
 
 - cart entry + quantity badge;
 - tooltip hover / Escape / click;
-- first-focus selection and focused wheel stepping;
+- per-focus selection (including a new focus session after blur);
+- hover wheel stepping without focus, damping and normal page scroll outside the field;
 - direct quantity set and MOQ validation;
 - keyboard activation of the Order List entry;
 - promotion SKU search by code and Chinese/English name;
 - ISO3 search by Chinese name, English name and code;
 - existing tier tags (Gold/Bronze/Diamond);
-- Chinese audit action/detail display;
+- Chinese audit action/detail display plus the expandable raw action/details block;
 - business-order status color and Chinese/English toggle with no overflow.
 
-Existing Mock suites were updated only where the old labels or old `+10` accumulation no longer apply.
+`tests/e2e/combobox-touch.spec.ts` runs in touch-capable Chromium and WebKit contexts at both 390 px and 430 px, taps the ISO3 and promotion SKU inputs/options and checks selection and horizontal overflow. Existing Mock suites were updated only where the old labels or old `+10` accumulation no longer apply.
 
 ### Real Playwright
 
@@ -120,9 +125,9 @@ Existing Mock suites were updated only where the old labels or old `+10` accumul
 | Check | Result |
 | --- | --- |
 | `npm run lint` | PASS |
-| `npm test` | **19 files, 113 tests** |
+| `npm test` | **19 files, 118 tests** |
 | `npm run build` / `verify:assets` | PASS |
-| `npm run test:e2e` | **98 passed / 30 skipped** (existing intentional skips + new desktop-only resize tests) |
+| `npm run test:e2e` | **100 passed / 32 skipped** (existing intentional skips; touch regression runs in Chromium and WebKit) |
 | `npm run test:e2e:preview` | **1 passed** |
 | `npm run api:lint` / `api:build` | PASS (no API change) |
 | `scripts/real-auth-e2e.sh` on isolated Compose project | **4 passed** (catalogue + orders, desktop 1440 / mobile 390) |

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { WarehouseDto } from '../types';
+import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 
 /** The existing name-only API is shared by Setup and the warehouse inventory view. */
 export const WarehouseNameEditor: React.FC<{
@@ -20,12 +21,12 @@ export const WarehouseNameEditor: React.FC<{
   </>;
   return <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
     <label className="min-w-[120px] flex-1 text-xs font-semibold text-slate-600">中文名称
-      <input value={names.name} maxLength={200} disabled={busy} data-testid="warehouse-edit-name-zh"
+      <SelectAllOnFocusInput value={names.name} maxLength={200} disabled={busy} data-testid="warehouse-edit-name-zh"
         onChange={event => setNames(prev => ({ ...prev, name: event.target.value }))}
         className="mt-1 h-11 w-full rounded-lg border border-slate-300 px-2 text-sm" />
     </label>
     <label className="min-w-[120px] flex-1 text-xs font-semibold text-slate-600">English name
-      <input value={names.nameEn} maxLength={200} disabled={busy} data-testid="warehouse-edit-name-en"
+      <SelectAllOnFocusInput value={names.nameEn} maxLength={200} disabled={busy} data-testid="warehouse-edit-name-en"
         onChange={event => setNames(prev => ({ ...prev, nameEn: event.target.value }))}
         className="mt-1 h-11 w-full rounded-lg border border-slate-300 px-2 text-sm" />
     </label>
