@@ -12,6 +12,7 @@ import {
 import type { InventoryRowDto, ProductDto, WarehouseDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { WarehouseInventoryView } from './WarehouseInventoryView';
+import { Localized } from '../internalLanguage';
 
 const inputClass =
   'w-full h-10 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -94,6 +95,7 @@ export const InventoryView: React.FC<{
   if (loading) return <LoadingBlock label="Loading inventory… / 正在加载库存…" />;
 
   return (
+    <Localized>
     <div className="space-y-4">
       {error && <ErrorBlock message={error} onRetry={load} />}
       {notice && (
@@ -253,6 +255,7 @@ export const InventoryView: React.FC<{
       </>}
       {!internal && null}
     </div>
+    </Localized>
   );
 };
 
@@ -282,6 +285,7 @@ const RegisterForm: React.FC<{
   }
 
   return (
+    <Localized>
     <form
       className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200"
       onSubmit={async event => {
@@ -376,6 +380,7 @@ const RegisterForm: React.FC<{
         Register
       </button>
     </form>
+    </Localized>
   );
 };
 
@@ -389,6 +394,7 @@ const AdjustForm: React.FC<{
   const [busy, setBusy] = useState(false);
 
   return (
+    <Localized>
     <form
       className="border-t border-slate-200 bg-slate-50 p-3 flex flex-wrap items-end gap-2 text-xs"
       onSubmit={async event => {
@@ -447,5 +453,6 @@ const AdjustForm: React.FC<{
         Save adjustment
       </button>
     </form>
+    </Localized>
   );
 };

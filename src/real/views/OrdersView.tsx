@@ -17,12 +17,11 @@ import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { LanguageToggle } from '../../components/ui/LanguageToggle';
 import { OrderStatusBadge } from '../../components/ui/OrderStatusBadge';
 import type { OrderStatus } from '../../types';
-import {
-  shippingMethodLabel,
-  type OrderLanguage,
-} from '../../utils/orderStatus';
+import { shippingMethodLabel } from '../../utils/orderStatus';
 import { QuantityField } from '../../components/ui/QuantityField';
 import { HelpTooltip } from '../../components/ui/HelpTooltip';
+import { formatEnglishDate } from '../../utils/dateDisplay';
+import { useInternalLanguage } from '../internalLanguage';
 
 type OrderView = CustomerOrderDto | InternalOrderDto;
 
@@ -32,11 +31,6 @@ function isInternal(order: OrderView): order is InternalOrderDto {
 
 function pieces(order: OrderView): number {
   return order.lines.reduce((sum, line) => sum + line.quantity, 0);
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = ({ scope }) => {
@@ -52,8 +46,12 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const [language, setLanguage] = useState<OrderLanguage>('en');
-  const text = (en: string, zh: string) => (language === 'zh' ? zh : en);
+  const { language, setLanguage } = useInternalLanguage();
+  const text = (en: string, zh: string) => (scope === 'customer' ? en : language === 'zh' ? zh : en);
+  const localizedError = (value: string) =>
+    scope === 'customer' || language === 'en' || /[\u3400-\u9fff]/.test(value)
+      ? value
+      : '操作失败，请重试或联系管理员。';
 
   const loadList = async (): Promise<void> => {
     setError('');
@@ -167,7 +165,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       />
     );
   }
-  if (error) return <ErrorBlock message={error} onRetry={load} />;
+  if (error) return <ErrorBlock message={localizedError(error)} onRetry={load} />;
 
   return (
     <div className="space-y-4">
@@ -216,7 +214,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       )}
       {actionError && (
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
-          {actionError}
+          {localizedError(actionError)}
         </div>
       )}
 
@@ -251,7 +249,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                     {order.company.customerCode} · {order.company.shortName}
                   </span>
                 )}
-                <span className="ml-auto text-slate-500">{formatDate(order.submittedAt)}</span>
+                <span className="ml-auto text-slate-500">{formatEnglishDate(order.submittedAt)}</span>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
                 <span>
@@ -262,7 +260,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                 </span>
                 <span>
                   {order.shippingMethod} · {order.destinationCountryAlpha3} ·{' '}
-                  {order.expectedShipDate}
+                  {formatEnglishDate(order.expectedShipDate)}
                 </span>
                 {isInternal(order) && (
                   <span>{text('Buyer', '下单人')} {order.submittedByUsername}</span>
@@ -295,7 +293,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                 />
                 <span className="text-[11px] text-slate-500">
                   {text('Revision', '版本')} {detail.revision} ·{' '}
-                  {text('updated', '更新于')} {formatDate(detail.updatedAt)}
+                  {text('updated', '更新于')} {formatEnglishDate(detail.updatedAt)}
                 </span>
                 <button
                   type="button"
@@ -399,7 +397,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                       ? detail.shippingMethod
                       : shippingMethodLabel(detail.shippingMethod, language)}{' '}
                     · {detail.destinationCountryAlpha3} ·{' '}
-                    {text('expected ship', '预计发货')} {detail.expectedShipDate}
+                    {text('expected ship', '预计发货')} {formatEnglishDate(detail.expectedShipDate)}
                   </div>
                   {detail.shippingRequirements && (
                     <div className="text-slate-600 mt-1">{detail.shippingRequirements}</div>
@@ -441,7 +439,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                       {'actorLabel' in event && (
                         <span className="text-slate-400">by {event.actorLabel}</span>
                       )}
-                      <span className="ml-auto text-slate-400">{formatDate(event.createdAt)}</span>
+                      <span className="ml-auto text-slate-400">{formatEnglishDate(event.createdAt)}</span>
                     </div>
                   ))}
                 </div>

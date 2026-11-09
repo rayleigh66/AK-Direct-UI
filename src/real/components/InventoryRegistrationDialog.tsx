@@ -4,6 +4,7 @@ import { AuthApiError } from '../../auth/api';
 import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 import { listAdminInventory, registerInventory } from '../api';
 import type { InventoryRowDto, WarehouseDto } from '../types';
+import { Localized } from '../internalLanguage';
 
 export const InventoryRegistrationDialog: React.FC<{
   sku: { id: string; skuCode: string; label: string };
@@ -80,7 +81,7 @@ export const InventoryRegistrationDialog: React.FC<{
     finally { pending.current = false; if (alive.current) setBusy(false); }
   };
   const fieldClass = 'mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm focus:ring-2 focus:ring-[#ff681e] focus:outline-none';
-  return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 sm:p-6">
+  return <Localized><div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 sm:p-6">
     <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId}
       className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl bg-white p-5 sm:p-6 shadow-xl outline-none"
       onKeyDown={event => {
@@ -124,5 +125,5 @@ export const InventoryRegistrationDialog: React.FC<{
       </form>}
       {!checking && !committed && !verified && <button type="button" disabled={busy} className="mt-3 min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold" onClick={() => void lookup()}>查询最新状态</button>}
     </div>
-  </div>;
+  </div></Localized>;
 };

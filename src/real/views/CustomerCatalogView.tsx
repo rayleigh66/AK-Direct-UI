@@ -98,12 +98,12 @@ export const CustomerCatalogView: React.FC<{ onOpenCart?: () => void }> = ({ onO
     });
   }, [products, search, brandId, seriesId, tagId]);
 
-  if (loading) return <LoadingBlock label="Loading catalogue… / 正在加载目录…" />;
+  if (loading) return <LoadingBlock label="Loading catalogue…" />;
   if (error) return <ErrorBlock message={error} onRetry={load} />;
   if (!products.length) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">
-        No authorised products are published for your company yet. / 贵公司暂无可浏览的已上架商品。
+        No authorised products are published for your company yet.
       </div>
     );
   }
@@ -288,7 +288,7 @@ export const CustomerCatalogView: React.FC<{ onOpenCart?: () => void }> = ({ onO
                 </div>
               </dl>
               <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-700">Colours / 颜色</div>
+                <div className="text-xs font-bold text-slate-700">Colours</div>
                 {addError && (
                   <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-[11px] text-rose-800">
                     {addError}

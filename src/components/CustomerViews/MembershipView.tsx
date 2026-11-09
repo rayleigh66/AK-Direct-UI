@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { useApp } from '../../context/AppContext';
+import { formatEnglishDate } from '../../utils/dateDisplay';
 import { customerStatus, customerTierName } from '../../utils/customerDisplay';
 import { HelpTooltip } from '../ui/HelpTooltip';
 import {
@@ -179,7 +180,7 @@ export const MembershipView: React.FC = () => {
           <div>
             <div className="text-slate-400">Last effective purchase:</div>
             <div className="font-mono font-bold text-slate-800 text-sm mt-0.5">
-              {currentCompany.last_effective_purchase_date}
+              {formatEnglishDate(currentCompany.last_effective_purchase_date)}
             </div>
             <div className="text-[10px] text-slate-500 mt-1">
               Based on recorded full payment, not order submission
@@ -265,7 +266,7 @@ export const MembershipView: React.FC = () => {
               {companyOrders.map(o => (
                 <tr key={o.id} className="hover:bg-slate-50/50">
                   <td className="p-3 pl-4 font-mono font-bold text-slate-900">{o.order_no}</td>
-                  <td className="p-3 text-slate-500">{o.created_at.slice(0, 10)}</td>
+                  <td className="p-3 text-slate-500">{formatEnglishDate(o.created_at)}</td>
                   <td className="p-3 font-mono text-slate-700">{o.created_by_username}</td>
                   <td className="p-3">
                     <span className="font-semibold text-slate-800">{customerStatus(o.status)}</span>

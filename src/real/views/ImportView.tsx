@@ -1,9 +1,15 @@
 import React, { useRef, useState } from 'react';
-import { CheckCircle2, FileSpreadsheet, Upload, X } from 'lucide-react';
+import { CheckCircle2, Download, FileSpreadsheet, Upload, X } from 'lucide-react';
 import { parseCsv, parseInventoryTable, type InventoryImportLine } from '../../utils/inventoryImport';
 import { commitImport, previewImport } from '../api';
 import type { CommitImportResultDto, ImportPreviewDto } from '../types';
 import { ErrorBlock } from '../RealWorkspace';
+import { Localized } from '../internalLanguage';
+import {
+  INVENTORY_TEMPLATE_CSV,
+  INVENTORY_TEMPLATE_HEADERS,
+  downloadInventoryTemplate,
+} from '../../utils/inventoryTemplate';
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
@@ -90,6 +96,7 @@ export const ImportView: React.FC = () => {
   };
 
   return (
+    <Localized>
     <div className="space-y-4">
       {error && <ErrorBlock message={error} />}
 
@@ -130,13 +137,26 @@ export const ImportView: React.FC = () => {
           )}
         </div>
 
-        <details className="text-[11px] text-slate-500">
-          <summary className="cursor-pointer font-semibold">Download template / 下载模板</summary>
-          <pre className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-200 overflow-x-auto">
-{`sku_code,warehouse_code,on_hand,unsellable
-AKT-0001-BLK,WH-SH,120,0`}
-          </pre>
-        </details>
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--subtle-bg)] p-3 text-[11px] text-[var(--muted)]">
+          <div className="min-w-0 flex-1">
+            <div className="font-bold text-[var(--ink)]">Download CSV template / 下载 CSV 模板</div>
+            <code title={INVENTORY_TEMPLATE_CSV.trim()} className="mt-1 block break-all font-mono text-[10px]">
+              {INVENTORY_TEMPLATE_HEADERS.join(',')}
+            </code>
+            <div className="mt-1">
+              Header-only file, ready for Excel. Downloading never writes inventory.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={downloadInventoryTemplate}
+            data-testid="import-template-download"
+            className="fo-btn flex items-center gap-1.5"
+            aria-label="Download CSV template"
+          >
+            <Download className="h-4 w-4" /> Download CSV template
+          </button>
+        </div>
       </section>
 
       {preview && !result && (
@@ -214,5 +234,6 @@ AKT-0001-BLK,WH-SH,120,0`}
         </section>
       )}
     </div>
+    </Localized>
   );
 };

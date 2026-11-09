@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Localized } from '../internalLanguage';
 import type { WarehouseDto } from '../types';
 import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 
@@ -11,15 +12,15 @@ export const WarehouseNameEditor: React.FC<{
   const [names, setNames] = useState({ name: '', nameEn: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  if (!editing) return <>
+  if (!editing) return <Localized><>
     <span className="font-semibold">{warehouse.nameEn}</span>
     <span className="text-slate-500">{warehouse.name}</span>
     <button type="button" data-testid="warehouse-edit" className="min-h-11 px-3 rounded-lg border border-slate-300 text-xs font-semibold"
       onClick={() => { setNames({ name: warehouse.name, nameEn: warehouse.nameEn }); setEditing(true); setError(''); }}>
       Edit names
     </button>
-  </>;
-  return <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+  </></Localized>;
+  return <Localized><div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
     <label className="min-w-[120px] flex-1 text-xs font-semibold text-slate-600">中文名称
       <SelectAllOnFocusInput value={names.name} maxLength={200} disabled={busy} data-testid="warehouse-edit-name-zh"
         onChange={event => setNames(prev => ({ ...prev, name: event.target.value }))}
@@ -43,5 +44,5 @@ export const WarehouseNameEditor: React.FC<{
     <button type="button" data-testid="warehouse-edit-cancel" disabled={busy} onClick={() => setEditing(false)}
       className="h-11 rounded-lg border border-slate-300 px-3 text-xs font-semibold">Cancel</button>
     {error && <p role="alert" className="w-full text-xs text-red-700">{error}</p>}
-  </div>;
+  </div></Localized>;
 };

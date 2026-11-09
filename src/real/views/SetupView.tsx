@@ -15,6 +15,7 @@ import {
 import type { SeriesDto, TagDto, WarehouseDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { WarehouseNameEditor } from '../components/WarehouseNameEditor';
+import { Localized } from '../internalLanguage';
 
 const inputClass =
   'w-full h-9 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -65,6 +66,7 @@ export const SetupView: React.FC = () => {
   if (loading) return <LoadingBlock label="Loading setup…" />;
 
   return (
+    <Localized>
     <div className="space-y-4">
       {error && <ErrorBlock message={error} onRetry={load} />}
       {notice && (
@@ -223,6 +225,7 @@ export const SetupView: React.FC = () => {
         />
       </section>
     </div>
+    </Localized>
   );
 };
 
@@ -235,6 +238,7 @@ const SimpleCreate: React.FC<{
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   return (
+    <Localized>
     <form
       className="flex flex-wrap items-end gap-2 pt-2 border-t border-slate-100"
       onSubmit={async event => {
@@ -269,5 +273,6 @@ const SimpleCreate: React.FC<{
         <Plus className="w-3.5 h-3.5" /> {submitLabel}
       </button>
     </form>
+    </Localized>
   );
 };

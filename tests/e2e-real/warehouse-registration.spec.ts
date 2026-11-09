@@ -26,6 +26,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   await page.locator('input[autocomplete="current-password"]').fill(password!);
   await page.getByRole('button', { name: /Sign in/ }).click();
   await expect(page.getByTestId('real-tab-inventory')).toBeVisible();
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
   const { csrfToken } = await (await page.request.get('/api/auth/csrf')).json();
   const write = async (url: string, data: Record<string, unknown>) => {
     const response = await page.request.post(url, { data, headers: { 'X-CSRF-Token': csrfToken } });
@@ -112,7 +113,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   await page.getByTestId('inventory-adjust-submit').click();
   expect((await conflict).status()).toBe(409);
   expect((await read()).find((row: { warehouseId: string }) => row.warehouseId === target.id)).toMatchObject({ onHand: 9, version: 2 });
-  await page.getByRole('button', { name: /Retry/ }).click();
+  await page.getByRole('button', { name: /Retry|重试/ }).click();
   await expect(page.getByTestId('inventory-row').filter({ hasText: sku.skuCode })).toHaveCount(2);
   await expect(page.getByTestId('inventory-adjust-onhand')).toHaveValue('9');
   await page.getByTestId('inventory-adjust-onhand').fill('10');

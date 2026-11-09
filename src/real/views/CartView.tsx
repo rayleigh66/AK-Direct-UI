@@ -19,51 +19,19 @@ import type { CustomerOrderDto, ShippingMethod } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { QuantityField } from '../../components/ui/QuantityField';
 import { HelpTooltip } from '../../components/ui/HelpTooltip';
-
-const SHIPPING_METHODS: ShippingMethod[] = [
-  'Express',
-  'Air',
-  'Sea',
-  'Customer Pickup',
-  'Other',
-];
-
-const DRAFT_VERSION = 1;
-
-interface ShippingDraft {
-  shippingMethod: ShippingMethod | '';
-  destinationCountryAlpha3: string;
-  expectedShipDate: string;
-  shippingRequirements: string;
-}
-
-const EMPTY_DRAFT: ShippingDraft = {
-  shippingMethod: '',
-  destinationCountryAlpha3: '',
-  expectedShipDate: '',
-  shippingRequirements: '',
-};
-
-function draftKey(companyId: string | undefined): string {
-  return `aoking.real.shippingDraft.${companyId ?? 'unknown'}`;
-}
-
-function readDraft(companyId: string | undefined): ShippingDraft {
-  try {
-    const raw = window.localStorage.getItem(draftKey(companyId));
-    if (!raw) return EMPTY_DRAFT;
-    const parsed = JSON.parse(raw) as Partial<ShippingDraft> & { version?: number };
-    if (parsed.version !== DRAFT_VERSION) return EMPTY_DRAFT;
-    return {
-      shippingMethod: (parsed.shippingMethod as ShippingMethod | '') ?? '',
-      destinationCountryAlpha3: parsed.destinationCountryAlpha3 ?? '',
-      expectedShipDate: parsed.expectedShipDate ?? '',
-      shippingRequirements: parsed.shippingRequirements ?? '',
-    };
-  } catch {
-    return EMPTY_DRAFT;
-  }
-}
+import { SearchableCombobox } from '../../components/ui/SearchableCombobox';
+import { EnglishDateField } from '../../components/ui/EnglishDateField';
+import { ISO_COUNTRIES, findCountry } from '../../data/isoCountries';
+import { formatEnglishDate } from '../../utils/dateDisplay';
+import {
+  DRAFT_VERSION,
+  EMPTY_DRAFT,
+  SHIPPING_METHODS,
+  isShippingMethod,
+  readShippingDraft,
+  shippingDraftKey,
+  type ShippingDraft,
+} from '../shippingDraft';
 
 function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -78,7 +46,7 @@ export const CartView: React.FC<{
   onViewOrders: () => void;
 }> = ({ user, onBrowse, onViewOrders }) => {
   const { cart, loading, error, refresh, setItem, removeItem, clear } = useRealCart();
-  const [draft, setDraft] = useState<ShippingDraft>(() => readDraft(user.companyId));
+  const [draft, setDraft] = useState<ShippingDraft>(() => readShippingDraft(user.companyId));
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
@@ -99,7 +67,7 @@ export const CartView: React.FC<{
   useEffect(() => {
     try {
       window.localStorage.setItem(
-        draftKey(user.companyId),
+        shippingDraftKey(user.companyId),
         JSON.stringify({ version: DRAFT_VERSION, ...draft })
       );
     } catch {
@@ -131,7 +99,7 @@ export const CartView: React.FC<{
           AOKING Direct sales will verify quantities, price and stock before confirming. Submitting
           this request did not reserve stock.
         </p>
-        <dl className="grid sm:grid-cols-3 gap-3 text-xs">
+        <dl className="grid grid-cols-2 gap-3 text-xs">
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
             <dt className="text-slate-400">Order number</dt>
             <dd className="font-mono font-bold text-sm" data-testid="success-order-no">
@@ -148,6 +116,12 @@ export const CartView: React.FC<{
             <dt className="text-slate-400">Reference total</dt>
             <dd className="font-bold text-sm" data-testid="success-total">
               {usdFromCents(success.referenceTotalCents)}
+            </dd>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <dt className="text-slate-400">Expected ship</dt>
+            <dd className="font-bold text-sm" data-testid="success-expected-ship">
+              {formatEnglishDate(success.expectedShipDate)}
             </dd>
           </div>
         </dl>
@@ -222,9 +196,9 @@ export const CartView: React.FC<{
   };
 
   const validateForm = (): string => {
-    if (!draft.shippingMethod) return 'Select a shipping method.';
-    if (!/^[A-Za-z]{3}$/.test(draft.destinationCountryAlpha3.trim())) {
-      return 'Enter the destination country as an ISO three-letter code (for example USA).';
+    if (!isShippingMethod(draft.shippingMethod)) return 'Select a shipping method.';
+    if (!findCountry(draft.destinationCountryAlpha3.trim().toUpperCase())) {
+      return 'Select a valid destination country from the ISO alpha-3 list.';
     }
     if (!draft.expectedShipDate) return 'Choose an expected ship date.';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.expectedShipDate)) {
@@ -265,7 +239,7 @@ export const CartView: React.FC<{
       setConfirmOpen(false);
       idempotency.current = null;
       try {
-        window.localStorage.removeItem(draftKey(user.companyId));
+        window.localStorage.removeItem(shippingDraftKey(user.companyId));
       } catch {
         /* ignore storage failures */
       }
@@ -522,34 +496,38 @@ export const CartView: React.FC<{
                 ))}
               </div>
             </div>
-            <label className="text-xs font-semibold text-slate-700">
+            <div className="text-xs font-semibold text-slate-700">
               Destination country (ISO alpha-3)
-              <input
+              <SearchableCombobox
+                options={ISO_COUNTRIES.map(country => ({
+                  value: country.code,
+                  label: `${country.code} — ${country.nameEn}`,
+                  keywords: `${country.code} ${country.code2} ${country.nameEn}`,
+                }))}
                 value={draft.destinationCountryAlpha3}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...current,
-                    destinationCountryAlpha3: event.target.value.toUpperCase(),
-                  }))
+                onChange={country =>
+                  setDraft(current => ({ ...current, destinationCountryAlpha3: country }))
                 }
-                maxLength={3}
-                placeholder="e.g. USA"
-                className="mt-1 w-full h-11 px-3 rounded-xl border border-slate-300 text-sm font-mono uppercase"
-                data-testid="delivery-country"
+                ariaLabel="Destination country (ISO alpha-3)"
+                placeholder="Search by English name or ISO3 code"
+                emptyText="No matching country"
+                testId="delivery-country"
+                className="mt-1"
               />
-            </label>
-            <label className="text-xs font-semibold text-slate-700">
+            </div>
+            <div className="text-xs font-semibold text-slate-700">
               Expected ship date
-              <input
-                type="date"
+              <EnglishDateField
                 value={draft.expectedShipDate}
-                onChange={event =>
-                  setDraft(current => ({ ...current, expectedShipDate: event.target.value }))
+                onChange={value =>
+                  setDraft(current => ({ ...current, expectedShipDate: value }))
                 }
-                className="mt-1 w-full h-11 px-3 rounded-xl border border-slate-300 text-sm"
-                data-testid="delivery-date"
+                ariaLabel="Expected ship date"
+                testId="delivery-date"
+                required
+                className="mt-1"
               />
-            </label>
+            </div>
             <label className="text-xs font-semibold text-slate-700 sm:col-span-2">
               Packing requirements and notes
               <textarea
@@ -615,7 +593,7 @@ export const CartView: React.FC<{
             </p>
             <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-[11px] text-slate-600">
               {draft.shippingMethod} · {draft.destinationCountryAlpha3} ·{' '}
-              {draft.expectedShipDate}
+              {formatEnglishDate(draft.expectedShipDate)}
               {draft.shippingRequirements ? ` · ${draft.shippingRequirements}` : ''}
             </div>
             <div className="flex flex-wrap gap-2 justify-end">

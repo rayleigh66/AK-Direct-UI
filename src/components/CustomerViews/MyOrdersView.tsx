@@ -11,6 +11,7 @@ import {
   customerStatus,
 } from '../../utils/customerDisplay';
 import { Order, OrderStatus } from '../../types';
+import { formatEnglishDate } from '../../utils/dateDisplay';
 import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import {
   Clock,
@@ -195,7 +196,7 @@ export const MyOrdersView: React.FC = () => {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                      <span>Submitted: {order.created_at}</span>
+                      <span>Submitted: {formatEnglishDate(order.created_at)}</span>
                       <span>·</span>
                       <span className="flex items-center gap-1">
                         <User className="w-3 h-3 text-slate-400" />
@@ -241,7 +242,7 @@ export const MyOrdersView: React.FC = () => {
                         <span>Order progress</span>
                         {order.reservation_expires_at && order.status === 'CONFIRMED' && (
                           <span className="text-[11px] text-amber-700 font-medium">
-                            Reservation expires: {order.reservation_expires_at.slice(0, 16).replace('T', ' ')} UTC
+                            Reservation expires: {formatEnglishDate(order.reservation_expires_at)} UTC
                           </span>
                         )}
                       </div>
@@ -370,11 +371,11 @@ export const MyOrdersView: React.FC = () => {
                           </div>
                           <div>
                             <span className="text-slate-400 block text-[10px]">Actual ship date:</span>
-                            <span>{order.actual_ship_date}</span>
+                            <span>{formatEnglishDate(order.actual_ship_date)}</span>
                           </div>
                           <div>
                             <span className="text-slate-400 block text-[10px]">Estimated arrival:</span>
-                            <span>{order.estimated_delivery_date}</span>
+                            <span>{formatEnglishDate(order.estimated_delivery_date)}</span>
                           </div>
                         </div>
                       </div>
@@ -383,7 +384,7 @@ export const MyOrdersView: React.FC = () => {
                     {/* Action Controls for Customer based on PRD 6.2 */}
                     <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200">
                       <div className="text-xs text-slate-500">
-                        Shipping: <strong className="text-slate-800">{order.shipping_method}</strong> · Packing: {order.shipping_requirements || 'No special requirements'}
+                        Shipping: <strong className="text-slate-800">{order.shipping_method}</strong> · Expected ship: <strong className="text-slate-800">{formatEnglishDate(order.expected_ship_date)}</strong> · Packing: {order.shipping_requirements || 'No special requirements'}
                       </div>
 
                       <div className="flex items-center gap-2">

@@ -173,9 +173,26 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await page.getByTestId('real-tab-cart').click();
   const finalItem = page.getByTestId('cart-item').filter({ hasText: skuCode });
   await expect(finalItem.getByTestId('cart-quantity-input')).toHaveValue('12');
-  await page.locator('[data-testid="delivery-method"][data-method="Sea"]').click();
-  await page.getByTestId('delivery-country').fill('USA');
+  await expect(page.locator('[data-testid="delivery-method"][data-method="Sea"]')).toHaveClass(
+    /border-slate-900/
+  );
+  // Invalid free text cannot become a destination; the field is a select-only combobox.
+  const country = page.getByTestId('delivery-country');
+  await country.fill('ZZZ');
+  await page.getByTestId('cart-submit-open').click();
+  await expect(page.getByText('Select a valid destination country from the ISO alpha-3 list.')).toBeVisible();
+  await country.fill('USA');
+  await page.getByRole('option').filter({ hasText: 'USA' }).first().click();
   await page.getByTestId('delivery-date').fill(expectedDate);
+  await expect(page.getByTestId('delivery-date-display')).toHaveText(/[A-Z][a-z]{2} \d{1,2}, \d{4}/);
+  // A valid saved selection wins over the Sea fallback across a reload.
+  await page.locator('[data-testid="delivery-method"][data-method="Air"]').click();
+  await page.reload();
+  await page.getByTestId('real-tab-cart').click();
+  await expect(page.locator('[data-testid="delivery-method"][data-method="Air"]')).toHaveClass(
+    /border-slate-900/
+  );
+  await page.locator('[data-testid="delivery-method"][data-method="Sea"]').click();
   await page
     .getByTestId('delivery-requirements')
     .fill('Fumigation-free pallet with AOKING shipping marks.');
@@ -211,7 +228,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   // The assigned salesperson sees the pending order and confirmation is disabled.
   await signIn(page, SALES_EMAIL, SALES_PASSWORD);
   await expect(page.getByTestId('real-tab-orders')).toBeVisible();
-  await page.getByTestId('real-tab-orders').click();
+  await expect(page.getByTestId('real-tab-orders')).toHaveAttribute('aria-current', 'page');
   const internalOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
   await expect(internalOrder).toBeVisible({ timeout: 20_000 });
   await internalOrder.click();
@@ -231,6 +248,19 @@ test('customer A and B share a cart, submit a real order and the salesperson see
     .getByRole('button', { name: 'EN' })
     .click();
   await expect(orderStatus).toHaveText('Pending confirmation');
+
+  // The global toggle applies across sales pages without losing the active tab.
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
+  await expect(page.getByTestId('real-tab-inventory')).toContainText('库存');
+  await page.getByTestId('real-tab-inventory').click();
+  await expect(
+    page.getByText('只读库存视图。业务员不能调整数量或预占库存。')
+  ).toBeVisible();
+  await page.getByTestId('real-tab-orders').click();
+  await expect(page.getByTestId('real-tab-orders')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByText('待确认订单', { exact: true })).toBeVisible();
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: 'EN' }).click();
+  await expect(page.getByText('Pending orders', { exact: true })).toBeVisible();
   if (!mobile) {
     await page.setViewportSize({ width: 430, height: 900 });
     await expectNoHorizontalOverflow(page);

@@ -4,6 +4,7 @@ import { SearchableCombobox } from '../../components/ui/SearchableCombobox';
 import { InventoryRegistrationDialog } from '../components/InventoryRegistrationDialog';
 import { WarehouseNameEditor } from '../components/WarehouseNameEditor';
 import type { InventoryRowDto, ProductDto, WarehouseDto } from '../types';
+import { Localized } from '../internalLanguage';
 
 const skuMime = 'application/x-aoking-sku';
 export const WarehouseInventoryView: React.FC<{
@@ -29,7 +30,7 @@ export const WarehouseInventoryView: React.FC<{
       setDraft({ skuId: id, warehouseId: targetId });
     }
   };
-  return <div data-testid="warehouse-view" className="grid min-w-0 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+  return <Localized><div data-testid="warehouse-view" className="grid min-w-0 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
     <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-4">
       <div><p className="text-xs font-semibold tracking-wider text-slate-500">SKU DIRECTORY</p><h2 className="mt-1 text-lg font-bold">选择需要登记的 SKU</h2></div>
       <SearchableCombobox ariaLabel="搜索并选择 SKU" placeholder="搜索 SKU、商品或颜色" value={skuId} onChange={setSkuId}
@@ -81,5 +82,5 @@ export const WarehouseInventoryView: React.FC<{
     </section>
     {draft && draftSku && draftWarehouse && <InventoryRegistrationDialog key={`${draft.skuId}:${draft.warehouseId}`} sku={draftSku} warehouse={draftWarehouse}
       onClose={() => setDraft(null)} onRegistered={onRegistered} onExisting={row => { setDraft(null); onAdjust(row); }} />}
-  </div>;
+  </div></Localized>;
 };
