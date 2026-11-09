@@ -117,7 +117,7 @@ test('admin creates a company from the UI with a one-time credential', async ({ 
   await page.getByTestId('company-code').fill(code);
   await page.getByTestId('company-short-name').fill(`E2E UI ${code}`);
   await page.getByTestId('company-country').fill('United States');
-  await page.getByRole('option', { name: 'USA — United States', exact: true }).click();
+  await page.getByRole('option', { name: 'USA — United States of America', exact: true }).click();
   await page.getByTestId('company-sales').selectOption({ label: `E2E Sales · ${SALES_EMAIL}` });
   await page.getByTestId('company-brand-brand-aoking').check();
   await page.getByTestId('company-create-submit').click();
