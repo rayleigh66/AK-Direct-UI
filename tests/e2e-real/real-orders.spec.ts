@@ -216,6 +216,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.locator('[data-testid="delivery-method"][data-method="Air"]')).toHaveClass(
     /border-slate-900/
   );
+  await expect(country).toHaveValue(/USA/);
   await page.locator('[data-testid="delivery-method"][data-method="Sea"]').click();
   await page
     .getByTestId('delivery-requirements')

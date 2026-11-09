@@ -154,7 +154,13 @@ const WorkspaceShell: React.FC<{
         {tabs.length > 1 && (
           <nav
             className="mx-auto flex w-full max-w-[1660px] gap-1 overflow-x-auto px-3 pb-2 sm:px-6 lg:px-10"
-            aria-label={isCustomer ? 'Customer sections' : 'Internal sections'}
+            aria-label={
+              isCustomer
+                ? 'Customer sections'
+                : language === 'zh'
+                  ? '内部导航'
+                  : 'Internal sections'
+            }
           >
             {tabs.map(tab => {
               const label = TAB_LABELS[tab];
