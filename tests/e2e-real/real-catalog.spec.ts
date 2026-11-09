@@ -219,6 +219,9 @@ test('admin creates catalogue and stock, customer browses authorised products', 
     .getAttribute('value');
   await seriesFilter.selectOption(seriesValue!);
   await expect(productCard).toBeVisible();
+  // Capture the list position at the moment the card is actionable; the
+  // browser's native focus-on-click must not be mistaken for a drawer jump.
+  await productCard.scrollIntoViewIfNeeded();
   const scrollBefore = await page.evaluate(() => window.scrollY);
 
   await productCard.click();
