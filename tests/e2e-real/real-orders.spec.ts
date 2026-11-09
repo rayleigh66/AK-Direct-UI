@@ -155,6 +155,9 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await cartItem.getByTestId('cart-quantity-input').fill('12');
   await cartItem.getByTestId('cart-quantity-save').click();
   await expect(page.getByTestId('cart-pieces')).toContainText('12 PCS');
+  await expect(page.getByTestId('cart-badge-count')).toHaveText('12');
+  await expect(page.getByTestId('real-user-meta')).toContainText(customerB);
+  await expect(page.getByTestId('real-user-meta')).not.toContainText(/C\d{6}/);
   await expectNoHorizontalOverflow(page);
   await screenshot(page, `shared-cart-${testInfo.project.name}`);
   if (!mobile) {
@@ -173,9 +176,81 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await page.getByTestId('real-tab-cart').click();
   const finalItem = page.getByTestId('cart-item').filter({ hasText: skuCode });
   await expect(finalItem.getByTestId('cart-quantity-input')).toHaveValue('12');
+  await expect(page.locator('[data-testid="delivery-method"][data-method="Sea"]')).toHaveClass(
+    /border-slate-900/
+  );
+  // Invalid free text cannot become a destination; the field is a select-only combobox.
+  const country = page.getByTestId('delivery-country');
+  const destinationError = page.getByText(
+    'Select a valid destination country from the ISO alpha-3 list.'
+  );
+  const chooseUsa = async () => {
+    await country.fill('USA');
+    const option = page.getByRole('option').filter({ hasText: 'USA' }).first();
+    if (mobile) await option.tap();
+    else await option.click();
+  };
+  await country.fill('ZZZ');
+  await page.getByTestId('cart-submit-open').click();
+  await expect(destinationError).toBeVisible();
+  await chooseUsa();
+  const dateTrigger = page.getByTestId('delivery-date');
+  const expectedDateObject = new Date(`${expectedDate}T00:00:00Z`);
+  const expectedDisplay = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(expectedDateObject);
+  const expectedMonth = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(expectedDateObject);
+  const chooseExpectedDate = async () => {
+    await dateTrigger.click();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if ((await page.getByTestId('delivery-date-month').innerText()) === expectedMonth) break;
+      await page.getByTestId('delivery-date-next-month').click();
+    }
+    await page.getByTestId(`delivery-date-day-${expectedDate}`).click();
+    await expect(dateTrigger).toHaveAttribute('data-value', expectedDate);
+  };
+  await chooseExpectedDate();
+  await expect(page.getByTestId('delivery-date-display')).toHaveText(expectedDisplay);
+
+  // Clear and re-select through the visible calendar.
+  await dateTrigger.click();
+  await page.getByTestId('delivery-date-clear').click();
+  await expect(page.getByTestId('delivery-date-display')).toHaveText('Select date');
+  await chooseExpectedDate();
+  await expect(page.getByTestId('delivery-date-display')).toHaveText(expectedDisplay);
+
+  // An abandoned search must clear the saved USA instead of silently reusing it.
+  await country.fill('ZZZ');
+  await page.getByTestId('cart-submit-open').click();
+  await expect(destinationError).toBeVisible();
+  await expect(page.getByTestId('cart-submit-confirm')).toHaveCount(0);
+  await expect(country).toHaveValue('');
+  await chooseUsa();
+  await expect(country).toHaveValue(/USA/);
+
+  // Blur also abandons the query and requires an explicit new selection.
+  await country.fill('ZZZ');
+  await page.getByTestId('delivery-requirements').click();
+  await expect(country).toHaveValue('');
+  await chooseUsa();
+
+  // A valid saved selection wins over the Sea fallback across a reload.
+  await page.locator('[data-testid="delivery-method"][data-method="Air"]').click();
+  await page.reload();
+  await page.getByTestId('real-tab-cart').click();
+  await expect(page.locator('[data-testid="delivery-method"][data-method="Air"]')).toHaveClass(
+    /border-slate-900/
+  );
+  await expect(country).toHaveValue(/USA/);
+  await expect(page.getByTestId('delivery-date')).toHaveAttribute('data-value', expectedDate);
   await page.locator('[data-testid="delivery-method"][data-method="Sea"]').click();
-  await page.getByTestId('delivery-country').fill('USA');
-  await page.getByTestId('delivery-date').fill(expectedDate);
   await page
     .getByTestId('delivery-requirements')
     .fill('Fumigation-free pallet with AOKING shipping marks.');
@@ -211,7 +286,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   // The assigned salesperson sees the pending order and confirmation is disabled.
   await signIn(page, SALES_EMAIL, SALES_PASSWORD);
   await expect(page.getByTestId('real-tab-orders')).toBeVisible();
-  await page.getByTestId('real-tab-orders').click();
+  await expect(page.getByTestId('real-tab-orders')).toHaveAttribute('aria-current', 'page');
   const internalOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
   await expect(internalOrder).toBeVisible({ timeout: 20_000 });
   await internalOrder.click();
@@ -224,13 +299,26 @@ test('customer A and B share a cart, submit a real order and the salesperson see
     .getByTestId('order-detail')
     .locator('[data-order-status="PENDING_CONFIRMATION"]');
   await expect(orderStatus).toHaveText('Pending confirmation');
-  await page.getByTestId('internal-order-language').getByRole('button', { name: '中文' }).click();
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
   await expect(orderStatus).toHaveText('待确认');
   await page
-    .getByTestId('internal-order-language')
+    .getByTestId('internal-language-toggle')
     .getByRole('button', { name: 'EN' })
     .click();
   await expect(orderStatus).toHaveText('Pending confirmation');
+
+  // The global toggle applies across sales pages without losing the active tab.
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
+  await expect(page.getByTestId('real-tab-inventory')).toContainText('库存');
+  await page.getByTestId('real-tab-inventory').click();
+  await expect(
+    page.getByText('只读库存视图。业务员不能调整数量或预占库存。')
+  ).toBeVisible();
+  await page.getByTestId('real-tab-orders').click();
+  await expect(page.getByTestId('real-tab-orders')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByText('待确认订单', { exact: true })).toBeVisible();
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: 'EN' }).click();
+  await expect(page.getByText('Pending orders', { exact: true })).toBeVisible();
   if (!mobile) {
     await page.setViewportSize({ width: 430, height: 900 });
     await expectNoHorizontalOverflow(page);
@@ -305,4 +393,81 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.getByTestId('cart-empty')).toBeVisible();
   await grant(true);
   expect(errors).toEqual([]);
+
+  // Administrator order/customer drawers share one right-side container.
+  await signOut(page);
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await expect(page.getByTestId('real-tab-products')).toBeVisible();
+  await page.getByTestId('real-tab-orders').click();
+  const adminOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
+  await expect(adminOrder).toBeVisible({ timeout: 20_000 });
+  const customerLink = adminOrder.getByTestId('admin-order-customer-link');
+  const companyCode = await customerLink.getAttribute('data-company-code');
+  expect(companyCode).toMatch(/^C[0-9]{6}$/);
+
+  await adminOrder.click();
+  const orderDrawer = page.getByTestId('order-detail-drawer');
+  await expect(orderDrawer).toBeVisible();
+  await expect(orderDrawer).toContainText(orderNo);
+  await expect(orderDrawer).toContainText('Reference');
+  await expect(orderDrawer).toContainText('Cancelled');
+  await expect(orderDrawer).toContainText('Administrator supervision is read-only');
+  await expect(orderDrawer.getByTestId('sales-confirm-disabled')).toHaveCount(0);
+  const orderBox = await orderDrawer.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(orderBox).not.toBeNull();
+  if (viewport.width >= 640) {
+    expect(orderBox!.width).toBeGreaterThanOrEqual(480);
+    expect(orderBox!.width).toBeLessThanOrEqual(600);
+    expect(orderBox!.x).toBeGreaterThan(viewport.width / 2);
+  } else {
+    expect(orderBox!.width).toBeGreaterThanOrEqual(viewport.width - 1);
+  }
+  await screenshot(page, `admin-order-drawer-${testInfo.project.name}`);
+
+  await page.getByTestId('order-drawer-close').click();
+  await expect(orderDrawer).toBeHidden();
+  expect(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-order-no'))
+  ).toBe(orderNo);
+
+  // The list customer chip opens Customer Details without opening a second drawer.
+  await customerLink.click();
+  const customerDrawer = page.getByTestId('customer-detail-drawer');
+  await expect(customerDrawer).toBeVisible();
+  await expect(orderDrawer).toHaveCount(0);
+  await expect(customerDrawer.getByTestId('customer-detail')).toContainText(companyCode!);
+  await expect(customerDrawer.getByTestId('customer-detail')).toContainText('USA');
+  await expect(customerDrawer.getByTestId('customer-detail-order')).toContainText(orderNo);
+  await expect(customerDrawer.getByTestId('customer-detail-order')).toContainText(
+    customerA
+  );
+  await expect(customerDrawer.getByTestId('customer-detail-salesperson')).toContainText(
+    'E2E Sales'
+  );
+  await screenshot(page, `admin-customer-drawer-${testInfo.project.name}`);
+
+  if (!mobile) {
+    for (const width of [375, 390, 430, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(customerDrawer).toBeVisible();
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      expect(overflow).toBeLessThanOrEqual(1);
+      const box = await customerDrawer.boundingBox();
+      expect(box!.width).toBeLessThanOrEqual(width + 1);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  } else {
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  }
+
+  await customerDrawer.getByTestId('customer-detail-back').click();
+  await expect(page.getByTestId('order-detail-drawer')).toContainText(orderNo);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('order-detail-drawer')).toBeHidden();
 });

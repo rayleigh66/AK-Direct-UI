@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { useApp } from '../../context/AppContext';
+import { formatEnglishDate } from '../../utils/dateDisplay';
 import {
   Bell,
   CheckCircle2,
@@ -86,7 +87,7 @@ export const NotificationsView: React.FC = () => {
                     )}
                   </div>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    {notif.created_at}
+                    {formatEnglishDate(notif.created_at)}
                   </span>
                 </div>
 

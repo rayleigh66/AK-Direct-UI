@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
@@ -35,6 +35,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   const tagCode = `E2E_TAG_${suffix}`;
   const productCode = `E2E-${suffix}`;
   const skuCode = `E2E-${suffix}-BLK`;
+  const skuCode2 = `E2E-${suffix}-TAN`;
   const productTitle = `E2E Runtime Pack ${suffix}`;
 
   await page.goto('/');
@@ -109,6 +110,15 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await card.getByTestId('sku-create-submit').click();
   await expect(card.getByTestId('sku-row').filter({ hasText: skuCode })).toBeVisible();
 
+  // A second colour makes the drawer's independent per-SKU quantity controls real.
+  await card.getByTestId('sku-new').click();
+  await card.getByTestId('sku-code').fill(skuCode2);
+  await card.getByTestId('sku-color-en').fill('Sand Tan');
+  await card.getByTestId('sku-color-zh').fill('沙棕');
+  await card.getByTestId('sku-price').fill('42.00');
+  await card.getByTestId('sku-create-submit').click();
+  await expect(card.getByTestId('sku-row').filter({ hasText: skuCode2 })).toBeVisible();
+
   await card.getByTestId('product-publish').click();
   await expect(card.getByTestId('product-unpublish')).toBeVisible();
 
@@ -128,15 +138,43 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.getByTestId('inventory-register-reason').fill('Initial physical count for real E2E');
   await page.getByTestId('inventory-register-submit').click();
   await expect(page.getByTestId('inventory-row').filter({ hasText: skuCode })).toBeVisible();
+
+  await page.getByTestId('inventory-register-open').click();
+  const skuSelect2 = page.getByTestId('inventory-register-sku');
+  const skuValue2 = await skuSelect2
+    .locator('option', { hasText: skuCode2 })
+    .getAttribute('value');
+  await skuSelect2.selectOption(skuValue2!);
+  const warehouseSelect2 = page.getByTestId('inventory-register-warehouse');
+  const warehouseValue2 = await warehouseSelect2
+    .locator('option', { hasText: warehouseCode })
+    .getAttribute('value');
+  await warehouseSelect2.selectOption(warehouseValue2!);
+  await page.getByTestId('inventory-register-onhand').fill('12');
+  await page.getByTestId('inventory-register-reason').fill('Second colour stock for drawer E2E');
+  await page.getByTestId('inventory-register-submit').click();
+  await expect(page.getByTestId('inventory-row').filter({ hasText: skuCode2 })).toBeVisible();
   await screenshot(page, `inventory-${testInfo.project.name}`);
 
   await page.getByTestId('real-tab-import').click();
+  await expect(page.getByTestId('import-template-guide')).toContainText('sku_code');
+  await expect(page.getByTestId('import-template-warning')).toContainText('EXAMPLE-SKU');
+  const templateDownloadPromise = page.waitForEvent('download');
+  await page.getByTestId('import-template-download').click();
+  const templateDownload = await templateDownloadPromise;
+  const templatePath = path.join(testInfo.outputDir, 'inventory-template.csv');
+  await templateDownload.saveAs(templatePath);
+  const template = await readFile(templatePath, 'utf8');
+  expect(template.split(/\r?\n/)[0]).toBe('sku_code,warehouse_code,on_hand,unsellable');
+  expect(template).toContain('EXAMPLE-SKU,EXAMPLE-WH,100,0');
+  const filledTemplate = template.replace(
+    'EXAMPLE-SKU,EXAMPLE-WH,100,0',
+    `${skuCode},${warehouseCode},25,2`
+  );
   await page.getByTestId('import-file').setInputFiles({
     name: 'stock.csv',
     mimeType: 'text/csv',
-    buffer: Buffer.from(
-      `sku_code,warehouse_code,on_hand,unsellable\n${skuCode},${warehouseCode},25,2\n`
-    ),
+    buffer: Buffer.from(filledTemplate),
   });
   const previewRow = page.getByTestId('import-row').filter({ hasText: skuCode });
   await expect(previewRow).toBeVisible({ timeout: 20_000 });
@@ -162,28 +200,121 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.getByRole('button', { name: /Save password/ }).click();
 
   await expect(page.getByTestId('catalog-search')).toBeVisible();
-  await expect(page.getByTestId('real-catalog-cart-entry')).toBeVisible();
+  await expect(page.getByTestId('real-user-meta')).toContainText(customerUsername);
+  await expect(page.getByTestId('real-user-meta')).not.toContainText(/C\d{6}/);
+  await expect(page.getByTestId('real-catalog-cart-entry')).toHaveCount(0);
+  await expect(page.getByTestId('real-tab-cart')).toBeVisible();
+  await expect(page.getByTestId('cart-badge')).toBeVisible();
   const productCard = page.getByTestId('catalog-product-card').filter({ hasText: productTitle });
   await expect(productCard).toBeVisible({ timeout: 20_000 });
   await expect(productCard).toContainText('$38.00');
   await screenshot(page, `customer-catalog-${testInfo.project.name}`);
 
+  // Keep a real filter active while the drawer opens and closes.
+  const search = page.getByTestId('catalog-search');
+  await search.fill(productCode);
+  const seriesFilter = page.getByTestId('catalog-series-filter');
+  const seriesValue = await seriesFilter
+    .locator('option', { hasText: seriesName })
+    .getAttribute('value');
+  await seriesFilter.selectOption(seriesValue!);
+  await expect(productCard).toBeVisible();
+  // Capture the list position at the moment the card is actionable; the
+  // browser's native focus-on-click must not be mistaken for a drawer jump.
+  await productCard.scrollIntoViewIfNeeded();
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+
   await productCard.click();
-  await expect(page.getByTestId('catalog-detail')).toBeVisible();
-  await expect(page.getByTestId('catalog-detail')).toContainText('Add to cart');
-  await expect(page.getByTestId('catalog-detail')).toContainText('Shared company cart');
+  const drawer = page.getByTestId('catalog-detail');
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toContainText('Add to cart');
+  await expect(drawer).toContainText('Shared company cart');
+  await expect(drawer).not.toContainText(/C\d{6}/);
+
+  const viewport = page.viewportSize()!;
+  const drawerBox = await drawer.boundingBox();
+  expect(drawerBox).not.toBeNull();
+  if (viewport.width >= 640) {
+    expect(drawerBox!.width).toBeGreaterThanOrEqual(480);
+    expect(drawerBox!.width).toBeLessThanOrEqual(600);
+    expect(drawerBox!.x).toBeGreaterThan(viewport.width / 2);
+  } else {
+    expect(drawerBox!.width).toBeGreaterThanOrEqual(viewport.width - 1);
+    expect(drawerBox!.x).toBeLessThanOrEqual(1);
+  }
+
+  await expect(drawer.getByTestId('catalog-sku-row')).toHaveCount(2);
+  const row1 = drawer.getByTestId('catalog-sku-row').filter({ hasText: skuCode });
+  const row2 = drawer.getByTestId('catalog-sku-row').filter({ hasText: skuCode2 });
+  await expect(row1).toBeVisible();
+  await expect(row2).toBeVisible();
+  const qty1 = row1.getByTestId('catalog-add-qty');
+  const qty2 = row2.getByTestId('catalog-add-qty');
+
+  // MOQ, stepper, direct input and damped wheel all stay on the shared field.
+  await expect(qty1).toHaveValue('10');
+  await row1.getByTestId('catalog-qty-decrease').click();
+  await expect(qty1).toHaveValue('10');
+  await row1.getByTestId('catalog-qty-increase').click();
+  await expect(qty1).toHaveValue('11');
+  await qty1.fill('12');
+  await expect(qty1).toHaveValue('12');
+  await qty1.hover();
+  await page.mouse.wheel(0, 120);
+  await expect(qty1).toHaveValue('13');
+
+  // The stock upper bound is rejected before the cart API is called.
+  await qty1.fill('24');
+  await row1.getByTestId('catalog-add-submit').click();
+  await expect(drawer.getByRole('alert')).toContainText('Only 23 PCS');
+  await qty1.fill('12');
+  await row1.getByTestId('catalog-add-submit').click();
+  await expect(row1).toContainText('Added to the company shared cart');
+  await expect(page.getByTestId('cart-badge-count')).toHaveText('12');
+
+  // The second colour has its own draft and does not change the first.
+  await expect(qty2).toHaveValue('10');
+  await row2.getByTestId('catalog-qty-increase').click();
+  await expect(qty2).toHaveValue('11');
+  await qty2.fill('10');
+  await row2.getByTestId('catalog-add-submit').click();
+  await expect(page.getByTestId('cart-badge-count')).toHaveText('22');
+  await expect(qty1).toHaveValue('12');
+
   await page.getByRole('button', { name: 'Shared cart and reservation details help' }).click();
   await expect(page.getByRole('tooltip')).toContainText(
     'shared by every account of your company'
   );
-  await expect(page.getByTestId('catalog-detail')).toContainText('Matte Black');
+  await expect(drawer).toContainText('Matte Black');
   await screenshot(page, `customer-detail-${testInfo.project.name}`);
-  if (testInfo.project.name === 'real-desktop-1440') {
-    await page.setViewportSize({ width: 430, height: 900 });
-    const mobileOverflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
-    );
-    expect(mobileOverflow).toBeLessThanOrEqual(1);
-    await screenshot(page, 'customer-catalog-real-430');
+
+  await page.getByTestId('catalog-detail-close').click();
+  await expect(drawer).toBeHidden();
+  await expect(search).toHaveValue(productCode);
+  await expect(seriesFilter).toHaveValue(seriesValue!);
+  await expect(productCard).toBeVisible();
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - scrollBefore)).toBeLessThanOrEqual(1);
+
+  // Reopening resets drafts from the shared cart without losing the filter.
+  await productCard.click();
+  await expect(drawer).toBeVisible();
+  await expect(qty1).toHaveValue('12');
+  await expect(qty2).toHaveValue('10');
+
+  if (!mobileProject) {
+    for (const width of [375, 390, 430, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(drawer).toBeVisible();
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      expect(overflow).toBeLessThanOrEqual(1);
+      const box = await drawer.boundingBox();
+      expect(box!.width).toBeLessThanOrEqual(width + 1);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await screenshot(page, 'customer-detail-real-1440');
   }
+  await page.getByTestId('catalog-detail-close').click();
+  await expect(drawer).toBeHidden();
 });

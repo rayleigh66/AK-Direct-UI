@@ -293,3 +293,21 @@ export interface BrandDto {
   nameEn: string;
   active: boolean;
 }
+
+export interface AdminCustomerCompanyDto {
+  id: string;
+  customerCode: string;
+  shortName: string;
+  countryAlpha3: string;
+  internalNickname?: string;
+  assignedSalesUserId?: string;
+  status: 'active' | 'suspended';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminSalesUserDto {
+  id: string;
+  name: string;
+  email: string;
+}

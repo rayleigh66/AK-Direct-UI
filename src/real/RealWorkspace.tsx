@@ -8,6 +8,7 @@ import {
   Settings2,
   ShoppingCart,
   Smartphone,
+  Sparkles,
   Upload,
 } from 'lucide-react';
 import type { AuthUserDto } from '../auth/api';
@@ -18,40 +19,63 @@ import { ImportView } from './views/ImportView';
 import { SetupView } from './views/SetupView';
 import { CartView } from './views/CartView';
 import { OrdersView } from './views/OrdersView';
+import { TierPreviewView } from './views/TierPreviewView';
 import { RealCartProvider, useRealCart } from './cart';
+import { LanguageToggle } from '../components/ui/LanguageToggle';
+import { BrandLockup } from '../components/BrandLockup';
+import { formatCartBadge } from '../utils/cartCount';
+import {
+  InternalLanguageProvider,
+  translateInternalText,
+  useInternalLanguage,
+} from './internalLanguage';
 
-type TabKey = 'catalog' | 'cart' | 'orders' | 'products' | 'inventory' | 'import' | 'setup';
+type TabKey =
+  | 'catalog'
+  | 'cart'
+  | 'orders'
+  | 'products'
+  | 'inventory'
+  | 'import'
+  | 'setup'
+  | 'tiers';
 
-const TAB_LABELS: Record<TabKey, { en: string; zh?: string; icon: React.ReactNode }> = {
-  catalog: { en: 'Catalogue', icon: <Package className="w-4 h-4" /> },
-  cart: { en: 'Cart', icon: <ShoppingCart className="w-4 h-4" /> },
+const TAB_LABELS: Record<TabKey, { en: string; zh: string; icon: React.ReactNode }> = {
+  catalog: { en: 'Catalogue', zh: '商品目录', icon: <Package className="w-4 h-4" /> },
+  cart: { en: 'Cart', zh: '购物车', icon: <ShoppingCart className="w-4 h-4" /> },
   orders: { en: 'Orders', zh: '订单', icon: <ClipboardList className="w-4 h-4" /> },
   products: { en: 'Products', zh: '商品', icon: <Package className="w-4 h-4" /> },
   inventory: { en: 'Inventory', zh: '库存', icon: <Boxes className="w-4 h-4" /> },
   import: { en: 'Import', zh: '导入', icon: <Upload className="w-4 h-4" /> },
   setup: { en: 'Setup', zh: '基础设置', icon: <Settings2 className="w-4 h-4" /> },
+  tiers: { en: 'Customer tiers', zh: '客户等级与折扣', icon: <Sparkles className="w-4 h-4" /> },
 };
 
 const CartBadge: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
   const { cart } = useRealCart();
   const count = cart?.totalQuantity ?? 0;
+  const badge = formatCartBadge(count);
   if (!cart) return null;
   return (
     <button
       type="button"
       onClick={onOpen}
       data-testid="cart-badge"
-      className="min-h-[42px] px-3 rounded-xl border border-white/20 text-xs font-semibold flex items-center gap-2 hover:bg-white/10"
+      aria-label={`Cart, ${count} PCS`}
+      className="fo-btn flex min-h-[42px] items-center gap-2 border-[var(--line)] bg-white text-[var(--ink)]"
     >
       <span className="relative">
         <ShoppingCart className="w-4 h-4" />
-        {cart.itemCount > 0 && (
-          <span className="absolute -top-2 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-[#ff681e] text-white text-[9px] font-bold grid place-items-center">
-            {cart.itemCount}
+        {count > 0 && (
+          <span
+            data-testid="cart-badge-count"
+            className="absolute -right-2 -top-2 grid h-4 min-w-[16px] place-items-center rounded-full bg-[var(--orange)] px-1 text-[9px] font-bold text-[var(--ink)]"
+          >
+            {badge}
           </span>
         )}
       </span>
-      <span>{count} PCS</span>
+      <span className="hidden sm:inline">Cart</span>
     </button>
   );
 };
@@ -61,17 +85,21 @@ const WorkspaceShell: React.FC<{
   onSignOut: () => void | Promise<void>;
 }> = ({ user, onSignOut }) => {
   const isCustomer = user.type === 'customer';
+  const { language, setLanguage } = useInternalLanguage();
   const can = (permission: string) => user.permissions.includes(permission);
   const tabs = useMemo<TabKey[]>(() => {
     if (isCustomer) return ['catalog', 'cart', 'orders'];
     const result: TabKey[] = [];
     if (can('catalog.manage')) {
-      result.push('products', 'inventory', 'import', 'setup');
+      result.push('products', 'inventory', 'import', 'setup', 'tiers');
     } else if (can('inventory.read') || can('inventory.manage')) {
       result.push('inventory');
     }
     if (can('sales.read_all') || can('sales.read_assigned')) {
-      result.push('orders');
+      // Sales land on Orders; administrators keep their catalogue workspace
+      // first and see Orders after the configuration tabs.
+      if (can('catalog.manage')) result.push('orders');
+      else result.unshift('orders');
     }
     return result.length ? result : ['inventory'];
   }, [isCustomer, user.permissions]);
@@ -79,47 +107,51 @@ const WorkspaceShell: React.FC<{
   const [activeTab, setActiveTab] = useState<TabKey>(tabs[0]);
 
   return (
-    <div className="min-h-screen bg-[#f8f8f6] text-[#151515] flex flex-col">
-      <header className="bg-[#171717] text-white">
-        <div className="px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[10px] font-bold tracking-[2px] uppercase text-[#ff843f]">
-              AOKING Direct · Phase 4B-04
-            </div>
-            <div className="text-base sm:text-lg font-extrabold tracking-tight">
-              {isCustomer
-                ? 'Catalogue, cart and orders'
-                : 'Catalogue, inventory and orders / 商品、库存与订单'}
-            </div>
+    <div className="flex min-h-screen flex-col bg-[var(--bg)] text-[var(--ink)]">
+      <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-white/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[1660px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandLockup testId="brand-lockup" />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {isCustomer && <CartBadge onOpen={() => setActiveTab('cart')} />}
-            <div className="text-right text-[11px] leading-tight max-w-[160px] sm:max-w-none">
-              <div className="font-semibold truncate">{user.displayName}</div>
-              {isCustomer ? (
-                <div className="text-slate-400 truncate">
-                  {user.companyName} ({user.companyCode})
-                </div>
-              ) : (
-                <>
-                  <div className="text-slate-400 font-mono truncate">{user.username}</div>
-                  <div className="text-slate-400">{user.roles.join(' · ')}</div>
-                </>
-              )}
+            {!isCustomer && (
+              <LanguageToggle
+                value={language}
+                onChange={setLanguage}
+                label={language === 'zh' ? '内部界面语言' : 'Internal language'}
+                testId="internal-language-toggle"
+              />
+            )}
+            <div
+              data-testid="real-user-meta"
+              className="max-w-[180px] text-right text-[11px] leading-tight sm:max-w-none"
+            >
+              <div className="truncate font-semibold">{user.displayName}</div>
+              <div className="truncate font-mono text-[var(--muted)]">{user.username}</div>
             </div>
             <button
               type="button"
               onClick={() => void onSignOut()}
-              aria-label="Sign out"
-              className="min-h-[42px] px-3 rounded-xl border border-white/20 text-xs font-semibold flex items-center gap-2 hover:bg-white/10"
+              aria-label={isCustomer ? 'Sign out' : language === 'zh' ? '退出登录' : 'Sign out'}
+              className="fo-btn flex min-h-[42px] items-center gap-2"
             >
               <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">{isCustomer ? 'Sign out' : 'Sign out / 退出'}</span>
+              <span className="hidden sm:inline">{isCustomer ? 'Sign out' : language === 'zh' ? '退出' : 'Sign out'}</span>
             </button>
           </div>
         </div>
         {tabs.length > 1 && (
-          <nav className="px-2 sm:px-6 flex gap-1 overflow-x-auto border-t border-white/10">
+          <nav
+            className="mx-auto flex w-full max-w-[1660px] gap-1 overflow-x-auto px-3 pb-2 sm:px-6 lg:px-10"
+            aria-label={
+              isCustomer
+                ? 'Customer sections'
+                : language === 'zh'
+                  ? '内部导航'
+                  : 'Internal sections'
+            }
+          >
             {tabs.map(tab => {
               const label = TAB_LABELS[tab];
               const active = tab === activeTab;
@@ -128,16 +160,16 @@ const WorkspaceShell: React.FC<{
                   key={tab}
                   type="button"
                   onClick={() => setActiveTab(tab)}
+                  aria-current={active ? 'page' : undefined}
                   data-testid={`real-tab-${tab}`}
-                  className={`px-3 sm:px-4 py-3 text-xs font-semibold flex items-center gap-2 whitespace-nowrap border-b-2 transition-colors ${
+                  className={`flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] px-3.5 text-xs font-bold transition-colors ${
                     active
-                      ? 'border-[#ff681e] text-white'
-                      : 'border-transparent text-slate-400 hover:text-white'
+                      ? 'bg-[var(--nav-active-bg)] text-white'
+                      : 'text-[var(--muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--ink)]'
                   }`}
                 >
-                  {label.icon}
-                  {label.en}
-                  {label.zh && <span className="text-[10px] text-slate-500">{label.zh}</span>}
+                  <span className={active ? 'text-[var(--orange)]' : ''}>{label.icon}</span>
+                  {language === 'zh' && !isCustomer ? label.zh : label.en}
                 </button>
               );
             })}
@@ -145,9 +177,9 @@ const WorkspaceShell: React.FC<{
         )}
       </header>
 
-      <main className="flex-1 w-full max-w-[1660px] mx-auto px-3 sm:px-6 lg:px-10 py-5 sm:py-8">
+      <main className="mx-auto w-full max-w-[1660px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
         {activeTab === 'catalog' && (
-          <CustomerCatalogView onOpenCart={() => setActiveTab('cart')} />
+          <CustomerCatalogView />
         )}
         {activeTab === 'cart' && isCustomer && (
           <CartView
@@ -169,14 +201,12 @@ const WorkspaceShell: React.FC<{
         )}
         {activeTab === 'import' && <ImportView />}
         {activeTab === 'setup' && <SetupView />}
+        {activeTab === 'tiers' && <TierPreviewView />}
       </main>
 
-      <footer className="text-center py-6 text-[10px] tracking-wide text-[#b0b0ae] border-t border-[#e8e8e6] bg-white">
-        AOKING DIRECT · PHASE 4B-04 PILOT &nbsp; / &nbsp;{' '}
-        {isCustomer
-          ? 'Order requests are pending sales confirmation; stock is not reserved.'
-          : '真实 PostgreSQL 数据 · 订单确认为只读，Phase 4B-05 开放'}
-        <span className="inline-flex items-center gap-1 ml-2">
+      <footer className="border-t border-[var(--line)] bg-white py-4 text-center text-[10px] tracking-wide text-[var(--muted)]">
+        AOKING DIRECT · ROUND 2 UI UAT
+        <span className="ml-2 inline-flex items-center gap-1">
           <Smartphone className="w-3 h-3" /> 375–1440 px
         </span>
       </footer>
@@ -189,34 +219,53 @@ export const RealWorkspace: React.FC<{
   onSignOut: () => void | Promise<void>;
 }> = ({ user, onSignOut }) => (
   <RealCartProvider user={user}>
-    <WorkspaceShell user={user} onSignOut={onSignOut} />
+    <InternalLanguageProvider userKey={user.username}>
+      <WorkspaceShell user={user} onSignOut={onSignOut} />
+    </InternalLanguageProvider>
   </RealCartProvider>
 );
 
-export const LoadingBlock: React.FC<{ label?: string }> = ({ label = 'Loading…' }) => (
-  <div className="flex items-center gap-2 text-xs text-slate-500 py-10 justify-center">
-    <RefreshCw className="w-4 h-4 animate-spin" />
-    {label}
-  </div>
-);
+export const LoadingBlock: React.FC<{ label?: string }> = ({ label = 'Loading…' }) => {
+  const { language } = useInternalLanguage();
+  return (
+    <div className="flex items-center gap-2 py-10 text-xs text-[var(--muted)] justify-center">
+      <RefreshCw className="w-4 h-4 animate-spin" />
+      {translateInternalText(label, language)}
+    </div>
+  );
+};
 
 export const ErrorBlock: React.FC<{ message: string; onRetry?: () => void }> = ({
   message,
   onRetry,
-}) => (
-  <div
-    role="alert"
-    className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 flex flex-wrap items-center gap-3"
-  >
-    <span className="flex-1">{message}</span>
-    {onRetry && (
-      <button
-        type="button"
-        onClick={onRetry}
-        className="px-3 py-1.5 rounded-lg bg-rose-600 text-white font-semibold"
-      >
-        Retry / 重试
-      </button>
-    )}
-  </div>
-);
+}) => {
+  const { t, language } = useInternalLanguage();
+  const needsChineseSummary = language === 'zh' && !/[\u3400-\u9fff]/.test(message);
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800"
+    >
+      {needsChineseSummary ? (
+        <div className="min-w-0 flex-1">
+          <div>{t('The operation failed. Please retry or contact an administrator.', '操作失败，请重试或联系管理员。')}</div>
+          <details className="mt-1 text-[10px]">
+            <summary className="cursor-pointer font-semibold">{t('Technical detail', '技术详情')}</summary>
+            <pre className="mt-1 whitespace-pre-wrap break-all font-mono">{message}</pre>
+          </details>
+        </div>
+      ) : (
+        <span className="flex-1">{message}</span>
+      )}
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white"
+        >
+          {t('Retry', '重试')}
+        </button>
+      )}
+    </div>
+  );
+};

@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { InventoryView } from '../src/real/views/InventoryView';
 import * as api from '../src/real/api';
 import { AuthApiError } from '../src/auth/api';
+import { InternalLanguageProvider } from '../src/real/internalLanguage';
 import type { InventoryRowDto, ProductDto, WarehouseDto } from '../src/real/types';
 
 vi.mock('../src/real/api');
@@ -30,6 +31,7 @@ const existing: InventoryRowDto = {
 let serverRows: InventoryRowDto[];
 let serverWarehouses: WarehouseDto[];
 beforeEach(() => {
+  window.localStorage.setItem('aoking.internal.language.warehouse-test', 'zh');
   vi.resetAllMocks(); serverRows = [existing]; serverWarehouses = warehouses.map(item => ({ ...item }));
   vi.mocked(api.listAdminProducts).mockResolvedValue(products);
   vi.mocked(api.listWarehouses).mockImplementation(async () => serverWarehouses);
@@ -50,7 +52,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function openBoard() {
-  render(<InventoryView canManage canRead internal />);
+  render(<InternalLanguageProvider userKey="warehouse-test"><InventoryView canManage canRead internal /></InternalLanguageProvider>);
   await screen.findAllByTestId('inventory-row');
   fireEvent.click(screen.getByRole('button', { name: '仓库视图' }));
   return screen.findByTestId('warehouse-view');
@@ -265,11 +267,11 @@ describe('administrator warehouse registration', () => {
     fireEvent.change(name, { target: { value: '  ' } });
     fireEvent.click(within(card).getByTestId('warehouse-edit-save'));
     expect(api.updateWarehouse).not.toHaveBeenCalled();
-    expect(within(card).getByRole('alert').textContent).toContain('required');
+    expect(within(card).getByRole('alert').textContent).toContain('必填');
     fireEvent.change(name, { target: { value: '未保存名称' } });
     vi.mocked(api.updateWarehouse).mockRejectedValueOnce(new Error('Name update rejected.'));
     fireEvent.click(within(card).getByTestId('warehouse-edit-save'));
-    await within(card).findByText('Name update rejected.');
+    await within(card).findByText('无法保存仓库名称。');
     expect((name as HTMLInputElement).value).toBe('未保存名称');
     fireEvent.click(within(card).getByTestId('warehouse-edit-cancel'));
     expect(within(card).queryByTestId('warehouse-edit-name-zh')).toBeNull();
@@ -279,7 +281,7 @@ describe('administrator warehouse registration', () => {
   });
 
   it('does not expose warehouse management or drag controls to read-only users', async () => {
-    render(<InventoryView canManage={false} canRead internal />);
+    render(<InternalLanguageProvider userKey="warehouse-test"><InventoryView canManage={false} canRead internal /></InternalLanguageProvider>);
     await screen.findAllByTestId('inventory-row');
     expect(screen.queryByRole('button', { name: '仓库视图' })).toBeNull();
     expect(screen.queryByTestId('warehouse-sku-drag')).toBeNull();

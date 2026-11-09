@@ -23,6 +23,7 @@ import {
   Building2,
   CheckCircle2,
 } from 'lucide-react';
+import { BrandLockup } from './BrandLockup';
 
 interface SidebarProps {
   isMobileOpen: boolean;
@@ -104,19 +105,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
         }`}
       >
         {/* Brand Header */}
-        <div className="h-[76px] px-6 flex items-center gap-3 border-b border-[#e8e8e6] shrink-0">
-          <div className="relative w-9 h-9 bg-[#171717] rounded-[10px] flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
-            <div className="w-[19px] h-[19px] border-2 border-white rotate-45 rounded-[3px]" />
-            <div className="absolute right-1.5 bottom-1.5 w-[11px] h-[11px] bg-[#ff681e] rounded-[2px]" />
-          </div>
-          <div>
-            <div className="text-[17px] font-extrabold tracking-[-0.9px] text-[#151515] leading-none">
-              AOKING<span className="text-[#ff681e]">Direct</span>
-            </div>
-            <div className="text-[9px] font-bold tracking-[2.1px] text-[#989b9b] mt-1 uppercase">
-              SPOT OPERATIONS
-            </div>
-          </div>
+        <div className="h-[76px] px-6 flex items-center border-b border-[#e8e8e6] shrink-0">
+          <BrandLockup size="sm" testId="brand-lockup-sidebar" />
         </div>
 
         {/* Scrollable Navigation */}

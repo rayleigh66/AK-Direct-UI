@@ -19,6 +19,12 @@ interface SearchableComboboxProps {
   testId?: string;
   disabled?: boolean;
   className?: string;
+  /**
+   * When true, ending a search without choosing an option clears the current
+   * value instead of silently restoring it. Required where a previously saved
+   * selection must not be submitted after the customer searched for another.
+   */
+  clearOnUnselectedQuery?: boolean;
 }
 
 /**
@@ -36,6 +42,7 @@ export const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
   testId,
   disabled = false,
   className = '',
+  clearOnUnselectedQuery = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -47,6 +54,20 @@ export const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
 
   const selected = options.find(option => option.value === value);
   const displayValue = dirty ? query : selected?.label ?? '';
+
+  // The outside-pointer listener is registered once per open session, so keep
+  // the latest editing state in a ref instead of a stale closure.
+  const closeState = useRef({ dirty, onChange, clearOnUnselectedQuery });
+  closeState.current = { dirty, onChange, clearOnUnselectedQuery };
+
+  const closeSearch = () => {
+    setOpen(false);
+    if (closeState.current.clearOnUnselectedQuery && closeState.current.dirty) {
+      closeState.current.onChange('');
+    }
+    setDirty(false);
+    setQuery('');
+  };
 
   const filtered = useMemo(() => {
     const needle = dirty ? query.trim().toLowerCase() : '';
@@ -62,9 +83,7 @@ export const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
     if (!open) return;
     const closeOnOutside = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-        setDirty(false);
-        setQuery('');
+        closeSearch();
       }
     };
     document.addEventListener('pointerdown', closeOnOutside);
@@ -117,9 +136,7 @@ export const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
             if (!open) openMenu();
           }}
           onBlur={() => {
-            setOpen(false);
-            setDirty(false);
-            setQuery('');
+            closeSearch();
           }}
           onChange={event => {
             setDirty(true);
@@ -140,9 +157,7 @@ export const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
               return;
             }
             if (event.key === 'Escape') {
-              setOpen(false);
-              setDirty(false);
-              setQuery('');
+              closeSearch();
               return;
             }
             if (event.key === 'Enter' && open && activeIndex >= 0) {

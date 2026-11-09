@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, ImagePlus, Plus, Search, Star, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, ImagePlus, List, LayoutGrid, Plus, Search, Star, Trash2 } from 'lucide-react';
 import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 import {
   createProduct,
@@ -28,6 +28,7 @@ import type {
 } from '../types';
 import { usdFromCents } from '../cart';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
+import { Localized, useInternalLanguage } from '../internalLanguage';
 
 const inputClass =
   'w-full h-10 px-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
@@ -44,6 +45,21 @@ export const AdminCatalogView: React.FC<{ canWrite: boolean }> = ({ canWrite }) 
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    try {
+      return window.localStorage.getItem('aoking.real.adminCatalogView') === 'grid' ? 'grid' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('aoking.real.adminCatalogView', viewMode);
+    } catch {
+      /* preference is a convenience */
+    }
+  }, [viewMode]);
 
   const refresh = async (): Promise<void> => {
     const [productItems, brandItems, seriesItems, tagItems] = await Promise.all([
@@ -93,6 +109,7 @@ export const AdminCatalogView: React.FC<{ canWrite: boolean }> = ({ canWrite }) 
   if (loading) return <LoadingBlock label="Loading products… / 正在加载商品…" />;
 
   return (
+    <Localized>
     <div className="space-y-4">
       {error && <ErrorBlock message={error} onRetry={load} />}
       {notice && (
@@ -113,6 +130,26 @@ export const AdminCatalogView: React.FC<{ canWrite: boolean }> = ({ canWrite }) 
               data-testid="admin-product-search"
             />
           </label>
+          <div className="inline-flex rounded-xl border border-slate-300 bg-white p-0.5" role="group" aria-label="Product view / 商品视图">
+            <button
+              type="button"
+              aria-pressed={viewMode === 'grid'}
+              onClick={() => setViewMode('grid')}
+              data-testid="admin-product-view-grid"
+              className={`flex min-h-8 items-center gap-1 rounded-[8px] px-2.5 text-[11px] font-bold ${viewMode === 'grid' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" /> Grid / 网格
+            </button>
+            <button
+              type="button"
+              aria-pressed={viewMode === 'list'}
+              onClick={() => setViewMode('list')}
+              data-testid="admin-product-view-list"
+              className={`flex min-h-8 items-center gap-1 rounded-[8px] px-2.5 text-[11px] font-bold ${viewMode === 'list' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+            >
+              <List className="h-3.5 w-3.5" /> List / 列表
+            </button>
+          </div>
           {canWrite && (
             <button
               type="button"
@@ -137,10 +174,11 @@ export const AdminCatalogView: React.FC<{ canWrite: boolean }> = ({ canWrite }) 
         )}
       </section>
 
-      <div className="space-y-3">
+      <div className={viewMode === 'grid' ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-3'} data-testid="admin-product-view" data-view-mode={viewMode}>
         {visible.map(product => (
           <ProductCard
             key={product.id}
+            layout={viewMode}
             product={product}
             brands={brands}
             series={series}
@@ -158,6 +196,7 @@ export const AdminCatalogView: React.FC<{ canWrite: boolean }> = ({ canWrite }) 
         )}
       </div>
     </div>
+  </Localized>
   );
 };
 
@@ -183,6 +222,7 @@ const CreateProductForm: React.FC<{
     setForm(current => ({ ...current, [key]: value }));
 
   return (
+    <Localized>
     <form
       className="grid sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100"
       onSubmit={async event => {
@@ -315,6 +355,7 @@ const CreateProductForm: React.FC<{
         {busy ? 'Creating…' : 'Create draft / 创建草稿'}
       </button>
     </form>
+  </Localized>
   );
 };
 
@@ -327,6 +368,7 @@ interface DestructiveRequest {
 }
 
 const ProductCard: React.FC<{
+  layout: 'grid' | 'list';
   product: ProductDto;
   brands: BrandDto[];
   series: SeriesDto[];
@@ -335,7 +377,8 @@ const ProductCard: React.FC<{
   expanded: boolean;
   onToggle: () => void;
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
-}> = ({ product, brands, series, tags, canWrite, expanded, onToggle, run }) => {
+}> = ({ layout, product, brands, series, tags, canWrite, expanded, onToggle, run }) => {
+  const { t } = useInternalLanguage();
   const primary = product.images.find(image => image.isPrimary) ?? product.images[0];
   const activeSkus = product.skus.filter(sku => sku.sellableStatus === 'active').length;
   const [impact, setImpact] = useState<
@@ -367,17 +410,24 @@ const ProductCard: React.FC<{
   };
 
   return (
+    <Localized>
     <section
-      className="bg-white border border-slate-200 rounded-2xl overflow-hidden"
+      className={`overflow-hidden rounded-2xl border border-[var(--card-border)] bg-white shadow-[var(--shadow)] ${
+        layout === 'grid' && expanded ? 'sm:col-span-2 xl:col-span-3' : ''
+      }`}
       data-testid="admin-product-card"
       data-product-code={product.productCode}
     >
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-3 sm:p-4 text-left"
+        className={`w-full gap-3 p-3 text-left sm:p-4 ${
+          layout === 'grid' ? 'flex flex-col items-stretch' : 'flex items-center'
+        }`}
       >
-        <div className="w-14 h-14 rounded-xl bg-[#f3f3f1] overflow-hidden shrink-0">
+        <div className={`overflow-hidden rounded-xl bg-[#f3f3f1] ${
+          layout === 'grid' ? 'h-40 w-full' : 'h-14 w-14 shrink-0'
+        }`}>
           {primary && <img src={primary.url} alt="" className="w-full h-full object-cover" />}
         </div>
         <div className="min-w-0 flex-1">
@@ -387,11 +437,14 @@ const ProductCard: React.FC<{
           <div className="text-sm font-bold truncate">{product.titleEn}</div>
           <div className="text-[11px] text-slate-500 truncate">{product.title}</div>
         </div>
-        <div className="hidden sm:block text-right text-[11px] text-slate-500">
+        <div className={`text-[11px] text-slate-500 ${layout === 'grid' ? 'flex w-full items-center justify-between text-left' : 'hidden text-right sm:block'}`}>
           <div>
-            {product.skus.length} SKU · {activeSkus} active
+            {t(
+              `${product.skus.length} SKU · ${activeSkus} active`,
+              `${product.skus.length} 个 SKU · ${activeSkus} 个启用`
+            )}
           </div>
-          <div>{product.images.length} images</div>
+          <div>{t(`${product.images.length} images`, `${product.images.length} 张图片`)}</div>
         </div>
         <span
           className={`text-[10px] font-bold px-2 py-1 rounded-full border ${
@@ -508,8 +561,10 @@ const ProductCard: React.FC<{
                     className="min-h-[42px] px-4 rounded-xl bg-rose-600 text-white text-xs font-bold"
                     data-testid="impact-confirm"
                   >
-                    Confirm and cancel {impact.preview.affectedOrders.length} order(s)
-                  </button>
+                    {t(
+                      `Confirm and cancel ${impact.preview.affectedOrders.length} order(s)`,
+                      `确认取消 ${impact.preview.affectedOrders.length} 个订单`
+                    )}                  </button>
                 </div>
               </div>
             </div>
@@ -517,6 +572,7 @@ const ProductCard: React.FC<{
         </div>
       )}
     </section>
+  </Localized>
   );
 };
 
@@ -558,6 +614,7 @@ const ProductEditor: React.FC<{
   }, [product]);
 
   return (
+    <Localized>
     <form
       className="grid sm:grid-cols-2 gap-3"
       onSubmit={event => {
@@ -694,6 +751,7 @@ const ProductEditor: React.FC<{
         </button>
       )}
     </form>
+  </Localized>
   );
 };
 
@@ -704,6 +762,7 @@ const ImageManager: React.FC<{
 }> = ({ product, canWrite, run }) => {
   const [busy, setBusy] = useState(false);
   return (
+    <Localized>
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-bold text-slate-700">
@@ -789,6 +848,7 @@ const ImageManager: React.FC<{
         )}
       </div>
     </div>
+  </Localized>
   );
 };
 
@@ -798,6 +858,7 @@ const SkuManager: React.FC<{
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
   requestDestructive: (request: DestructiveRequest) => Promise<void>;
 }> = ({ product, canWrite, run, requestDestructive }) => {
+  const { t } = useInternalLanguage();
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
     skuCode: '',
@@ -809,6 +870,7 @@ const SkuManager: React.FC<{
   });
 
   return (
+    <Localized>
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-xs font-bold text-slate-700">
@@ -926,7 +988,7 @@ const SkuManager: React.FC<{
               <option value="">Use product image</option>
               {product.images.map((image, index) => (
                 <option key={image.id} value={image.id}>
-                  Image {index + 1}
+                  {t(`Image ${index + 1}`, `图片 ${index + 1}`)}
                 </option>
               ))}
             </select>
@@ -941,6 +1003,7 @@ const SkuManager: React.FC<{
         </form>
       )}
     </div>
+  </Localized>
   );
 };
 
@@ -950,10 +1013,12 @@ const SkuRow: React.FC<{
   run: (action: () => Promise<unknown>, success: string) => Promise<void>;
   requestDestructive: (request: DestructiveRequest) => Promise<void>;
 }> = ({ sku, canWrite, run, requestDestructive }) => {
+  const { t } = useInternalLanguage();
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(usd(sku.basePriceCents));
 
   return (
+    <Localized>
     <div className="p-3 rounded-xl border border-slate-200 text-xs space-y-2" data-testid="sku-row">
       <div className="flex flex-wrap items-center gap-2">
         <span
@@ -970,7 +1035,11 @@ const SkuRow: React.FC<{
               : 'bg-slate-50 text-slate-500 border-slate-200'
           }`}
         >
-          {sku.sellableStatus}
+          {sku.sellableStatus === 'active'
+            ? t('active', '启用')
+            : sku.sellableStatus === 'discontinued'
+              ? t('discontinued', '停用')
+              : sku.sellableStatus}
         </span>
         {canWrite && (
           <button
@@ -1041,5 +1110,6 @@ const SkuRow: React.FC<{
         </form>
       )}
     </div>
+  </Localized>
   );
 };

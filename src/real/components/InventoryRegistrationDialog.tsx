@@ -4,6 +4,7 @@ import { AuthApiError } from '../../auth/api';
 import { SelectAllOnFocusInput } from '../../components/ui/SelectAllOnFocusInput';
 import { listAdminInventory, registerInventory } from '../api';
 import type { InventoryRowDto, WarehouseDto } from '../types';
+import { Localized, useInternalLanguage } from '../internalLanguage';
 
 export const InventoryRegistrationDialog: React.FC<{
   sku: { id: string; skuCode: string; label: string };
@@ -12,6 +13,7 @@ export const InventoryRegistrationDialog: React.FC<{
   onExisting: (row: InventoryRowDto) => void;
   onRegistered: (row: InventoryRowDto) => Promise<void>;
 }> = ({ sku, warehouse, onClose, onExisting, onRegistered }) => {
+  const { t, language } = useInternalLanguage();
   const [onHand, setOnHand] = useState('');
   const [unsellable, setUnsellable] = useState('0');
   const [reason, setReason] = useState('');
@@ -53,7 +55,12 @@ export const InventoryRegistrationDialog: React.FC<{
     const count = Number(onHand), damaged = Number(unsellable);
     if (!onHand.trim() || !unsellable.trim() || !Number.isInteger(count) || count < 0 || count > 100_000_000 ||
       !Number.isInteger(damaged) || damaged < 0 || damaged > count || !reason.trim() || reason.trim().length > 500) {
-      setError('请填写 0–100000000 的整数数量、有效不可售数量及登记原因。'); return;
+      setError(
+        t(
+          'Enter whole quantities from 0–100000000, a valid unsellable quantity, and a registration reason.',
+          '请填写 0–100000000 的整数数量、有效不可售数量及登记原因。'
+        )
+      ); return;
     }
     pending.current = true; setBusy(true); setError('');
     let saved: InventoryRowDto;
@@ -68,7 +75,12 @@ export const InventoryRegistrationDialog: React.FC<{
         setError(err.message);
       } else {
         setUncertain(true); setVerified(false);
-        setError('提交结果尚未确认。请查询最新状态后再决定是否重新登记。');
+        setError(
+          t(
+            'The submission result is unconfirmed. Query the latest status before deciding whether to register again.',
+            '提交结果尚未确认。请查询最新状态后再决定是否重新登记。'
+          )
+        );
       }
       pending.current = false; setBusy(false); return;
     }
@@ -76,11 +88,14 @@ export const InventoryRegistrationDialog: React.FC<{
     if (!alive.current) return;
     setCommitted(true);
     try { await onRegistered(saved); if (alive.current) close.current(); }
-    catch { if (alive.current) setError('已登记成功，列表刷新失败。请关闭后刷新查看，请勿重复登记。'); }
+    catch { if (alive.current) setError(t(
+      'Registration succeeded but the list refresh failed. Close and refresh to verify; do not register again.',
+      '已登记成功，列表刷新失败。请关闭后刷新查看，请勿重复登记。'
+    )); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   };
   const fieldClass = 'mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm focus:ring-2 focus:ring-[#ff681e] focus:outline-none';
-  return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 sm:p-6">
+  return <Localized><div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 sm:p-6">
     <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId}
       className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl bg-white p-5 sm:p-6 shadow-xl outline-none"
       onKeyDown={event => {
@@ -100,10 +115,25 @@ export const InventoryRegistrationDialog: React.FC<{
       <p className="mt-3 font-mono text-sm font-semibold break-words">{sku.skuCode} → {warehouse.code}</p>
       <p className="mt-1 text-sm text-slate-500">{warehouse.name} · {warehouse.nameEn}</p>
       <p className="mt-3 text-xs leading-relaxed text-slate-600">登记该仓库实际盘点后的绝对库存数量。此操作不代表仓间调拨，也不会扣减其他仓库。</p>
-      {error && <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{error}</p>}
+      {error && <div role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        {language === 'zh' && !/[㐀-鿿]/.test(error) ? (
+          <>
+            <p>{t('The operation failed. Please retry or contact an administrator.', '操作失败，请重试或联系管理员。')}</p>
+            <details className="mt-1 text-[11px]">
+              <summary className="cursor-pointer font-semibold">{t('Technical detail', '技术详情')}</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-all font-mono">{error}</pre>
+            </details>
+          </>
+        ) : (
+          <p>{error}</p>
+        )}
+      </div>}
       {checking ? <p role="status" className="mt-4 text-sm text-slate-500">正在核对已有库存记录…</p> : existing ? <div className="mt-4 space-y-3">
         <p className="text-sm font-semibold">此 SKU 已在该仓库登记，请查看或独立调整已有库存。</p>
-        <p className="text-sm text-slate-600">在手 {existing.onHand} · 预占 {existing.reserved} · 不可售 {existing.unsellable} PCS · 版本 {existing.version}</p>
+        <p className="text-sm text-slate-600">{t(
+          `On hand ${existing.onHand} · Reserved ${existing.reserved} · Unsellable ${existing.unsellable} PCS · Version ${existing.version}`,
+          `在手 ${existing.onHand} · 预占 ${existing.reserved} · 不可售 ${existing.unsellable} PCS · 版本 ${existing.version}`
+        )}</p>
         <button type="button" className="min-h-11 rounded-xl bg-slate-900 px-4 text-sm font-bold text-white" onClick={() => onExisting(existing)}>查看／调整已有库存</button>
       </div> : committed ? <p role="status" className="mt-4 text-sm font-semibold text-emerald-700">库存登记已保存。</p> : <form noValidate data-testid="warehouse-registration-form" className="mt-4 space-y-4" onSubmit={event => { event.preventDefault(); void submit(); }}>
         <label className="block text-sm font-semibold">登记后在手数量
@@ -124,5 +154,5 @@ export const InventoryRegistrationDialog: React.FC<{
       </form>}
       {!checking && !committed && !verified && <button type="button" disabled={busy} className="mt-3 min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold" onClick={() => void lookup()}>查询最新状态</button>}
     </div>
-  </div>;
+  </div></Localized>;
 };

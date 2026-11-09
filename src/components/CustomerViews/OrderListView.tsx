@@ -21,7 +21,6 @@ import {
   Truck,
   Ship,
   MapPin,
-  Calendar,
   CheckCircle2,
   FileText,
 } from 'lucide-react';
@@ -29,6 +28,8 @@ import { Order } from '../../types';
 import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
 import { QuantityField } from '../ui/QuantityField';
 import { HelpTooltip } from '../ui/HelpTooltip';
+import { EnglishDateField } from '../ui/EnglishDateField';
+import { formatEnglishDate } from '../../utils/dateDisplay';
 
 function shippingDraftKey(companyId?: string) {
   return `aoking-shipping-draft:${companyId ?? 'guest'}`;
@@ -64,9 +65,12 @@ export const OrderListView: React.FC = () => {
     () => readShippingDraft(currentCompany?.id),
     [currentCompany?.id]
   );
-  const [shippingMethod, setShippingMethod] = useState<Order['shipping_method']>(
-    (initialShippingDraft?.shippingMethod as Order['shipping_method']) || 'Sea'
-  );
+  const [shippingMethod, setShippingMethod] = useState<Order['shipping_method']>(() => {
+    const saved = initialShippingDraft?.shippingMethod;
+    return saved === 'Sea' || saved === 'Air' || saved === 'Express' || saved === 'Customer Pickup'
+      ? (saved as Order['shipping_method'])
+      : 'Sea';
+  });
   const [destinationCountry, setDestinationCountry] = useState<string>(
     initialShippingDraft?.destinationCountry || currentCompany?.country_alpha3 || 'USA'
   );
@@ -199,6 +203,14 @@ export const OrderListView: React.FC = () => {
       setErrorMessage('Your order list is empty.');
       return;
     }
+    if (!expectedDate) {
+      setErrorMessage('Choose an expected ship date.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expectedDate)) {
+      setErrorMessage('Expected ship date must be a valid date.');
+      return;
+    }
     if (privacyCheck.hasViolation) {
       setErrorMessage(privacyCheck.message ?? 'Privacy check failed.');
       return;
@@ -276,6 +288,12 @@ export const OrderListView: React.FC = () => {
             <span className="text-slate-400">Reference total:</span>
             <span data-testid="success-total-usd" className="font-mono font-bold text-slate-900">
               USD ${submittedTotal.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Expected ship:</span>
+            <span data-testid="success-expected-ship" className="font-semibold text-slate-800">
+              {formatEnglishDate(submittedOrder.expected_ship_date)}
             </span>
           </div>
           <div className="flex justify-between">
@@ -553,16 +571,13 @@ export const OrderListView: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Expected ship date
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={expectedDate}
-                  onChange={e => setExpectedDate(e.target.value)}
-                  className="w-full h-11 pl-10 pr-3 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900"
-                  required
-                />
-                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
-              </div>
+              <EnglishDateField
+                value={expectedDate}
+                onChange={setExpectedDate}
+                ariaLabel="Expected ship date"
+                testId="expected-ship-date"
+                required
+              />
             </div>
 
             {/* Shipping Requirements (with strict privacy filter) */}

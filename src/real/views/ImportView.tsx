@@ -1,13 +1,22 @@
 import React, { useRef, useState } from 'react';
-import { CheckCircle2, FileSpreadsheet, Upload, X } from 'lucide-react';
+import { CheckCircle2, Download, FileSpreadsheet, Upload, X } from 'lucide-react';
 import { parseCsv, parseInventoryTable, type InventoryImportLine } from '../../utils/inventoryImport';
 import { commitImport, previewImport } from '../api';
 import type { CommitImportResultDto, ImportPreviewDto } from '../types';
 import { ErrorBlock } from '../RealWorkspace';
+import { Localized, useInternalLanguage } from '../internalLanguage';
+import { formatEnglishDateTime } from '../../utils/dateDisplay';
+import {
+  INVENTORY_TEMPLATE_COLUMNS,
+  INVENTORY_TEMPLATE_CSV,
+  INVENTORY_TEMPLATE_EXAMPLE,
+  downloadInventoryTemplate,
+} from '../../utils/inventoryTemplate';
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
 export const ImportView: React.FC = () => {
+  const { t } = useInternalLanguage();
   const fileInput = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
   const [lines, setLines] = useState<InventoryImportLine[]>([]);
@@ -90,6 +99,7 @@ export const ImportView: React.FC = () => {
   };
 
   return (
+    <Localized>
     <div className="space-y-4">
       {error && <ErrorBlock message={error} />}
 
@@ -122,7 +132,7 @@ export const ImportView: React.FC = () => {
           </label>
           {fileName && (
             <span className="text-xs text-slate-500 flex items-center gap-1">
-              {fileName} · {lines.length} rows
+              {fileName} · {t(`${lines.length} rows`, `${lines.length} 行`)}
               <button type="button" onClick={reset} aria-label="Clear file">
                 <X className="w-4 h-4" />
               </button>
@@ -130,13 +140,50 @@ export const ImportView: React.FC = () => {
           )}
         </div>
 
-        <details className="text-[11px] text-slate-500">
-          <summary className="cursor-pointer font-semibold">Download template / 下载模板</summary>
-          <pre className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-200 overflow-x-auto">
-{`sku_code,warehouse_code,on_hand,unsellable
-AKT-0001-BLK,WH-SH,120,0`}
-          </pre>
-        </details>
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--subtle-bg)] p-3 text-[11px] text-[var(--muted)]">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="font-bold text-[var(--ink)]">Download CSV template / 下载 CSV 模板</div>
+            <code
+              title={INVENTORY_TEMPLATE_CSV.trim()}
+              className="block whitespace-pre-wrap break-all font-mono text-[10px]"
+              data-testid="import-template-preview"
+            >
+              {INVENTORY_TEMPLATE_CSV.trim()}
+            </code>
+            <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2" data-testid="import-template-guide">
+              {INVENTORY_TEMPLATE_COLUMNS.map(column => (
+                <div key={column.key} className="flex gap-2">
+                  <dt className="shrink-0 font-mono font-bold text-[var(--ink)]">{column.key}</dt>
+                  <dd>{t(column.en, column.zh)}</dd>
+                </div>
+              ))}
+            </dl>
+            <div
+              data-testid="import-template-warning"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-semibold text-amber-900"
+            >
+              {t(
+                `Replace the example SKU (${INVENTORY_TEMPLATE_EXAMPLE.sku_code}) and warehouse code (${INVENTORY_TEMPLATE_EXAMPLE.warehouse_code}) before uploading. The example row is never written automatically; the server validates every real SKU and warehouse.`,
+                `上传前请替换示例 SKU（${INVENTORY_TEMPLATE_EXAMPLE.sku_code}）与仓库编码（${INVENTORY_TEMPLATE_EXAMPLE.warehouse_code}）。示例行不会自动写入；服务器会校验每个真实 SKU 与仓库。`
+              )}
+            </div>
+            <div>
+              {t(
+                'Header plus one example row, ready for Excel. Downloading never writes inventory.',
+                '表头加一行示例，可直接用 Excel 打开。下载不会写入库存。'
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={downloadInventoryTemplate}
+            data-testid="import-template-download"
+            className="fo-btn flex items-center gap-1.5"
+            aria-label="Download CSV template"
+          >
+            <Download className="h-4 w-4" /> Download CSV template
+          </button>
+        </div>
       </section>
 
       {preview && !result && (
@@ -201,8 +248,10 @@ AKT-0001-BLK,WH-SH,120,0`}
             {result.alreadyCommitted ? 'Already imported (idempotent)' : 'Import committed'}
           </div>
           <p>
-            {result.rows.length} rows applied at {new Date(result.committedAt).toLocaleString()}.
-            Repeated confirmation with the same preview does not change stock again.
+            {t(
+              `${result.rows.length} rows applied at ${formatEnglishDateTime(result.committedAt)}. Repeated confirmation with the same preview does not change stock again.`,
+              `${result.rows.length} 行已应用，时间 ${formatEnglishDateTime(result.committedAt)}。使用同一预览重复确认不会再次变更库存。`
+            )}
           </p>
           <button
             type="button"
@@ -214,5 +263,6 @@ AKT-0001-BLK,WH-SH,120,0`}
         </section>
       )}
     </div>
+    </Localized>
   );
 };
