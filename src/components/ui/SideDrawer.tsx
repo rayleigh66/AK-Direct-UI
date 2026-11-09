@@ -81,14 +81,29 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   useEffect(() => {
     if (!mounted) return;
     const body = document.body;
-    const previousOverflow = body.style.overflow;
-    const previousPadding = body.style.paddingRight;
+    const scrollY = window.scrollY;
+    const previous = {
+      overflow: body.style.overflow,
+      paddingRight: body.style.paddingRight,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    };
     const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    // Freeze the body at its current offset so mobile browsers cannot reset the
+    // list position behind the drawer; the cleanup restores the exact scroll.
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.width = '100%';
     body.style.overflow = 'hidden';
     if (scrollbar > 0) body.style.paddingRight = `${scrollbar}px`;
     return () => {
-      body.style.overflow = previousOverflow;
-      body.style.paddingRight = previousPadding;
+      body.style.overflow = previous.overflow;
+      body.style.paddingRight = previous.paddingRight;
+      body.style.position = previous.position;
+      body.style.top = previous.top;
+      body.style.width = previous.width;
+      window.scrollTo(0, scrollY);
     };
   }, [mounted]);
 
