@@ -842,15 +842,21 @@ describeDb('authentication, RBAC and session isolation', () => {
     const accounts = await admin.agent.get(`/api/admin/companies/${companyAId}/accounts`);
     expect(accounts.status).toBe(200);
     expect(accounts.body.accounts).toHaveLength(1);
-    expect(Object.keys(accounts.body.accounts[0]).sort()).toEqual([
+    // `lastLoginAt` is optional and appears only after a successful login.
+    const allowedKeys = [
       'accountLetter',
       'createdAt',
       'id',
+      'lastLoginAt',
       'mustChangePassword',
       'status',
       'updatedAt',
       'username',
-    ]);
+    ];
+    const returnedKeys = Object.keys(accounts.body.accounts[0]);
+    expect(returnedKeys.every(key => allowedKeys.includes(key))).toBe(true);
+    expect(returnedKeys).toContain('username');
+    expect(returnedKeys).toContain('accountLetter');
     expect(accounts.body.accounts[0]).toMatchObject({
       username: 'AK000101A',
       accountLetter: 'A',
