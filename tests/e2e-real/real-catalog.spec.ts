@@ -65,6 +65,15 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   );
   expect(editOverflow).toBeLessThanOrEqual(1);
   await screenshot(page, `warehouse-edit-${testInfo.project.name}`);
+  if (testInfo.project.name === 'real-desktop-1440') {
+    await page.setViewportSize({ width: 430, height: 900 });
+    const mobileOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(mobileOverflow).toBeLessThanOrEqual(1);
+    await screenshot(page, 'warehouse-edit-real-430');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
 
   await page.getByTestId('series-name-zh').fill('E2E 系列');
   await page.getByTestId('series-name-en').fill(seriesName);
@@ -168,4 +177,12 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   );
   await expect(page.getByTestId('catalog-detail')).toContainText('Matte Black');
   await screenshot(page, `customer-detail-${testInfo.project.name}`);
+  if (testInfo.project.name === 'real-desktop-1440') {
+    await page.setViewportSize({ width: 430, height: 900 });
+    const mobileOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(mobileOverflow).toBeLessThanOrEqual(1);
+    await screenshot(page, 'customer-catalog-real-430');
+  }
 });

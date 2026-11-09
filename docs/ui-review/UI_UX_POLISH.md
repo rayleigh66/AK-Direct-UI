@@ -87,8 +87,9 @@ Mock (`docs/ui-review/ui-polish/`):
 
 Real:
 
-- `docs/ui-review/real-catalog/warehouse-edit-real-desktop-1440.png`
-- `docs/ui-review/real-catalog/warehouse-edit-real-mobile-390.png`
+- `docs/ui-review/real-catalog/warehouse-edit-real-desktop-1440.png`, `warehouse-edit-real-mobile-390.png`, `warehouse-edit-real-430.png`
+- `docs/ui-review/real-catalog/customer-catalog-real-430.png`
+- `docs/ui-review/real-orders/sales-pending-orders-real-430.png`
 - refreshed customer catalogue/detail, shared-cart, customer-order and sales-pending-order captures.
 
 ## 3. Interaction tests
@@ -112,7 +113,7 @@ Existing Mock suites were updated only where the old labels or old `+10` accumul
 
 ### Real Playwright
 
-`tests/e2e-real/real-catalog.spec.ts` now edits both warehouse names through the real Setup UI and checks no horizontal overflow at 390/1440. `tests/e2e-real/real-orders.spec.ts` checks the shared status badge and the internal `中文 / EN` toggle.
+`tests/e2e-real/real-catalog.spec.ts` edits both warehouse names through the real Setup UI and checks no horizontal overflow at 390/1440, plus a 430 px resize of the Setup and customer catalogue views. `tests/e2e-real/real-orders.spec.ts` checks the shared status badge, the internal `中文 / EN` toggle and a 430 px sales-order resize.
 
 ### Local results
 

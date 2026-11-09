@@ -230,6 +230,12 @@ test('customer A and B share a cart, submit a real order and the salesperson see
     .getByRole('button', { name: 'EN' })
     .click();
   await expect(orderStatus).toHaveText('Pending confirmation');
+  if (!mobile) {
+    await page.setViewportSize({ width: 430, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'sales-pending-orders-real-430');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
   await expectNoHorizontalOverflow(page);
   await screenshot(page, `sales-pending-orders-${testInfo.project.name}`);
   await signOut(page);
