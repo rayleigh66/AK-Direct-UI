@@ -357,6 +357,7 @@ export async function listAdminCompanies(): Promise<AdminCustomerCompanyDto[]> {
     .companies;
 }
 
+/** Admin-only company projection behind the existing `companies.manage` permission. */
 export async function getAdminCompany(id: string): Promise<AdminCustomerCompanyDto> {
   return (
     await apiJson<{ company: AdminCustomerCompanyDto }>('GET', `/api/admin/companies/${id}`)
@@ -441,6 +442,7 @@ export async function setCompanySalesAssignment(
   ).company;
 }
 
+/** Active salespeople for the assignment display; existing `companies.manage` route. */
 export async function listSalesUsers(): Promise<AdminSalesUserDto[]> {
   return (await apiJson<{ users: AdminSalesUserDto[] }>('GET', '/api/admin/sales-users')).users;
 }

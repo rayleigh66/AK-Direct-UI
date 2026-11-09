@@ -1,23 +1,31 @@
-import React, { useEffect, useState } from 'react';
-import { ClipboardList, RefreshCw, ShieldAlert } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ClipboardList, RefreshCw, ShieldAlert } from 'lucide-react';
 import { AuthApiError } from '../../auth/api';
 import {
   cancelCustomerOrder,
+  getAdminCompany,
   getAdminOrder,
   getCustomerOrder,
   getSalesOrder,
   listAdminOrders,
   listCustomerOrders,
   listSalesOrders,
+  listSalesUsers,
   modifyOrderLines,
 } from '../api';
 import { usdFromCents } from '../cart';
-import type { CustomerOrderDto, InternalOrderDto } from '../types';
+import type {
+  AdminCustomerCompanyDto,
+  AdminSalesUserDto,
+  CustomerOrderDto,
+  InternalOrderDto,
+} from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { OrderStatusBadge } from '../../components/ui/OrderStatusBadge';
 import type { OrderStatus } from '../../types';
 import { shippingMethodLabel } from '../../utils/orderStatus';
 import { QuantityField } from '../../components/ui/QuantityField';
+import { SideDrawer } from '../../components/ui/SideDrawer';
 import { HelpTooltip } from '../../components/ui/HelpTooltip';
 import { formatEnglishDate } from '../../utils/dateDisplay';
 import { useInternalLanguage } from '../internalLanguage';
@@ -45,6 +53,15 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [adminDrawerOpen, setAdminDrawerOpen] = useState(false);
+  const [adminDrawerKind, setAdminDrawerKind] = useState<'order' | 'customer'>('order');
+  const [customerOrder, setCustomerOrder] = useState<InternalOrderDto | null>(null);
+  const [customerCompany, setCustomerCompany] = useState<AdminCustomerCompanyDto | null>(null);
+  const [customerLoading, setCustomerLoading] = useState(false);
+  const [customerError, setCustomerError] = useState('');
+  const [salesUsers, setSalesUsers] = useState<AdminSalesUserDto[]>([]);
+  const detailRequest = useRef(0);
+  const customerRequest = useRef(0);
   const { language } = useInternalLanguage();
   const text = (en: string, zh: string) => (scope === 'customer' ? en : language === 'zh' ? zh : en);
   const localizedError = (value: string) =>
@@ -73,7 +90,20 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
 
   useEffect(load, [scope]);
 
+  useEffect(() => {
+    if (scope !== 'admin') return;
+    listSalesUsers()
+      .then(setSalesUsers)
+      .catch(() => setSalesUsers([]));
+  }, [scope]);
+
   const loadDetail = async (id: string): Promise<void> => {
+    const token = ++detailRequest.current;
+    if (scope === 'admin') {
+      setAdminDrawerKind('order');
+      setAdminDrawerOpen(true);
+      setCustomerError('');
+    }
     setSelectedId(id);
     setDetailLoading(true);
     setActionError('');
@@ -85,16 +115,68 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
           : scope === 'sales'
             ? await getSalesOrder(id)
             : await getAdminOrder(id);
+      if (token !== detailRequest.current) return;
       setDetail(item);
       setLineDrafts(
         Object.fromEntries(item.lines.map(line => [line.skuId, String(line.quantity)]))
       );
     } catch (err) {
+      if (token !== detailRequest.current) return;
       setActionError(err instanceof Error ? err.message : 'The order could not be loaded.');
       setDetail(null);
     } finally {
-      setDetailLoading(false);
+      if (token === detailRequest.current) setDetailLoading(false);
     }
+  };
+
+  const openOrder = (order: OrderView) => {
+    void loadDetail(order.id);
+  };
+
+  const openCustomer = (order: InternalOrderDto) => {
+    const token = ++customerRequest.current;
+    setCustomerOrder(order);
+    setCustomerCompany(null);
+    setCustomerError('');
+    setCustomerLoading(true);
+    setAdminDrawerKind('customer');
+    setAdminDrawerOpen(true);
+    getAdminCompany(order.company.id)
+      .then(company => {
+        if (token === customerRequest.current) setCustomerCompany(company);
+      })
+      .catch(err => {
+        if (token === customerRequest.current) {
+          setCustomerError(
+            err instanceof Error ? err.message : 'The customer details could not be loaded.'
+          );
+        }
+      })
+      .finally(() => {
+        if (token === customerRequest.current) setCustomerLoading(false);
+      });
+  };
+
+  const closeAdminDrawer = () => setAdminDrawerOpen(false);
+
+  const clearAdminDrawer = () => {
+    setAdminDrawerOpen(false);
+    setSelectedId(null);
+    setDetail(null);
+    setCustomerOrder(null);
+    setCustomerCompany(null);
+    setCustomerError('');
+  };
+
+  const closeInlineDetail = () => {
+    setSelectedId(null);
+    setDetail(null);
+  };
+
+  const salesperson = (id?: string | null) => {
+    if (!id) return text('Unassigned', '未分配');
+    const user = salesUsers.find(item => item.id === id);
+    return user ? `${user.name} · ${user.email}` : id;
   };
 
   const refreshAll = async (id?: string) => {
@@ -171,6 +253,113 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
   }
   if (error) return <ErrorBlock message={localizedError(error)} onRetry={load} />;
 
+  const renderCustomerDetail = () => {
+    const order = customerOrder;
+    if (!order) return null;
+    const company = customerCompany;
+    const assignedSalesUserId = company?.assignedSalesUserId ?? order.currentAssignedSalesUserId;
+    return (
+      <div data-testid="customer-detail" className="space-y-4">
+        {customerLoading ? (
+          <LoadingBlock label={text('Loading customer details…', '正在加载客户资料…')} />
+        ) : (
+          <>
+            {customerError && (
+              <ErrorBlock
+                message={localizedError(customerError)}
+                onRetry={() => openCustomer(order)}
+              />
+            )}
+            <div className="grid gap-2 text-xs sm:grid-cols-2" data-testid="customer-detail-company">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-slate-400">{text('Customer code', '客户编码')}</div>
+                <div className="font-mono font-semibold">
+                  {company?.customerCode ?? order.company.customerCode}
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-slate-400">{text('Customer name', '客户简称')}</div>
+                <div className="font-semibold">
+                  {company?.shortName ?? order.company.shortName}
+                </div>
+              </div>
+              {company && (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-slate-400">{text('Country', '国家')}</div>
+                    <div className="font-semibold">{company.countryAlpha3}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-slate-400">{text('Status', '状态')}</div>
+                    <div className="font-semibold">
+                      {company.status === 'active'
+                        ? text('Active', '启用')
+                        : text('Suspended', '已停用')}
+                    </div>
+                  </div>
+                  {company.internalNickname && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-slate-400">
+                        {text('Internal nickname', '内部简称')}
+                      </div>
+                      <div className="font-semibold">{company.internalNickname}</div>
+                    </div>
+                  )}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-slate-400">{text('Created', '创建时间')}</div>
+                    <div className="font-semibold">{formatEnglishDate(company.createdAt)}</div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div
+              className="rounded-xl border border-slate-200 p-3 text-xs"
+              data-testid="customer-detail-order"
+            >
+              <div className="text-slate-400">{text('Related order', '关联订单')}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="font-mono font-bold">{order.orderNo}</span>
+                <OrderStatusBadge status={order.status as OrderStatus} language={language} />
+                <span className="ml-auto text-slate-500">
+                  {formatEnglishDate(order.submittedAt)}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-1 text-slate-600">
+                <div>
+                  {text('Submitted by', '下单账号')}{' '}
+                  <span className="font-mono">{order.submittedByUsername}</span>
+                </div>
+                <div>
+                  {text('Reference total', '参考总额')}{' '}
+                  {usdFromCents(order.referenceTotalCents)}
+                </div>
+                <div>
+                  {text('Expected ship', '预计发货')}{' '}
+                  {formatEnglishDate(order.expectedShipDate)}
+                </div>
+              </div>
+            </div>
+            <div
+              className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs"
+              data-testid="customer-detail-salesperson"
+            >
+              <div className="text-slate-400">{text('Assigned salesperson', '负责业务员')}</div>
+              <div className="font-semibold">{salesperson(assignedSalesUserId)}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadDetail(order.id)}
+              data-testid="customer-detail-back"
+              className="flex min-h-[40px] items-center gap-1.5 rounded-xl border border-slate-300 px-3 text-xs font-semibold"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> {text('Back to order', '返回订单')}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
@@ -221,13 +410,24 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       ) : (
         <div className="space-y-2">
           {orders.map(order => (
-            <button
+            <div
               key={order.id}
-              type="button"
-              onClick={() => void loadDetail(order.id)}
+              role="button"
+              tabIndex={0}
+              onClick={event => {
+                event.currentTarget.focus({ preventScroll: true });
+                openOrder(order);
+              }}
+              onKeyDown={event => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openOrder(order);
+                }
+              }}
               data-testid={scope === 'customer' ? 'customer-order-card' : 'internal-order-card'}
               data-order-no={order.orderNo}
-              className={`w-full text-left bg-white border rounded-2xl p-4 transition-colors ${
+              className={`w-full cursor-pointer text-left bg-white border rounded-2xl p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff681e] ${
                 selectedId === order.id
                   ? 'border-[#ff681e]'
                   : 'border-slate-200 hover:border-slate-300'
@@ -240,11 +440,27 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   language={scope === 'customer' ? 'en' : language}
                   testId={`internal-order-status-${order.id}`}
                 />
-                {isInternal(order) && (
-                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
-                    {order.company.customerCode} · {order.company.shortName}
-                  </span>
-                )}
+                {isInternal(order) &&
+                  (scope === 'admin' ? (
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation();
+                        openCustomer(order);
+                      }}
+                      onKeyDown={event => event.stopPropagation()}
+                      data-testid="admin-order-customer-link"
+                      data-company-code={order.company.customerCode}
+                      aria-label={`Open customer details for ${order.company.customerCode} ${order.company.shortName}`}
+                      className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 underline-offset-2 hover:bg-slate-200 hover:underline"
+                    >
+                      {order.company.customerCode} · {order.company.shortName}
+                    </button>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
+                      {order.company.customerCode} · {order.company.shortName}
+                    </span>
+                  ))}
                 <span className="ml-auto text-slate-500">{formatEnglishDate(order.submittedAt)}</span>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
@@ -262,20 +478,14 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   <span>{text('Buyer', '下单人')} {order.submittedByUsername}</span>
                 )}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
 
-      {(detail || detailLoading) && (
-        <section
-          className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4"
-          data-testid="order-detail"
-        >
-          {detailLoading || !detail ? (
-            <LoadingBlock label={text('Loading order detail…', '正在加载订单详情…')} />
-          ) : (
-            <>
+      {(() => {
+        const orderContent = detail ? (
+          <div data-testid="order-detail" className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <div>
                   <div className="text-[10px] font-mono text-slate-400">
@@ -291,25 +501,35 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   {text('Revision', '版本')} {detail.revision} ·{' '}
                   {text('updated', '更新于')} {formatEnglishDate(detail.updatedAt)}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedId(null);
-                    setDetail(null);
-                  }}
-                  className="ml-auto min-h-[36px] px-3 rounded-xl border border-slate-300 text-xs font-semibold"
-                >
-                  {text('Close', '关闭')}
-                </button>
+                {scope !== 'admin' && (
+                  <button
+                    type="button"
+                    onClick={closeInlineDetail}
+                    className="ml-auto min-h-[36px] px-3 rounded-xl border border-slate-300 text-xs font-semibold"
+                  >
+                    {text('Close', '关闭')}
+                  </button>
+                )}
               </div>
 
               {isInternal(detail) && (
                 <div className="grid sm:grid-cols-3 gap-2 text-xs">
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <div className="text-slate-400">{text('Customer company', '客户公司')}</div>
-                    <div className="font-semibold">
-                      {detail.company.customerCode} · {detail.company.shortName}
-                    </div>
+                    {scope === 'admin' ? (
+                      <button
+                        type="button"
+                        onClick={() => openCustomer(detail)}
+                        data-testid="admin-order-customer-detail"
+                        className="font-semibold text-left underline decoration-dotted underline-offset-2 hover:decoration-[#ff681e]"
+                      >
+                        {detail.company.customerCode} · {detail.company.shortName}
+                      </button>
+                    ) : (
+                      <div className="font-semibold">
+                        {detail.company.customerCode} · {detail.company.shortName}
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <div className="text-slate-400">{text('Submitted by', '提交人')}</div>
@@ -317,12 +537,17 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <div className="text-slate-400">{text('Current salesperson (access scope)', '当前销售负责人（访问范围）')}</div>
-                    <div className="font-mono text-[11px] break-all">
-                      {detail.currentAssignedSalesUserId ?? text('Unassigned', '未分配')}
+                    <div className="text-[11px] font-semibold break-all">
+                      {scope === 'admin'
+                        ? salesperson(detail.currentAssignedSalesUserId)
+                        : detail.currentAssignedSalesUserId ?? text('Unassigned', '未分配')}
                     </div>
                     <div className="text-[10px] text-slate-400 mt-1">
                       {text('Submitted under', '提交时归属')}{' '}
-                      {detail.assignedSalesUserId ?? text('no salesperson', '无销售')} ({text('audit snapshot', '审计快照')})
+                      {scope === 'admin'
+                        ? salesperson(detail.assignedSalesUserId)
+                        : detail.assignedSalesUserId ?? text('no salesperson', '无销售')}{' '}
+                      ({text('audit snapshot', '审计快照')})
                     </div>
                   </div>
                 </div>
@@ -525,10 +750,63 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   )}
                 </div>
               )}
-            </>
-          )}
-        </section>
-      )}
+          </div>
+        ) : null;
+
+        if (scope === 'admin') {
+          return (
+            <SideDrawer
+              open={adminDrawerOpen}
+              onClose={closeAdminDrawer}
+              onClosed={clearAdminDrawer}
+              title={
+                adminDrawerKind === 'customer'
+                  ? text('Customer details', '客户资料')
+                  : text('Order details', '订单详情')
+              }
+              subtitle={
+                adminDrawerKind === 'customer'
+                  ? customerOrder
+                    ? `${customerOrder.company.customerCode} · ${customerOrder.company.shortName}`
+                    : undefined
+                  : detail?.orderNo
+              }
+              testId={
+                adminDrawerKind === 'customer' ? 'customer-detail-drawer' : 'order-detail-drawer'
+              }
+              closeTestId={`${adminDrawerKind}-drawer-close`}
+            >
+              {adminDrawerKind === 'order' ? (
+                detailLoading ? (
+                  <LoadingBlock label={text('Loading order detail…', '正在加载订单详情…')} />
+                ) : orderContent ? (
+                  orderContent
+                ) : (
+                  <ErrorBlock
+                    message={localizedError(
+                      actionError || text('The order could not be loaded.', '订单加载失败。')
+                    )}
+                    onRetry={() => selectedId && void loadDetail(selectedId)}
+                  />
+                )
+              ) : (
+                renderCustomerDetail()
+              )}
+            </SideDrawer>
+          );
+        }
+
+        if (!detail && !detailLoading) return null;
+        return (
+          <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
+            {detailLoading || !orderContent ? (
+              <LoadingBlock label={text('Loading order detail…', '正在加载订单详情…')} />
+            ) : (
+              orderContent
+            )}
+          </section>
+        );
+      })()}
     </div>
   );
 };
