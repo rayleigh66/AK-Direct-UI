@@ -95,45 +95,55 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   useEffect(() => {
     if (!mounted) return;
     const timer = window.setTimeout(
-      () => closeRef.current?.focus(),
+      () => closeRef.current?.focus({ preventScroll: true }),
       reduceMotion ? 0 : 30
     );
     return () => window.clearTimeout(timer);
   }, [mounted, reduceMotion]);
 
   useEffect(() => {
+    if (!mounted) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const nodes = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        element => element.offsetParent !== null
+      );
+      if (!nodes.length) {
+        event.preventDefault();
+        panel.focus({ preventScroll: true });
+        return;
+      }
+      if (!panel.contains(document.activeElement)) {
+        event.preventDefault();
+        nodes[0].focus({ preventScroll: true });
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [mounted, onClose]);
+
+  useEffect(() => {
     if (mounted) return;
-    restoreRef.current?.focus?.();
+    restoreRef.current?.focus?.({ preventScroll: true });
     restoreRef.current = null;
   }, [mounted]);
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== 'Tab') return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    const nodes = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-      element => element.offsetParent !== null
-    );
-    if (!nodes.length) {
-      event.preventDefault();
-      panel.focus();
-      return;
-    }
-    const first = nodes[0];
-    const last = nodes[nodes.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
 
   if (!mounted) return null;
 
@@ -153,7 +163,6 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onKeyDown={handleKeyDown}
         data-testid={testId}
         data-state={shown ? 'open' : 'closed'}
         className={`absolute inset-y-0 right-0 flex h-full w-full flex-col bg-white shadow-2xl outline-none sm:w-[min(560px,92vw)] ${
