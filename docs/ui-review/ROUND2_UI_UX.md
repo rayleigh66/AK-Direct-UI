@@ -2,6 +2,8 @@
 
 **Baseline:** PR #15 head `e76fcade22c9e2ce4ed2b7daa2f79ba343d8e28e`
 **Branch:** `feat/factoryos3-uat-round2`
+**Final local head:** `0151a34eee8ef28b703d70731aaa258a7a73ae7c`
+
 **Scope:** presentation and interaction only. No order state-machine, permission, frozen business rule or Phase 4B-05 change.
 
 ## 1. FactoryOS3 visual language
