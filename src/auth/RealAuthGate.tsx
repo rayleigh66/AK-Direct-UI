@@ -9,6 +9,7 @@ import {
   type AuthUserDto,
 } from './api';
 import { RealWorkspace } from '../real/RealWorkspace';
+import { BrandLockup } from '../components/BrandLockup';
 
 function errorMessage(error: unknown): string {
   if (error instanceof AuthApiError) return error.message;
@@ -113,24 +114,21 @@ export const RealAuthGate: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#f8f8f6] text-[#151515] flex flex-col">
-      <header className="bg-[#171717] text-white px-5 sm:px-8 py-4 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[10px] font-bold tracking-[2px] uppercase text-[#ff843f]">
-            AOKING Direct · Phase 4B-02
-          </div>
-          <div className="text-lg font-extrabold tracking-tight">Account & access</div>
+      <header className="border-b border-slate-200 bg-white px-5 py-4 text-[#151515] sm:px-8">
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3">
+          <BrandLockup testId="brand-lockup-login" />
+          {user && (
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={busy}
+              className="min-h-[42px] rounded-xl border border-slate-300 px-4 text-xs font-semibold flex items-center gap-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <LogOut className="w-4 h-4" />
+              {internal ? 'Sign out / 退出登录' : 'Sign out'}
+            </button>
+          )}
         </div>
-        {user && (
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={busy}
-            className="min-h-[42px] px-4 rounded-xl border border-white/20 text-xs font-semibold flex items-center gap-2 hover:bg-white/10 disabled:opacity-50"
-          >
-            <LogOut className="w-4 h-4" />
-            {internal ? 'Sign out / 退出登录' : 'Sign out'}
-          </button>
-        )}
       </header>
 
       <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-8 sm:py-12">
@@ -265,8 +263,8 @@ export const RealAuthGate: React.FC = () => {
 
       </main>
 
-      <footer className="text-center py-6 text-[10px] text-slate-400 border-t border-slate-200 bg-white">
-        AOKING DIRECT · ACCOUNT & ACCESS · DEMO INFRASTRUCTURE
+      <footer className="flex justify-center border-t border-slate-200 bg-white py-6">
+        <BrandLockup size="sm" />
       </footer>
     </div>
   );

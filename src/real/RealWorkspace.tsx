@@ -22,6 +22,7 @@ import { OrdersView } from './views/OrdersView';
 import { TierPreviewView } from './views/TierPreviewView';
 import { RealCartProvider, useRealCart } from './cart';
 import { LanguageToggle } from '../components/ui/LanguageToggle';
+import { BrandLockup } from '../components/BrandLockup';
 import { formatCartBadge } from '../utils/cartCount';
 import {
   InternalLanguageProvider,
@@ -110,21 +111,7 @@ const WorkspaceShell: React.FC<{
       <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-white/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-[1660px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--ink)]">
-              <span className="h-[17px] w-[17px] rotate-45 rounded-[3px] border-2 border-white" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[9px] font-extrabold uppercase tracking-[2px] text-[var(--orange-deep)]">
-                {isCustomer
-                  ? 'AOKING Direct · Wholesale operations'
-                  : language === 'zh'
-                    ? 'AOKING Direct · 批发运营'
-                    : 'AOKING Direct · Wholesale operations'}
-              </div>
-              <div className="truncate text-sm font-extrabold tracking-[-0.4px] sm:text-base">
-                {isCustomer ? 'Wholesale ordering' : language === 'zh' ? '运营工作台' : 'Operations workspace'}
-              </div>
-            </div>
+            <BrandLockup testId="brand-lockup" />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isCustomer && <CartBadge onOpen={() => setActiveTab('cart')} />}
