@@ -146,8 +146,13 @@ export async function listInventory(search?: string): Promise<InventoryRowDto[]>
     .inventory;
 }
 
-export async function listAdminInventory(search?: string): Promise<InventoryRowDto[]> {
-  const query = search ? `?search=${encodeURIComponent(search)}` : '';
+export async function listAdminInventory(
+  filters?: string | { search?: string; skuId?: string; warehouseId?: string }
+): Promise<InventoryRowDto[]> {
+  const values = typeof filters === 'string' ? { search: filters } : filters;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values ?? {})) if (value) params.set(key, value);
+  const query = params.size ? `?${params}` : '';
   return (await apiJson<{ inventory: InventoryRowDto[] }>('GET', `/api/admin/inventory${query}`))
     .inventory;
 }

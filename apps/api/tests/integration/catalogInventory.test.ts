@@ -124,11 +124,66 @@ async function login(
   return { response, csrfToken };
 }
 
-async function loggedInAgent(username: string): Promise<{ agent: TestAgent; csrfToken: string }> {
-  const agent = request.agent(app);
+async function loggedInAgent(username: string, targetApp: Express = app): Promise<{ agent: TestAgent; csrfToken: string }> {
+  const agent = request.agent(targetApp);
   const { response, csrfToken } = await login(agent, username);
   expect(response.status).toBe(200);
   return { agent, csrfToken };
+}
+
+let warehouseRuntimeCounter = 0;
+async function withWarehouseRuntime(fn: (runtimeApp: Express, applicationName: string) => Promise<void>) {
+  warehouseRuntimeCounter += 1;
+  const role = `aoking_runtime_warehouse_${process.pid}_${warehouseRuntimeCounter}`;
+  const password = 'WarehouseRuntimePass123!';
+  await provisionRuntimeRole({ adminDatabaseUrl: databaseUrl(), runtimeUser: role, runtimePassword: password });
+  const url = new URL(databaseUrl()); url.username = role; url.password = password;
+  const applicationName = `warehouse-regression-${warehouseRuntimeCounter}`;
+  const runtimePool = new Pool({ connectionString: url.toString(), application_name: applicationName, max: 10 });
+  const runtimeApp = createApp({ checkReadiness: () => checkReadiness(runtimePool), auth: { pool: runtimePool, config }, mediaRoot });
+  try { await fn(runtimeApp, applicationName); }
+  finally {
+    await runtimePool.end();
+    await pool.query(`DROP OWNED BY "${role}"; DROP ROLE "${role}"`);
+  }
+}
+async function inventoryFacts(skuId: string, whId: string) {
+  const result = await pool.query<{ balances: string; movements: string; audits: string }>(
+    `SELECT
+      (SELECT count(*) FROM inventory_balances WHERE sku_id=$1 AND warehouse_id=$2)::text AS balances,
+      (SELECT count(*) FROM inventory_movements WHERE sku_id=$1 AND warehouse_id=$2)::text AS movements,
+      (SELECT count(*) FROM audit_logs WHERE action='REGISTER_INVENTORY' AND target_id=$3)::text AS audits`,
+    [skuId, whId, `${skuId}:${whId}`]
+  );
+  return result.rows[0];
+}
+async function waitForWarehouseCondition(check: () => Promise<boolean>) {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error('Warehouse PostgreSQL scheduling barrier not reached');
+}
+async function gateWarehouseInsert(skuId: string) {
+  const coordinator = await pool.connect();
+  await coordinator.query('BEGIN');
+  await coordinator.query('SELECT pg_advisory_xact_lock(15015, 1)');
+  const pid = (await coordinator.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+  await pool.query(`CREATE FUNCTION warehouse_registration_gate_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF NEW.sku_id = '${skuId}'::uuid THEN PERFORM pg_advisory_xact_lock(15015, 1); END IF; RETURN NEW; END $$;
+    CREATE TRIGGER warehouse_registration_gate BEFORE INSERT ON inventory_balances
+    FOR EACH ROW EXECUTE FUNCTION warehouse_registration_gate_fn();`);
+  let released = false;
+  const release = async () => { if (!released) { released = true; await coordinator.query('COMMIT'); coordinator.release(); } };
+  return { pid, release, cleanup: async () => {
+    await release();
+    await pool.query('DROP TRIGGER warehouse_registration_gate ON inventory_balances; DROP FUNCTION warehouse_registration_gate_fn()');
+  } };
+}
+async function warehouseBlockedPids(applicationName: string, blocker: number): Promise<number[]> {
+  return (await pool.query<{ pid: number }>(`SELECT pid FROM pg_stat_activity
+    WHERE application_name=$1 AND $2 = ANY(pg_blocking_pids(pid))`, [applicationName, blocker])).rows.map(row => row.pid);
 }
 
 function post(agent: TestAgent, pathName: string, body: unknown, token: string) {
@@ -1131,6 +1186,169 @@ describeDb('catalog, media and inventory persistence', () => {
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('invalid_sku_image');
   });
+
+  it('warehouse registration: concurrent first inserts return 201 and 409 with one initial fact', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    const product = await createProduct(admin.agent, admin.csrfToken);
+    const sku = await createSku(admin.agent, admin.csrfToken, product.id);
+    await withWarehouseRuntime(async (runtimeApp, applicationName) => {
+      const a = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const b = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const gate = await gateWarehouseInsert(sku.id);
+      let requests: Array<Promise<SupertestResponse>> = [];
+      try {
+        requests = [a, b].map((actor, index) => post(actor.agent, '/api/admin/inventory/register', {
+          skuId: sku.id, warehouseId, onHand: index ? 22 : 11, reason: `First count ${index}`,
+        }, actor.csrfToken).then(response => response));
+        await waitForWarehouseCondition(async () => (await warehouseBlockedPids(applicationName, gate.pid)).length === 2);
+        await gate.release();
+        const results = await Promise.all(requests);
+        expect(results.map(row => row.status).sort()).toEqual([201, 409]);
+        expect(results.find(row => row.status === 409)?.body.error.code).toBe('inventory_exists');
+        expect(await inventoryFacts(sku.id, warehouseId)).toEqual({ balances: '1', movements: '1', audits: '1' });
+        const movement = await pool.query<{ on_hand_before: number; on_hand_after: number; delta_on_hand: number }>(
+          'SELECT on_hand_before, on_hand_after, delta_on_hand FROM inventory_movements WHERE sku_id=$1 AND warehouse_id=$2', [sku.id, warehouseId]
+        );
+        expect(movement.rows[0].on_hand_before).toBe(0);
+        expect([11, 22]).toContain(movement.rows[0].on_hand_after);
+        expect(movement.rows[0].delta_on_hand).toBe(movement.rows[0].on_hand_after);
+        const winnerIndex = results.findIndex(row => row.status === 201);
+        const audit = await pool.query('SELECT details FROM audit_logs WHERE action=$1 AND target_id=$2', ['REGISTER_INVENTORY', `${sku.id}:${warehouseId}`]);
+        expect(audit.rows[0].details).toMatchObject({ skuCode: sku.skuCode ?? sku.sku_code, onHand: winnerIndex ? 22 : 11, unsellable: 0, reason: `First count ${winnerIndex}` });
+      } finally { await gate.release(); await Promise.allSettled(requests); await gate.cleanup(); }
+    });
+  });
+
+  it('warehouse registration: deactivation waits for a validated registration transaction', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    const product = await createProduct(admin.agent, admin.csrfToken);
+    const sku = await createSku(admin.agent, admin.csrfToken, product.id);
+    const wh = await post(admin.agent, '/api/admin/warehouses', { code: 'WH-CONCURRENT', name: '并发仓', nameEn: 'Concurrent warehouse' }, admin.csrfToken);
+    expect(wh.status).toBe(201);
+    const whId = wh.body.warehouse.id as string;
+    await withWarehouseRuntime(async (runtimeApp, applicationName) => {
+      const a = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const b = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const gate = await gateWarehouseInsert(sku.id);
+      let registration: Promise<SupertestResponse> | undefined;
+      let deactivation: Promise<SupertestResponse> | undefined;
+      try {
+        registration = post(a.agent, '/api/admin/inventory/register', {
+          skuId: sku.id, warehouseId: whId, onHand: 12, reason: 'Explicit initial count',
+        }, a.csrfToken).then(response => response);
+        let firstPid = 0;
+        await waitForWarehouseCondition(async () => {
+          firstPid = (await warehouseBlockedPids(applicationName, gate.pid))[0] ?? 0; return firstPid > 0;
+        });
+        let deactivated = false;
+        deactivation = patch(b.agent, `/api/admin/warehouses/${whId}`, { active: false }, b.csrfToken)
+          .then(response => { deactivated = true; return response; });
+        await waitForWarehouseCondition(async () => deactivated || (await warehouseBlockedPids(applicationName, firstPid)).length > 0);
+        const deactivatedBeforeRegistrationRelease = deactivated;
+        await gate.release();
+        const [registered, disabled] = await Promise.all([registration, deactivation]);
+        expect({ deactivatedBeforeRegistrationRelease, statuses: [registered.status, disabled.status] })
+          .toEqual({ deactivatedBeforeRegistrationRelease: false, statuses: [201, 200] });
+        expect(await inventoryFacts(sku.id, whId)).toEqual({ balances: '1', movements: '1', audits: '1' });
+        expect((await pool.query('SELECT active FROM warehouses WHERE id=$1', [whId])).rows[0].active).toBe(false);
+      } finally { await gate.release(); await Promise.allSettled([registration, deactivation].filter(Boolean)); await gate.cleanup(); }
+    });
+  });
+
+  it('warehouse registration: an already-inactive warehouse rejects new stock without facts', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    const product = await createProduct(admin.agent, admin.csrfToken);
+    const sku = await createSku(admin.agent, admin.csrfToken, product.id);
+    const wh = await post(admin.agent, '/api/admin/warehouses', { code: 'WH-CLOSED', name: '停用仓', nameEn: 'Closed warehouse', active: false }, admin.csrfToken);
+    expect(wh.status).toBe(201);
+    await withWarehouseRuntime(async runtimeApp => {
+      const a = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const result = await post(a.agent, '/api/admin/inventory/register', {
+        skuId: sku.id, warehouseId: wh.body.warehouse.id, onHand: 12, reason: 'Should fail',
+      }, a.csrfToken);
+      expect(result.status).toBe(400); expect(result.body.error.code).toBe('invalid_warehouse');
+      expect(await inventoryFacts(sku.id, wh.body.warehouse.id)).toEqual({ balances: '0', movements: '0', audits: '0' });
+    });
+  });
+
+  it('warehouse registration: a queued deactivation wins before registration and rejects new stock', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    const product = await createProduct(admin.agent, admin.csrfToken);
+    const sku = await createSku(admin.agent, admin.csrfToken, product.id);
+    const wh = await post(admin.agent, '/api/admin/warehouses', { code: 'WH-FIRST-OFF', name: '先停用', nameEn: 'Deactivate first' }, admin.csrfToken);
+    expect(wh.status).toBe(201);
+    const whId = wh.body.warehouse.id as string;
+    await withWarehouseRuntime(async (runtimeApp, applicationName) => {
+      const a = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const b = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+      const blocker = await pool.connect();
+      let operations: Array<Promise<SupertestResponse>> = [];
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query('SELECT id FROM warehouses WHERE id=$1 FOR UPDATE', [whId]);
+        const pid = Number((await blocker.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
+        const disable = patch(a.agent, `/api/admin/warehouses/${whId}`, { active: false }, a.csrfToken).then(r => r);
+        operations.push(disable);
+        let disablePid = 0;
+        await waitForWarehouseCondition(async () => { disablePid = (await warehouseBlockedPids(applicationName, pid))[0] ?? 0; return disablePid > 0; });
+        const register = post(b.agent, '/api/admin/inventory/register', { skuId: sku.id, warehouseId: whId, onHand: 12, reason: 'Must reject after deactivation' }, b.csrfToken).then(r => r);
+        operations.push(register);
+        await waitForWarehouseCondition(async () => (await warehouseBlockedPids(applicationName, disablePid)).length > 0);
+        await blocker.query('COMMIT');
+        const [disabled, rejected] = await Promise.all(operations);
+        expect(disabled.status).toBe(200); expect(rejected.status).toBe(400);
+        expect(rejected.body.error.code).toBe('invalid_warehouse');
+        expect(await inventoryFacts(sku.id, whId)).toEqual({ balances: '0', movements: '0', audits: '0' });
+      } finally { await blocker.query('ROLLBACK'); blocker.release(); await Promise.allSettled(operations); }
+    });
+  });
+
+  it('warehouse registration: invalid quantities, missing CSRF and forbidden users create no facts', async () => {
+    const admin = await loggedInAgent('catalog.admin@example.test');
+    const product = await createProduct(admin.agent, admin.csrfToken);
+    const sku = await createSku(admin.agent, admin.csrfToken, product.id);
+    const input = { skuId: sku.id, warehouseId, onHand: 8, unsellable: 0, reason: 'Explicit count' };
+    for (const change of [{ onHand: -1 }, { onHand: 1.5 }, { onHand: 100000001 }, { unsellable: 9 }, { reason: '' }]) {
+      const result = await post(admin.agent, '/api/admin/inventory/register', { ...input, ...change }, admin.csrfToken);
+      expect([400, 422]).toContain(result.status);
+    }
+    expect((await admin.agent.post('/api/admin/inventory/register').send(input)).status).toBe(403);
+    for (const name of ['sales.one@example.test', 'AK000201A']) {
+      const actor = await loggedInAgent(name);
+      expect((await post(actor.agent, '/api/admin/inventory/register', input, actor.csrfToken)).status).toBe(403);
+    }
+    expect(await inventoryFacts(sku.id, warehouseId)).toEqual({ balances: '0', movements: '0', audits: '0' });
+  });
+
+  for (const failedTable of ['inventory_movements', 'audit_logs']) {
+    it(`warehouse registration: ${failedTable} failure rolls back stock and preserves another warehouse`, async () => {
+      const admin = await loggedInAgent('catalog.admin@example.test');
+      const product = await createProduct(admin.agent, admin.csrfToken);
+      const sku = await createSku(admin.agent, admin.csrfToken, product.id);
+      expect((await post(admin.agent, '/api/admin/inventory/register', {
+        skuId: sku.id, warehouseId, onHand: 17, reason: 'Existing source count',
+      }, admin.csrfToken)).status).toBe(201);
+      const condition = failedTable === 'audit_logs'
+        ? `NEW.action='REGISTER_INVENTORY' AND NEW.target_id='${sku.id}:${warehouseBId}'`
+        : `NEW.sku_id='${sku.id}'::uuid AND NEW.warehouse_id='${warehouseBId}'::uuid`;
+      await pool.query(`CREATE FUNCTION warehouse_registration_fault_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN IF ${condition} THEN RAISE EXCEPTION 'Warehouse injected transaction failure'; END IF; RETURN NEW; END $$;
+        CREATE TRIGGER warehouse_registration_fault BEFORE INSERT ON ${failedTable}
+        FOR EACH ROW EXECUTE FUNCTION warehouse_registration_fault_fn();`);
+      try {
+        await withWarehouseRuntime(async runtimeApp => {
+          const a = await loggedInAgent('catalog.admin@example.test', runtimeApp);
+          const result = await post(a.agent, '/api/admin/inventory/register', {
+            skuId: sku.id, warehouseId: warehouseBId, onHand: 9, reason: 'New target count',
+          }, a.csrfToken);
+          expect(result.status).toBe(500); expect(result.text).not.toContain('injected');
+          expect(await inventoryFacts(sku.id, warehouseBId)).toEqual({ balances: '0', movements: '0', audits: '0' });
+          const source = await pool.query('SELECT on_hand, version FROM inventory_balances WHERE sku_id=$1 AND warehouse_id=$2', [sku.id, warehouseId]);
+          expect(source.rows[0]).toEqual({ on_hand: 17, version: '1' });
+        });
+      } finally { await pool.query(`DROP TRIGGER warehouse_registration_fault ON ${failedTable}; DROP FUNCTION warehouse_registration_fault_fn()`); }
+    });
+  }
 
   it('runs catalogue and inventory writes through the restricted runtime role', async () => {
     const role = `aoking_runtime_catalog_${process.pid}`;

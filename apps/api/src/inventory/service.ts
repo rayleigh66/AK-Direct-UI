@@ -264,7 +264,8 @@ async function requireSku(client: PoolClient, skuId: string): Promise<{ id: stri
 }
 
 async function requireWarehouse(client: PoolClient, warehouseId: string): Promise<void> {
-  const rows = await client.query('SELECT 1 FROM warehouses WHERE id = $1 AND active = true', [warehouseId]);
+  // Serialize a validated registration with warehouse edits/deactivation.
+  const rows = await client.query('SELECT 1 FROM warehouses WHERE id = $1 AND active = true FOR SHARE', [warehouseId]);
   if (!rows.rowCount) throw new HttpError(400, 'invalid_warehouse', 'Warehouse is invalid or inactive.');
 }
 
@@ -296,11 +297,17 @@ export async function registerInventory(
     if (existing.rowCount) {
       throw new HttpError(409, 'inventory_exists', 'This SKU and warehouse already has an inventory row.');
     }
-    await client.query(
+    const inserted = await client.query(
       `INSERT INTO inventory_balances (sku_id, warehouse_id, on_hand, unsellable, updated_by)
-       VALUES ($1, $2, $3, $4, $5)`,
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (sku_id, warehouse_id) DO NOTHING`,
       [input.skuId, input.warehouseId, onHand, unsellable, auth.user.id]
     );
+    // A missing-row precheck cannot lock the gap. The primary-key conflict is
+    // the final arbiter, before any movement or audit is written.
+    if (inserted.rowCount !== 1) {
+      throw new HttpError(409, 'inventory_exists', 'This SKU and warehouse already has an inventory row.');
+    }
     await client.query(
       `INSERT INTO inventory_movements
         (id, sku_id, warehouse_id, movement_type, delta_on_hand, delta_unsellable,
