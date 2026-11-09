@@ -241,10 +241,10 @@ test('customer A and B share a cart, submit a real order and the salesperson see
     .getByTestId('order-detail')
     .locator('[data-order-status="PENDING_CONFIRMATION"]');
   await expect(orderStatus).toHaveText('Pending confirmation');
-  await page.getByTestId('internal-order-language').getByRole('button', { name: '中文' }).click();
+  await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
   await expect(orderStatus).toHaveText('待确认');
   await page
-    .getByTestId('internal-order-language')
+    .getByTestId('internal-language-toggle')
     .getByRole('button', { name: 'EN' })
     .click();
   await expect(orderStatus).toHaveText('Pending confirmation');

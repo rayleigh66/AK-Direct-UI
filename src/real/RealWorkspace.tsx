@@ -108,7 +108,7 @@ const WorkspaceShell: React.FC<{
             </div>
             <div className="min-w-0">
               <div className="text-[9px] font-extrabold uppercase tracking-[2px] text-[var(--orange-deep)]">
-                AOKING Direct · FactoryOS style
+                AOKING Direct · Wholesale operations
               </div>
               <div className="truncate text-sm font-extrabold tracking-[-0.4px] sm:text-base">
                 {isCustomer ? 'Wholesale ordering' : language === 'zh' ? '运营工作台' : 'Operations workspace'}

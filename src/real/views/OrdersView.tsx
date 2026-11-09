@@ -14,7 +14,6 @@ import {
 import { usdFromCents } from '../cart';
 import type { CustomerOrderDto, InternalOrderDto } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
-import { LanguageToggle } from '../../components/ui/LanguageToggle';
 import { OrderStatusBadge } from '../../components/ui/OrderStatusBadge';
 import type { OrderStatus } from '../../types';
 import { shippingMethodLabel } from '../../utils/orderStatus';
@@ -46,7 +45,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const { language, setLanguage } = useInternalLanguage();
+  const { language } = useInternalLanguage();
   const text = (en: string, zh: string) => (scope === 'customer' ? en : language === 'zh' ? zh : en);
   const localizedError = (value: string) =>
     scope === 'customer' || language === 'en' || /[\u3400-\u9fff]/.test(value)
@@ -189,14 +188,6 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                     '只读监管全部客户订单。'
                   )}
           </span>
-          {scope !== 'customer' && (
-            <LanguageToggle
-              value={language}
-              onChange={setLanguage}
-              label={text('Order screen language', '订单界面语言')}
-              testId="internal-order-language"
-            />
-          )}
           <button
             type="button"
             onClick={() => void refreshAll(selectedId ?? undefined)}
