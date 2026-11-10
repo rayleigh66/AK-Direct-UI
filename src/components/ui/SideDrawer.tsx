@@ -16,6 +16,8 @@ interface SideDrawerProps {
   footer?: React.ReactNode;
   testId?: string;
   closeTestId?: string;
+  /** Accessible name for the close button; the caller supplies localized text. */
+  closeLabel?: string;
 }
 
 /**
@@ -35,6 +37,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   footer,
   testId,
   closeTestId,
+  closeLabel = 'Close',
 }) => {
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
@@ -197,7 +200,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={closeLabel}
             data-testid={closeTestId}
             className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50"
           >

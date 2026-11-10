@@ -210,6 +210,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await expect(page.getByTestId('internal-shell')).toHaveCount(0);
   await expect(page.getByTestId('real-sidebar')).toHaveCount(0);
   await expect(page.getByTestId('brand-lockup')).toBeVisible();
+  await expect(page.getByText('ROUND 2 UI UAT')).toHaveCount(0);
   if (
     testInfo.project.name === 'real-mobile-390' &&
     process.env.REAL_E2E_SCREENSHOTS === '1'

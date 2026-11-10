@@ -99,7 +99,9 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
 
   const loadDetail = async (id: string): Promise<void> => {
     const token = ++detailRequest.current;
-    if (scope === 'admin') {
+    if (scope !== 'customer') {
+      // Internal order details open in the shared right-side drawer for both
+      // administrators and salespeople. Customer orders keep the inline detail.
       setAdminDrawerKind('order');
       setAdminDrawerOpen(true);
       setCustomerError('');
@@ -501,7 +503,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   {text('Revision', '版本')} {detail.revision} ·{' '}
                   {text('updated', '更新于')} {formatEnglishDate(detail.updatedAt)}
                 </span>
-                {scope !== 'admin' && (
+                {scope === 'customer' && (
                   <button
                     type="button"
                     onClick={closeInlineDetail}
@@ -753,7 +755,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
           </div>
         ) : null;
 
-        if (scope === 'admin') {
+        if (scope !== 'customer') {
           return (
             <SideDrawer
               open={adminDrawerOpen}
@@ -775,6 +777,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                 adminDrawerKind === 'customer' ? 'customer-detail-drawer' : 'order-detail-drawer'
               }
               closeTestId={`${adminDrawerKind}-drawer-close`}
+              closeLabel={text('Close', '关闭')}
             >
               {adminDrawerKind === 'order' ? (
                 detailLoading ? (

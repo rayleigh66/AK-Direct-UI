@@ -7,7 +7,6 @@ import {
   RefreshCw,
   Settings2,
   ShoppingCart,
-  Smartphone,
   Sparkles,
   Upload,
   Users,
@@ -163,13 +162,6 @@ const CustomerWorkspaceShell: React.FC<{
     <main className="mx-auto w-full max-w-[1660px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
       {renderTab()}
     </main>
-
-    <footer className="border-t border-[var(--line)] bg-white py-4 text-center text-[10px] tracking-wide text-[var(--muted)]">
-      AOKING DIRECT · ROUND 2 UI UAT
-      <span className="ml-2 inline-flex items-center gap-1">
-        <Smartphone className="w-3 h-3" /> 375–1440 px
-      </span>
-    </footer>
   </div>
 );
 
