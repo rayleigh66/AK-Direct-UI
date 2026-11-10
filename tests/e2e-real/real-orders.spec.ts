@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { openInternalSidebar, openInternalTab, waitForInternalWorkspace } from './internalNav';
 
 const ADMIN_EMAIL = process.env.REAL_E2E_ADMIN_EMAIL ?? '';
 const ADMIN_PASSWORD = process.env.REAL_E2E_ADMIN_PASSWORD ?? '';
@@ -83,15 +84,15 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   // Admin prepares a published product and real stock.
   await page.goto('/');
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-  await expect(page.getByTestId('real-tab-setup')).toBeVisible();
-  await page.getByTestId('real-tab-setup').click();
+  await waitForInternalWorkspace(page);
+  await openInternalTab(page, 'setup');
   await page.getByTestId('warehouse-code').fill(warehouseCode);
   await page.getByTestId('warehouse-name-zh').fill('订单测试仓');
   await page.getByTestId('warehouse-name-en').fill('Order Test Warehouse');
   await page.getByTestId('warehouse-create-submit').click();
   await expect(page.getByTestId('warehouse-row').filter({ hasText: warehouseCode })).toBeVisible();
 
-  await page.getByTestId('real-tab-products').click();
+  await openInternalTab(page, 'products');
   await page.getByTestId('product-new').click();
   await page.getByTestId('product-code').fill(productCode);
   await page.getByTestId('product-title-zh').fill('订单运行测试背包');
@@ -112,7 +113,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await card.getByTestId('product-publish').click();
   await expect(card.getByTestId('product-unpublish')).toBeVisible();
 
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await page.getByTestId('inventory-register-open').click();
   const skuSelect = page.getByTestId('inventory-register-sku');
   const skuValue = await skuSelect.locator('option', { hasText: skuCode }).getAttribute('value');
@@ -285,7 +286,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
 
   // The assigned salesperson sees the pending order and confirmation is disabled.
   await signIn(page, SALES_EMAIL, SALES_PASSWORD);
-  await expect(page.getByTestId('real-tab-orders')).toBeVisible();
+  await openInternalTab(page, 'orders');
   await expect(page.getByTestId('real-tab-orders')).toHaveAttribute('aria-current', 'page');
   const internalOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
   await expect(internalOrder).toBeVisible({ timeout: 20_000 });
@@ -293,6 +294,17 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.getByTestId('order-detail')).toContainText(orderNo);
   await expect(page.getByTestId('sales-confirm-disabled')).toBeVisible();
   await expect(page.getByTestId('sales-confirm-disabled')).toContainText('Phase 4B-05');
+  if (
+    testInfo.project.name === 'real-desktop-1440' &&
+    process.env.REAL_E2E_SCREENSHOTS === '1'
+  ) {
+    const directory = path.join(process.cwd(), 'docs/ui-review/real-admin-shell');
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({
+      path: path.join(directory, 'sales-orders-1440.png'),
+      fullPage: true,
+    });
+  }
 
   // Real internal order language mode + shared status badge vocabulary.
   const orderStatus = page
@@ -309,12 +321,13 @@ test('customer A and B share a cart, submit a real order and the salesperson see
 
   // The global toggle applies across sales pages without losing the active tab.
   await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
+  await openInternalSidebar(page);
   await expect(page.getByTestId('real-tab-inventory')).toContainText('库存');
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await expect(
     page.getByText('只读库存视图。业务员不能调整数量或预占库存。')
   ).toBeVisible();
-  await page.getByTestId('real-tab-orders').click();
+  await openInternalTab(page, 'orders');
   await expect(page.getByTestId('real-tab-orders')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByText('待确认订单', { exact: true })).toBeVisible();
   await page.getByTestId('internal-language-toggle').getByRole('button', { name: 'EN' }).click();
@@ -397,8 +410,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   // Administrator order/customer drawers share one right-side container.
   await signOut(page);
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-  await expect(page.getByTestId('real-tab-products')).toBeVisible();
-  await page.getByTestId('real-tab-orders').click();
+  await openInternalTab(page, 'orders');
   const adminOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
   await expect(adminOrder).toBeVisible({ timeout: 20_000 });
   const customerLink = adminOrder.getByTestId('admin-order-customer-link');
@@ -470,4 +482,12 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(page.getByTestId('order-detail-drawer')).toContainText(orderNo);
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('order-detail-drawer')).toBeHidden();
+
+  // The mobile sidebar and the business drawer share the shell cleanly.
+  if (mobile) {
+    await page.getByTestId('internal-nav-open').click();
+    await expect(page.getByTestId('real-sidebar')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('real-sidebar')).toBeHidden();
+  }
 });

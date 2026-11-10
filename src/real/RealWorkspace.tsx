@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Boxes,
   ClipboardList,
@@ -23,7 +23,8 @@ import { CartView } from './views/CartView';
 import { OrdersView } from './views/OrdersView';
 import { TierPreviewView } from './views/TierPreviewView';
 import { RealCartProvider, useRealCart } from './cart';
-import { LanguageToggle } from '../components/ui/LanguageToggle';
+import { RealSidebar, type RealSidebarGroup } from './RealSidebar';
+import { RealTopbar } from './RealTopbar';
 import { BrandLockup } from '../components/BrandLockup';
 import { formatCartBadge } from '../utils/cartCount';
 import {
@@ -84,12 +85,220 @@ const CartBadge: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
   );
 };
 
+const INTERNAL_GROUPS: Array<{
+  label: { en: string; zh: string };
+  keys: TabKey[];
+}> = [
+  { label: { en: 'Catalogue', zh: '商品目录' }, keys: ['products'] },
+  { label: { en: 'Operations', zh: '运营' }, keys: ['inventory', 'import', 'setup'] },
+  { label: { en: 'Customers', zh: '客户' }, keys: ['customers'] },
+  { label: { en: 'Orders', zh: '订单' }, keys: ['orders'] },
+  { label: { en: 'Pricing', zh: '客户等级' }, keys: ['tiers'] },
+];
+
+const CustomerWorkspaceShell: React.FC<{
+  user: AuthUserDto;
+  onSignOut: () => void | Promise<void>;
+  tabs: TabKey[];
+  activeTab: TabKey;
+  setActiveTab: (tab: TabKey) => void;
+  renderTab: () => React.ReactNode;
+}> = ({ user, onSignOut, tabs, activeTab, setActiveTab, renderTab }) => (
+  <div className="flex min-h-screen flex-col bg-[var(--bg)] text-[var(--ink)]">
+    <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-white/95 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-[1660px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
+        <div className="flex min-w-0 items-center gap-3">
+          <BrandLockup testId="brand-lockup" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <CartBadge onOpen={() => setActiveTab('cart')} />
+          <div
+            data-testid="real-user-meta"
+            className="max-w-[180px] text-right text-[11px] leading-tight sm:max-w-none"
+          >
+            <div className="truncate font-semibold">{user.displayName}</div>
+            <div className="truncate font-mono text-[var(--muted)]">{user.username}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onSignOut()}
+            aria-label="Sign out"
+            className="fo-btn flex min-h-[42px] items-center gap-2"
+          >
+            <LogOut className="w-4 h-4" />
+            <span className="hidden sm:inline">Sign out</span>
+          </button>
+        </div>
+      </div>
+      {tabs.length > 1 && (
+        <nav
+          className="mx-auto flex w-full max-w-[1660px] gap-1 overflow-x-auto px-3 pb-2 sm:px-6 lg:px-10"
+          aria-label="Customer sections"
+        >
+          {tabs.map(tab => {
+            const label = TAB_LABELS[tab];
+            const active = tab === activeTab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                aria-current={active ? 'page' : undefined}
+                data-testid={`real-tab-${tab}`}
+                className={`flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] px-3.5 text-xs font-bold transition-colors ${
+                  active
+                    ? 'bg-[var(--nav-active-bg)] text-white'
+                    : 'text-[var(--muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--ink)]'
+                }`}
+              >
+                <span className={active ? 'text-[var(--orange)]' : ''}>{label.icon}</span>
+                {label.en}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+    </header>
+
+    <main className="mx-auto w-full max-w-[1660px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
+      {renderTab()}
+    </main>
+
+    <footer className="border-t border-[var(--line)] bg-white py-4 text-center text-[10px] tracking-wide text-[var(--muted)]">
+      AOKING DIRECT · ROUND 2 UI UAT
+      <span className="ml-2 inline-flex items-center gap-1">
+        <Smartphone className="w-3 h-3" /> 375–1440 px
+      </span>
+    </footer>
+  </div>
+);
+
+const InternalWorkspaceShell: React.FC<{
+  user: AuthUserDto;
+  onSignOut: () => void | Promise<void>;
+  tabs: TabKey[];
+  activeTab: TabKey;
+  setActiveTab: (tab: TabKey) => void;
+  renderTab: () => React.ReactNode;
+}> = ({ user, onSignOut, tabs, activeTab, setActiveTab, renderTab }) => {
+  const { language, setLanguage } = useInternalLanguage();
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setNavigationOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const sidebar = document.getElementById('real-sidebar');
+      const focusable = Array.from(
+        sidebar?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      requestAnimationFrame(() => menuButtonRef.current?.focus());
+    };
+  }, [navigationOpen]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)');
+    const closeOnDesktop = () => {
+      if (media.matches) setNavigationOpen(false);
+    };
+    closeOnDesktop();
+    media.addEventListener('change', closeOnDesktop);
+    return () => media.removeEventListener('change', closeOnDesktop);
+  }, []);
+
+  const groups = useMemo<RealSidebarGroup[]>(() => {
+    const grouped = INTERNAL_GROUPS.map(group => ({
+      label: language === 'zh' ? group.label.zh : group.label.en,
+      items: group.keys
+        .filter(key => tabs.includes(key))
+        .map(key => ({
+          key,
+          label: language === 'zh' ? TAB_LABELS[key].zh : TAB_LABELS[key].en,
+          icon: TAB_LABELS[key].icon,
+        })),
+    })).filter(group => group.items.length > 0);
+    const groupedKeys = new Set(INTERNAL_GROUPS.flatMap(group => group.keys));
+    const leftovers = tabs.filter(key => !groupedKeys.has(key));
+    if (leftovers.length) {
+      grouped.push({
+        label: language === 'zh' ? '其他' : 'Workspace',
+        items: leftovers.map(key => ({
+          key,
+          label: language === 'zh' ? TAB_LABELS[key].zh : TAB_LABELS[key].en,
+          icon: TAB_LABELS[key].icon,
+        })),
+      });
+    }
+    return grouped;
+  }, [language, tabs]);
+
+  const activeLabel = TAB_LABELS[activeTab];
+
+  return (
+    <div
+      data-testid="internal-shell"
+      className="min-h-screen bg-[var(--bg)] text-[var(--ink)]"
+    >
+      <RealSidebar
+        groups={groups}
+        activeKey={activeTab}
+        open={navigationOpen}
+        language={language}
+        onSelect={key => {
+          setActiveTab(key as TabKey);
+          setNavigationOpen(false);
+        }}
+        onClose={() => setNavigationOpen(false)}
+      />
+      <div className="flex min-h-screen flex-col lg:pl-[248px]">
+        <RealTopbar
+          user={user}
+          title={language === 'zh' ? activeLabel.zh : activeLabel.en}
+          language={language}
+          onLanguageChange={setLanguage}
+          onSignOut={onSignOut}
+          onOpenNavigation={() => setNavigationOpen(true)}
+          navigationOpen={navigationOpen}
+          menuButtonRef={menuButtonRef}
+        />
+        <main className="mx-auto w-full min-w-0 max-w-[1660px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
+          {renderTab()}
+        </main>
+      </div>
+    </div>
+  );
+};
+
 const WorkspaceShell: React.FC<{
   user: AuthUserDto;
   onSignOut: () => void | Promise<void>;
 }> = ({ user, onSignOut }) => {
   const isCustomer = user.type === 'customer';
-  const { language, setLanguage } = useInternalLanguage();
   const can = (permission: string) => user.permissions.includes(permission);
   const tabs = useMemo<TabKey[]>(() => {
     if (isCustomer) return ['catalog', 'cart', 'orders'];
@@ -111,119 +320,63 @@ const WorkspaceShell: React.FC<{
 
   const [activeTab, setActiveTab] = useState<TabKey>(tabs[0]);
 
+  const renderTab = () => (
+    <>
+      {activeTab === 'catalog' && <CustomerCatalogView />}
+      {activeTab === 'cart' && isCustomer && (
+        <CartView
+          user={user}
+          onBrowse={() => setActiveTab('catalog')}
+          onViewOrders={() => setActiveTab('orders')}
+        />
+      )}
+      {activeTab === 'orders' && (
+        <OrdersView scope={isCustomer ? 'customer' : can('sales.read_all') ? 'admin' : 'sales'} />
+      )}
+      {activeTab === 'products' && <AdminCatalogView canWrite={can('catalog.manage')} />}
+      {activeTab === 'inventory' && (
+        <InventoryView
+          canManage={can('inventory.manage')}
+          canRead={can('inventory.read')}
+          internal={!isCustomer}
+        />
+      )}
+      {activeTab === 'import' && <ImportView />}
+      {activeTab === 'setup' && <SetupView />}
+      {activeTab === 'tiers' && <TierPreviewView />}
+      {activeTab === 'customers' && (
+        <AdminCustomersView
+          canManageCompanies={can('companies.manage')}
+          canManageAccounts={can('accounts.manage')}
+          canManageBrands={can('brands.manage')}
+          canReadCatalog={can('catalog.read') || can('catalog.manage')}
+        />
+      )}
+    </>
+  );
+
+  if (isCustomer) {
+    return (
+      <CustomerWorkspaceShell
+        user={user}
+        onSignOut={onSignOut}
+        tabs={tabs}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        renderTab={renderTab}
+      />
+    );
+  }
+
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--bg)] text-[var(--ink)]">
-      <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-[1660px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
-          <div className="flex min-w-0 items-center gap-3">
-            <BrandLockup testId="brand-lockup" />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {isCustomer && <CartBadge onOpen={() => setActiveTab('cart')} />}
-            {!isCustomer && (
-              <LanguageToggle
-                value={language}
-                onChange={setLanguage}
-                label={language === 'zh' ? '内部界面语言' : 'Internal language'}
-                testId="internal-language-toggle"
-              />
-            )}
-            <div
-              data-testid="real-user-meta"
-              className="max-w-[180px] text-right text-[11px] leading-tight sm:max-w-none"
-            >
-              <div className="truncate font-semibold">{user.displayName}</div>
-              <div className="truncate font-mono text-[var(--muted)]">{user.username}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => void onSignOut()}
-              aria-label={isCustomer ? 'Sign out' : language === 'zh' ? '退出登录' : 'Sign out'}
-              className="fo-btn flex min-h-[42px] items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">{isCustomer ? 'Sign out' : language === 'zh' ? '退出' : 'Sign out'}</span>
-            </button>
-          </div>
-        </div>
-        {tabs.length > 1 && (
-          <nav
-            className="mx-auto flex w-full max-w-[1660px] gap-1 overflow-x-auto px-3 pb-2 sm:px-6 lg:px-10"
-            aria-label={
-              isCustomer
-                ? 'Customer sections'
-                : language === 'zh'
-                  ? '内部导航'
-                  : 'Internal sections'
-            }
-          >
-            {tabs.map(tab => {
-              const label = TAB_LABELS[tab];
-              const active = tab === activeTab;
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  aria-current={active ? 'page' : undefined}
-                  data-testid={`real-tab-${tab}`}
-                  className={`flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] px-3.5 text-xs font-bold transition-colors ${
-                    active
-                      ? 'bg-[var(--nav-active-bg)] text-white'
-                      : 'text-[var(--muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--ink)]'
-                  }`}
-                >
-                  <span className={active ? 'text-[var(--orange)]' : ''}>{label.icon}</span>
-                  {language === 'zh' && !isCustomer ? label.zh : label.en}
-                </button>
-              );
-            })}
-          </nav>
-        )}
-      </header>
-
-      <main className="mx-auto w-full max-w-[1660px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
-        {activeTab === 'catalog' && (
-          <CustomerCatalogView />
-        )}
-        {activeTab === 'cart' && isCustomer && (
-          <CartView
-            user={user}
-            onBrowse={() => setActiveTab('catalog')}
-            onViewOrders={() => setActiveTab('orders')}
-          />
-        )}
-        {activeTab === 'orders' && (
-          <OrdersView scope={isCustomer ? 'customer' : can('sales.read_all') ? 'admin' : 'sales'} />
-        )}
-        {activeTab === 'products' && <AdminCatalogView canWrite={can('catalog.manage')} />}
-        {activeTab === 'inventory' && (
-          <InventoryView
-            canManage={can('inventory.manage')}
-            canRead={can('inventory.read')}
-            internal={!isCustomer}
-          />
-        )}
-        {activeTab === 'import' && <ImportView />}
-        {activeTab === 'setup' && <SetupView />}
-        {activeTab === 'tiers' && <TierPreviewView />}
-        {activeTab === 'customers' && (
-          <AdminCustomersView
-            canManageCompanies={can('companies.manage')}
-            canManageAccounts={can('accounts.manage')}
-            canManageBrands={can('brands.manage')}
-            canReadCatalog={can('catalog.read') || can('catalog.manage')}
-          />
-        )}
-      </main>
-
-      <footer className="border-t border-[var(--line)] bg-white py-4 text-center text-[10px] tracking-wide text-[var(--muted)]">
-        AOKING DIRECT · ROUND 2 UI UAT
-        <span className="ml-2 inline-flex items-center gap-1">
-          <Smartphone className="w-3 h-3" /> 375–1440 px
-        </span>
-      </footer>
-    </div>
+    <InternalWorkspaceShell
+      user={user}
+      onSignOut={onSignOut}
+      tabs={tabs}
+      activeTab={activeTab}
+      setActiveTab={setActiveTab}
+      renderTab={renderTab}
+    />
   );
 };
 

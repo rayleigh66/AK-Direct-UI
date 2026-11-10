@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { openInternalTab, waitForInternalWorkspace } from './internalNav';
 
 async function capture(page: Page, name: string) {
   const directory = process.env.WAREHOUSE_SCREENSHOT_DIR;
@@ -25,7 +26,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   await page.locator('input[autocomplete="username"]').fill(email!);
   await page.locator('input[autocomplete="current-password"]').fill(password!);
   await page.getByRole('button', { name: /Sign in/ }).click();
-  await expect(page.getByTestId('real-tab-inventory')).toBeVisible();
+  await waitForInternalWorkspace(page);
   await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
   const { csrfToken } = await (await page.request.get('/api/auth/csrf')).json();
   const write = async (url: string, data: Record<string, unknown>) => {
@@ -38,7 +39,7 @@ test('warehouse directory: explicit registration by drag, mobile selection and k
   const product = (await write('/api/admin/catalog/products', { brandId: 'brand-aoking', productCode: `WH-${suffix}`, title: '城市通勤背包', titleEn: 'City commuter pack', category: 'Backpacks' })).product;
   const sku = (await write(`/api/admin/catalog/products/${product.id}/skus`, { skuCode: `WH-${suffix}-BLK`, colorName: '哑光黑', colorNameEn: 'Matte black', colorHex: '#222222', basePriceCents: 3800 })).sku;
   await write('/api/admin/inventory/register', { skuId: sku.id, warehouseId: source.id, onHand: 18, unsellable: 2, reason: 'Source physical count' });
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await page.getByRole('button', { name: '仓库视图', exact: true }).click();
   const skuCombo = page.getByRole('combobox', { name: '搜索并选择 SKU' });
   await skuCombo.fill(sku.skuCode);

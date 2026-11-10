@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { openInternalTab, waitForInternalWorkspace } from './internalNav';
 
 const ADMIN_EMAIL = process.env.REAL_E2E_ADMIN_EMAIL ?? '';
 const ADMIN_PASSWORD = process.env.REAL_E2E_ADMIN_PASSWORD ?? '';
@@ -11,7 +12,10 @@ async function signIn(page: Page) {
   await page.locator('input[autocomplete="username"]').fill(ADMIN_EMAIL);
   await page.locator('input[autocomplete="current-password"]').fill(ADMIN_PASSWORD);
   await page.getByRole('button', { name: /Sign in/ }).click();
-  await expect(page.getByTestId('real-tab-products')).toBeVisible();
+  await waitForInternalWorkspace(page);
+  if ((page.viewportSize()?.width ?? 1440) >= 1024) {
+    await expect(page.getByTestId('real-tab-products')).toBeVisible();
+  }
 }
 
 async function capture(page: Page, name: string) {
@@ -44,12 +48,12 @@ test('round 2 admin visual, language, CSV, product views and tier preview', asyn
     '搜索商品款号、名称或品牌'
   );
 
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await expect(page.getByRole('button', { name: '库存列表', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '仓库视图', exact: true })).toBeVisible();
   await expect(page.getByTestId('real-tab-products')).not.toHaveAttribute('aria-current', 'page');
 
-  await page.getByTestId('real-tab-import').click();
+  await openInternalTab(page, 'import');
   await expect(page.getByText('下载 CSV 模板', { exact: true })).toBeVisible();
   await expect(page.getByTestId('import-template-guide')).toBeVisible();
   await expect(page.getByTestId('import-template-warning')).toContainText('EXAMPLE-SKU');
@@ -64,9 +68,9 @@ test('round 2 admin visual, language, CSV, product views and tier preview', asyn
     'sku_code,warehouse_code,on_hand,unsellable\nEXAMPLE-SKU,EXAMPLE-WH,100,0\n'
   );
 
-  await page.getByTestId('real-tab-setup').click();
+  await openInternalTab(page, 'setup');
   await expect(page.getByText('仓库', { exact: true }).first()).toBeVisible();
-  await page.getByTestId('real-tab-tiers').click();
+  await openInternalTab(page, 'tiers');
   await expect(page.getByTestId('tier-preview')).toBeVisible();
   await expect(page.getByText('界面预览，尚未应用于真实订单。').first()).toBeVisible();
   await capture(page, 'admin-tier-preview-zh-1440');
@@ -101,7 +105,7 @@ test('round 2 admin visual, language, CSV, product views and tier preview', asyn
   });
   expect(created.status()).toBe(201);
 
-  await page.getByTestId('real-tab-products').click();
+  await openInternalTab(page, 'products');
   await page.reload();
   await page.getByTestId('admin-product-search').fill(productCode);
   await page.getByTestId('admin-product-view-grid').click();
@@ -150,7 +154,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await capture(page, `language-zh-products-${width}`);
 
   // Inventory list — Chinese mode.
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await expect(page.getByRole('button', { name: '库存列表', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '仓库视图', exact: true })).toBeVisible();
   await expect(page.getByTestId('inventory-search')).toHaveAttribute(
@@ -174,7 +178,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await capture(page, `language-zh-warehouse-${width}`);
 
   // Import — Chinese mode.
-  await page.getByTestId('real-tab-import').click();
+  await openInternalTab(page, 'import');
   await expect(page.getByText('库存导入', { exact: true })).toBeVisible();
   await expect(page.getByTestId('import-template-download')).toHaveAttribute(
     'aria-label',
@@ -186,7 +190,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await expect(page.getByTestId('import-file')).toBeHidden();
 
   // Setup — Chinese mode.
-  await page.getByTestId('real-tab-setup').click();
+  await openInternalTab(page, 'setup');
   await expect(
     page.getByText('未预置仓库或库存。请先创建真实仓库编码，再登记库存。', { exact: true })
   ).toBeVisible();
@@ -196,13 +200,13 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await overflow(page);
 
   // Orders — Chinese mode (read-only administrator supervision).
-  await page.getByTestId('real-tab-orders').click();
+  await openInternalTab(page, 'orders');
   await expect(page.getByText('订单监督', { exact: true })).toBeVisible();
   await expect(page.getByText('只读监管全部客户订单。', { exact: true })).toBeVisible();
   await expect(page.getByText('Order supervision', { exact: true })).toHaveCount(0);
 
   // Tiers — Chinese mode.
-  await page.getByTestId('real-tab-tiers').click();
+  await openInternalTab(page, 'tiers');
   await expect(page.getByTestId('tier-preview')).toBeVisible();
   await expect(page.getByText('客户等级与折扣预览', { exact: true })).toBeVisible();
   await expect(page.getByText('已批准五级模型', { exact: true })).toBeVisible();
@@ -221,13 +225,13 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await expect(page.getByText('界面预览，尚未应用于真实订单。')).toHaveCount(0);
   await expect(page.getByText('已批准五级模型', { exact: true })).toHaveCount(0);
 
-  await page.getByTestId('real-tab-orders').click();
+  await openInternalTab(page, 'orders');
   await expect(page.getByText('Order supervision', { exact: true })).toBeVisible();
   await expect(
     page.getByText('Read-only supervision of all customer orders.', { exact: true })
   ).toBeVisible();
 
-  await page.getByTestId('real-tab-setup').click();
+  await openInternalTab(page, 'setup');
   await expect(
     page.getByText(
       'No warehouse or stock is seeded. Create the real warehouse code before registering stock.',
@@ -240,7 +244,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await expect(page.getByText('中文名称', { exact: true })).toHaveCount(0);
   await overflow(page);
 
-  await page.getByTestId('real-tab-import').click();
+  await openInternalTab(page, 'import');
   await expect(page.getByText('Stock import', { exact: true })).toBeVisible();
   await expect(page.getByTestId('import-template-download')).toHaveAttribute(
     'aria-label',
@@ -252,7 +256,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
     })
   ).toBeVisible();
 
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await expect(page.getByRole('button', { name: 'Inventory list', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Warehouse view', exact: true })).toBeVisible();
   await expect(page.getByTestId('inventory-search')).toHaveAttribute(
@@ -274,7 +278,7 @@ test('every internal page follows one language at 1440 and 390', async ({ page }
   await overflow(page);
   await capture(page, `language-en-warehouse-${width}`);
 
-  await page.getByTestId('real-tab-products').click();
+  await openInternalTab(page, 'products');
   await expect(page.getByTestId('admin-product-search')).toHaveAttribute(
     'placeholder',
     'Search product code, name or brand'
