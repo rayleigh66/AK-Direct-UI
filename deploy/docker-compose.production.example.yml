@@ -11,6 +11,15 @@ services:
       - ./deploy/Caddyfile.production.example:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    # Caddy redirects every HTTP request to HTTPS, so the base healthcheck
+    # (wget http://127.0.0.1/) would follow the redirect to an IP-address
+    # certificate and fail. Probe Caddy's local admin endpoint instead.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
 volumes:
   caddy_data:
