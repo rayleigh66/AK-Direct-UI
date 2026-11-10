@@ -1,5 +1,6 @@
 import { apiJson, apiUpload } from '../auth/api';
 import type {
+  AdminCustomerAccountDto,
   AdminCustomerCompanyDto,
   AdminSalesUserDto,
   BrandDto,
@@ -351,10 +352,93 @@ export async function getPendingOrderImpact(
   ).impact;
 }
 
+export async function listAdminCompanies(): Promise<AdminCustomerCompanyDto[]> {
+  return (await apiJson<{ companies: AdminCustomerCompanyDto[] }>('GET', '/api/admin/companies'))
+    .companies;
+}
+
 /** Admin-only company projection behind the existing `companies.manage` permission. */
 export async function getAdminCompany(id: string): Promise<AdminCustomerCompanyDto> {
   return (
     await apiJson<{ company: AdminCustomerCompanyDto }>('GET', `/api/admin/companies/${id}`)
+  ).company;
+}
+
+export async function createAdminCompany(input: Record<string, unknown>): Promise<{
+  company: AdminCustomerCompanyDto;
+  primaryUsername: string;
+  temporaryPassword: string;
+}> {
+  return apiJson('POST', '/api/admin/companies', input);
+}
+
+export async function listCompanyAccounts(
+  companyId: string
+): Promise<AdminCustomerAccountDto[]> {
+  return (
+    await apiJson<{ accounts: AdminCustomerAccountDto[] }>(
+      'GET',
+      `/api/admin/companies/${companyId}/accounts`
+    )
+  ).accounts;
+}
+
+export async function createCompanyAccount(companyId: string): Promise<{
+  username: string;
+  temporaryPassword: string;
+}> {
+  return apiJson('POST', `/api/admin/companies/${companyId}/accounts`, {});
+}
+
+export async function setCompanyStatus(
+  companyId: string,
+  status: 'active' | 'suspended',
+  options: { confirmAffectedOrders?: boolean; impactToken?: string } = {}
+): Promise<AdminCustomerCompanyDto> {
+  return (
+    await apiJson<{ company: AdminCustomerCompanyDto }>(
+      'PATCH',
+      `/api/admin/companies/${companyId}/status`,
+      { status, ...options }
+    )
+  ).company;
+}
+
+export async function setCustomerStatus(
+  customerId: string,
+  status: 'active' | 'suspended'
+): Promise<void> {
+  await apiJson('PATCH', `/api/admin/customers/${customerId}/status`, { status });
+}
+
+export async function listCompanyBrandIds(companyId: string): Promise<string[]> {
+  return (
+    await apiJson<{ brandIds: string[] }>('GET', `/api/admin/companies/${companyId}/brands`)
+  ).brandIds;
+}
+
+export async function setCompanyBrandGrant(
+  companyId: string,
+  brandId: string,
+  granted: boolean,
+  options: { confirmAffectedOrders?: boolean; impactToken?: string } = {}
+): Promise<void> {
+  await apiJson('PUT', `/api/admin/companies/${companyId}/brands/${brandId}`, {
+    granted,
+    ...options,
+  });
+}
+
+export async function setCompanySalesAssignment(
+  companyId: string,
+  salesUserId: string | null
+): Promise<AdminCustomerCompanyDto> {
+  return (
+    await apiJson<{ company: AdminCustomerCompanyDto }>(
+      'PATCH',
+      `/api/admin/companies/${companyId}/sales-assignment`,
+      { salesUserId }
+    )
   ).company;
 }
 

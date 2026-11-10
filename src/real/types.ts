@@ -306,6 +306,17 @@ export interface AdminCustomerCompanyDto {
   updatedAt: string;
 }
 
+export interface AdminCustomerAccountDto {
+  id: string;
+  username: string;
+  accountLetter: string;
+  status: 'active' | 'suspended';
+  mustChangePassword: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AdminSalesUserDto {
   id: string;
   name: string;

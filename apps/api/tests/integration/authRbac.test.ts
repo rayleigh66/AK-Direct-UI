@@ -837,6 +837,54 @@ describeDb('authentication, RBAC and session isolation', () => {
     expect(suspended.body.company.status).toBe('suspended');
   });
 
+  it('lists accounts and brand grants for administrators without leaking password hashes', async () => {
+    const admin = await loggedInAgent('admin.one@example.test');
+    const accounts = await admin.agent.get(`/api/admin/companies/${companyAId}/accounts`);
+    expect(accounts.status).toBe(200);
+    expect(accounts.body.accounts).toHaveLength(1);
+    // `lastLoginAt` is optional and appears only after a successful login.
+    const allowedKeys = [
+      'accountLetter',
+      'createdAt',
+      'id',
+      'lastLoginAt',
+      'mustChangePassword',
+      'status',
+      'updatedAt',
+      'username',
+    ];
+    const returnedKeys = Object.keys(accounts.body.accounts[0]);
+    expect(returnedKeys.every(key => allowedKeys.includes(key))).toBe(true);
+    expect(returnedKeys).toContain('username');
+    expect(returnedKeys).toContain('accountLetter');
+    expect(accounts.body.accounts[0]).toMatchObject({
+      username: 'AK000101A',
+      accountLetter: 'A',
+      status: 'active',
+      mustChangePassword: false,
+    });
+    expect(JSON.stringify(accounts.body)).not.toMatch(/scrypt\$|password_hash/);
+
+    const brands = await admin.agent.get(`/api/admin/companies/${companyAId}/brands`);
+    expect(brands.status).toBe(200);
+    expect(brands.body.brandIds).toEqual(['brand-aoking']);
+
+    const missing = await admin.agent.get(`/api/admin/companies/${randomUUID()}/accounts`);
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('company_not_found');
+
+    // A salesperson can read their assigned companies through the sales API,
+    // but the administrator projections stay behind their own permissions.
+    const sales = await loggedInAgent('sales.one@example.test');
+    expect((await sales.agent.get(`/api/admin/companies/${companyAId}/accounts`)).status).toBe(403);
+    expect((await sales.agent.get(`/api/admin/companies/${companyAId}/brands`)).status).toBe(403);
+
+    // Customers never reach the internal projections.
+    const customer = await loggedInAgent('AK000101A');
+    expect((await customer.agent.get(`/api/admin/companies/${companyAId}/accounts`)).status).toBe(403);
+    expect((await customer.agent.get(`/api/admin/companies/${companyAId}/brands`)).status).toBe(403);
+  });
+
   it('provisions a least-privilege runtime role separate from migrations', async () => {
     const role = `aoking_runtime_test_${process.pid}`;
     const password = 'RuntimePass123!Strong';

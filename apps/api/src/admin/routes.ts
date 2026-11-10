@@ -14,6 +14,8 @@ import {
   createSecondaryAccount,
   getCompanyForAuth,
   listAllCompanies,
+  listCompanyAccounts,
+  listCompanyBrandIds,
   setBrandGrant,
   setCompanyStatus,
   setCustomerStatus,
@@ -81,6 +83,22 @@ export function createAdminRouter(pool: DbPool, config: AuthConfig): Router {
     requirePermission('companies.manage'),
     asyncHandler(async (req, res) => {
       res.status(200).json({ company: await getCompanyForAuth(pool, req.auth!, req.params.id) });
+    })
+  );
+
+  router.get(
+    '/companies/:id/accounts',
+    requirePermission('accounts.manage'),
+    asyncHandler(async (req, res) => {
+      res.status(200).json({ accounts: await listCompanyAccounts(pool, req.params.id) });
+    })
+  );
+
+  router.get(
+    '/companies/:id/brands',
+    requirePermission('brands.manage'),
+    asyncHandler(async (req, res) => {
+      res.status(200).json({ brandIds: await listCompanyBrandIds(pool, req.params.id) });
     })
   );
 
