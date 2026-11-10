@@ -133,6 +133,11 @@ function renderOrders(scope: 'customer' | 'sales' | 'admin') {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  window.localStorage.clear();
+  document.body.style.overflow = '';
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.width = '';
   Object.defineProperty(window, 'scrollTo', { configurable: true, value: vi.fn() });
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -207,5 +212,77 @@ describe('internal order details', () => {
     const drawer = await screen.findByTestId('order-detail-drawer');
     expect(drawer.textContent).toContain(order.orderNo);
     expect(screen.getAllByTestId('order-detail')).toHaveLength(1);
+  });
+
+  it('names the sales drawer close button in the current internal language', async () => {
+    const order = internalOrder();
+    vi.mocked(api.listSalesOrders).mockResolvedValue([order]);
+    vi.mocked(api.getSalesOrder).mockResolvedValue(order);
+
+    window.localStorage.setItem('aoking.internal.language.orders-drawer-sales', 'zh');
+    renderOrders('sales');
+    fireEvent.click(await screen.findByTestId('internal-order-card'));
+    const zhClose = await screen.findByTestId('order-drawer-close');
+    await waitFor(() => expect(zhClose.getAttribute('aria-label')).toBe('关闭'), {
+      timeout: 2_000,
+    });
+
+    fireEvent.click(zhClose);
+    await waitFor(() => expect(screen.queryByTestId('order-detail-drawer')).toBeNull(), {
+      timeout: 2_000,
+    });
+    cleanup();
+
+    window.localStorage.removeItem('aoking.internal.language.orders-drawer-sales');
+    renderOrders('sales');
+    fireEvent.click(await screen.findByTestId('internal-order-card'));
+    const enClose = await screen.findByTestId('order-drawer-close');
+    expect(enClose.getAttribute('aria-label')).toBe('Close');
+  });
+
+  it('closes the sales drawer with Escape and restores scroll lock and focus', async () => {
+    const order = internalOrder();
+    vi.mocked(api.listSalesOrders).mockResolvedValue([order]);
+    vi.mocked(api.getSalesOrder).mockResolvedValue(order);
+    const scrollTo = vi.mocked(window.scrollTo);
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 640 });
+
+    renderOrders('sales');
+    const card = await screen.findByTestId('internal-order-card');
+    (card as HTMLElement).focus({ preventScroll: true });
+    expect(document.activeElement).toBe(card);
+    fireEvent.click(card);
+    await screen.findByTestId('order-detail-drawer');
+
+    // The body is frozen at the current offset while the drawer is open.
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.body.style.position).toBe('fixed');
+    expect(document.body.style.top).toBe('-640px');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('order-detail-drawer')).toBeNull(), {
+      timeout: 2_000,
+    });
+    expect(document.body.style.overflow).toBe('');
+    expect(document.body.style.position).toBe('');
+    expect(document.body.style.top).toBe('');
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(0, 640), { timeout: 2_000 });
+    expect(document.activeElement).toBe(card);
+  });
+
+  it('closes the sales drawer when the overlay is clicked', async () => {
+    const order = internalOrder();
+    vi.mocked(api.listSalesOrders).mockResolvedValue([order]);
+    vi.mocked(api.getSalesOrder).mockResolvedValue(order);
+
+    renderOrders('sales');
+    fireEvent.click(await screen.findByTestId('internal-order-card'));
+    await screen.findByTestId('order-detail-drawer');
+
+    fireEvent.click(screen.getByTestId('order-detail-drawer-overlay'));
+    await waitFor(() => expect(screen.queryByTestId('order-detail-drawer')).toBeNull(), {
+      timeout: 2_000,
+    });
+    expect(screen.queryByTestId('order-detail')).toBeNull();
   });
 });

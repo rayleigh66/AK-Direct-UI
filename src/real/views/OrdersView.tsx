@@ -777,6 +777,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                 adminDrawerKind === 'customer' ? 'customer-detail-drawer' : 'order-detail-drawer'
               }
               closeTestId={`${adminDrawerKind}-drawer-close`}
+              closeLabel={text('Close', '关闭')}
             >
               {adminDrawerKind === 'order' ? (
                 detailLoading ? (
