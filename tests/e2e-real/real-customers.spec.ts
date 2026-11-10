@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { openInternalTab, waitForInternalWorkspace } from './internalNav';
 
 const ADMIN_EMAIL = process.env.REAL_E2E_ADMIN_EMAIL ?? '';
 const ADMIN_PASSWORD = process.env.REAL_E2E_ADMIN_PASSWORD ?? '';
@@ -16,7 +17,9 @@ async function signIn(page: Page, email: string, password: string, landing: stri
   await page.locator('input[autocomplete="username"]').fill(email);
   await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.getByRole('button', { name: /Sign in/ }).click();
-  await expect(page.getByTestId(landing)).toBeVisible();
+  const width = page.viewportSize()?.width ?? 1440;
+  if (width < 1024) await waitForInternalWorkspace(page);
+  else await expect(page.getByTestId(landing)).toBeVisible();
 }
 
 function companyRow(page: Page, code: string) {
@@ -116,7 +119,7 @@ test('admin manages accounts, brands, sales assignment and status through real A
   test.skip(testInfo.project.name !== 'real-desktop-1440', 'One management pass at desktop 1440.');
 
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD, 'real-tab-products');
-  await page.getByTestId('real-tab-customers').click();
+  await openInternalTab(page, 'customers');
   await expect(page.getByTestId('admin-customers')).toBeVisible();
 
   const companiesResponse = await page.request.get('/api/admin/companies');
@@ -145,7 +148,7 @@ test('admin manages accounts, brands, sales assignment and status through real A
   await expect(page.getByTestId('admin-notice')).toContainText('Sales assignment saved.');
   await page.reload();
   await expect(page.getByTestId('real-tab-products')).toBeVisible();
-  await page.getByTestId('real-tab-customers').click();
+  await openInternalTab(page, 'customers');
   await openCompany(page, ADMIN_COMPANY_CODE);
   await expect(
     page.getByTestId('company-sales-select').locator('option:checked')
@@ -176,7 +179,7 @@ test('admin creates a company from the UI with a one-time credential', async ({ 
   test.skip(testInfo.project.name !== 'real-desktop-1440', 'One create pass at desktop 1440.');
 
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD, 'real-tab-products');
-  await page.getByTestId('real-tab-customers').click();
+  await openInternalTab(page, 'customers');
   await page.getByTestId('customer-company-new').click();
   await expect(page.getByTestId('company-create-form')).toBeVisible();
 
@@ -300,7 +303,7 @@ test('admin previews and confirms brand and company actions with pending orders'
   await signOut(page);
 
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD, 'real-tab-products');
-  await page.getByTestId('real-tab-customers').click();
+  await openInternalTab(page, 'customers');
 
   // Brand revoke: cancel must not write; confirm must use the impact token.
   await openCompany(page, codeA);
@@ -363,7 +366,7 @@ test('mobile admin can open a customer without horizontal overflow', async ({ pa
   test.skip(testInfo.project.name !== 'real-mobile-390', 'One mobile check at 390 px.');
 
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD, 'real-tab-products');
-  await page.getByTestId('real-tab-customers').click();
+  await openInternalTab(page, 'customers');
   await openCompany(page, ADMIN_COMPANY_CODE);
   await expect(page.getByTestId('company-accounts')).toBeVisible();
   await expect(page.getByTestId('customer-account-row').first()).toBeVisible();

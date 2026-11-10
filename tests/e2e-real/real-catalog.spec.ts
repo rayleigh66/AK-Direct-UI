@@ -1,6 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import { openInternalTab, waitForInternalWorkspace } from './internalNav';
 
 const ADMIN_EMAIL = process.env.REAL_E2E_ADMIN_EMAIL ?? '';
 const ADMIN_PASSWORD = process.env.REAL_E2E_ADMIN_PASSWORD ?? '';
@@ -44,8 +45,8 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.locator('input[autocomplete="current-password"]').fill(ADMIN_PASSWORD);
   await page.getByRole('button', { name: /Sign in/ }).click();
 
-  await expect(page.getByTestId('real-tab-setup')).toBeVisible();
-  await page.getByTestId('real-tab-setup').click();
+  await waitForInternalWorkspace(page);
+  await openInternalTab(page, 'setup');
 
   await page.getByTestId('warehouse-code').fill(warehouseCode);
   await page.getByTestId('warehouse-name-zh').fill('E2E 测试仓');
@@ -87,7 +88,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await page.getByTestId('tag-create-submit').click();
   await expect(page.getByText(tagCode, { exact: true })).toBeVisible();
 
-  await page.getByTestId('real-tab-products').click();
+  await openInternalTab(page, 'products');
   await page.getByTestId('product-new').click();
   await page.getByTestId('product-code').fill(productCode);
   await page.getByTestId('product-title-zh').fill('E2E 运行测试背包');
@@ -122,7 +123,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await card.getByTestId('product-publish').click();
   await expect(card.getByTestId('product-unpublish')).toBeVisible();
 
-  await page.getByTestId('real-tab-inventory').click();
+  await openInternalTab(page, 'inventory');
   await page.getByTestId('inventory-register-open').click();
   const skuSelect = page.getByTestId('inventory-register-sku');
   const skuValue = await skuSelect
@@ -156,7 +157,7 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await expect(page.getByTestId('inventory-row').filter({ hasText: skuCode2 })).toBeVisible();
   await screenshot(page, `inventory-${testInfo.project.name}`);
 
-  await page.getByTestId('real-tab-import').click();
+  await openInternalTab(page, 'import');
   await expect(page.getByTestId('import-template-guide')).toContainText('sku_code');
   await expect(page.getByTestId('import-template-warning')).toContainText('EXAMPLE-SKU');
   const templateDownloadPromise = page.waitForEvent('download');
@@ -205,6 +206,21 @@ test('admin creates catalogue and stock, customer browses authorised products', 
   await expect(page.getByTestId('real-catalog-cart-entry')).toHaveCount(0);
   await expect(page.getByTestId('real-tab-cart')).toBeVisible();
   await expect(page.getByTestId('cart-badge')).toBeVisible();
+  // Customer navigation and layout remain the pre-Shell customer surface.
+  await expect(page.getByTestId('internal-shell')).toHaveCount(0);
+  await expect(page.getByTestId('real-sidebar')).toHaveCount(0);
+  await expect(page.getByTestId('brand-lockup')).toBeVisible();
+  if (
+    testInfo.project.name === 'real-mobile-390' &&
+    process.env.REAL_E2E_SCREENSHOTS === '1'
+  ) {
+    const directory = path.join(process.cwd(), 'docs/ui-review/real-admin-shell');
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({
+      path: path.join(directory, 'customer-catalog-390.png'),
+      fullPage: true,
+    });
+  }
   const productCard = page.getByTestId('catalog-product-card').filter({ hasText: productTitle });
   await expect(productCard).toBeVisible({ timeout: 20_000 });
   await expect(productCard).toContainText('$38.00');
