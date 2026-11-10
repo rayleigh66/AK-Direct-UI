@@ -64,14 +64,17 @@ async function signInCustomer(page: Page, username: string, temporaryPassword: s
   await page.locator('input[autocomplete="current-password"]').fill(temporaryPassword);
   await page.getByRole('button', { name: /Sign in/ }).click();
   const changePassword = page.getByTestId('real-auth-change-password');
-  if (await changePassword.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  const catalog = page.getByTestId('catalog-search');
+  // The login response may need longer than a short visibility probe on CI.
+  await expect(changePassword.or(catalog)).toBeVisible({ timeout: 20_000 });
+  if (await changePassword.isVisible()) {
     const inputs = page.locator('input[type="password"]');
     await inputs.nth(0).fill(temporaryPassword);
     await inputs.nth(1).fill(CUSTOMER_PASSWORD);
     await inputs.nth(2).fill(CUSTOMER_PASSWORD);
     await page.getByRole('button', { name: /Save password/ }).click();
   }
-  await expect(page.getByTestId('catalog-search')).toBeVisible({ timeout: 20_000 });
+  await expect(catalog).toBeVisible({ timeout: 20_000 });
 }
 
 async function submitPendingOrder(page: Page, skuId: string): Promise<Record<string, any>> {
