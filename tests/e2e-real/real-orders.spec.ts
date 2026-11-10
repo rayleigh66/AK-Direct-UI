@@ -291,9 +291,19 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   const internalOrder = page.getByTestId('internal-order-card').filter({ hasText: orderNo });
   await expect(internalOrder).toBeVisible({ timeout: 20_000 });
   await internalOrder.click();
-  await expect(page.getByTestId('order-detail')).toContainText(orderNo);
-  await expect(page.getByTestId('sales-confirm-disabled')).toBeVisible();
-  await expect(page.getByTestId('sales-confirm-disabled')).toContainText('Phase 4B-05');
+  const salesDrawer = page.getByTestId('order-detail-drawer');
+  await expect(salesDrawer).toBeVisible();
+  await expect(salesDrawer.getByTestId('order-detail')).toContainText(orderNo);
+  await expect(salesDrawer.getByTestId('order-detail')).toContainText('Reference');
+  await expect(salesDrawer.getByTestId('sales-confirm-disabled')).toBeVisible();
+  await expect(salesDrawer.getByTestId('sales-confirm-disabled')).toContainText('Phase 4B-05');
+  await expect(page.getByTestId('order-detail')).toHaveCount(1);
+  if (mobile) {
+    const drawerBox = await salesDrawer.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(drawerBox).not.toBeNull();
+    expect(drawerBox!.width).toBeGreaterThanOrEqual(viewport.width - 1);
+  }
   if (
     testInfo.project.name === 'real-desktop-1440' &&
     process.env.REAL_E2E_SCREENSHOTS === '1'
@@ -307,17 +317,35 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   }
 
   // Real internal order language mode + shared status badge vocabulary.
-  const orderStatus = page
-    .getByTestId('order-detail')
-    .locator('[data-order-status="PENDING_CONFIRMATION"]');
-  await expect(orderStatus).toHaveText('Pending confirmation');
+  // The modal drawer blocks the topbar, so close and reopen around each toggle.
+  await expect(
+    salesDrawer.getByTestId('order-detail').locator('[data-order-status="PENDING_CONFIRMATION"]')
+  ).toHaveText('Pending confirmation');
+  await page.getByTestId('order-drawer-close').click();
+  await expect(salesDrawer).toBeHidden();
+  await expect(page.getByTestId('order-detail')).toHaveCount(0);
+  await expect(internalOrder).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-order-no')))
+    .toBe(orderNo);
+
   await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
-  await expect(orderStatus).toHaveText('待确认');
+  await internalOrder.click();
+  await expect(
+    salesDrawer.getByTestId('order-detail').locator('[data-order-status="PENDING_CONFIRMATION"]')
+  ).toHaveText('待确认');
+  await page.getByTestId('order-drawer-close').click();
+  await expect(salesDrawer).toBeHidden();
   await page
     .getByTestId('internal-language-toggle')
     .getByRole('button', { name: 'EN' })
     .click();
-  await expect(orderStatus).toHaveText('Pending confirmation');
+  await internalOrder.click();
+  await expect(
+    salesDrawer.getByTestId('order-detail').locator('[data-order-status="PENDING_CONFIRMATION"]')
+  ).toHaveText('Pending confirmation');
+  await page.getByTestId('order-drawer-close').click();
+  await expect(salesDrawer).toBeHidden();
 
   // The global toggle applies across sales pages without losing the active tab.
   await page.getByTestId('internal-language-toggle').getByRole('button', { name: '中文' }).click();
