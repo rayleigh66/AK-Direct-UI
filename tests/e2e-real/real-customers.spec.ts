@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 const ADMIN_EMAIL = process.env.REAL_E2E_ADMIN_EMAIL ?? '';
@@ -5,6 +8,8 @@ const ADMIN_PASSWORD = process.env.REAL_E2E_ADMIN_PASSWORD ?? '';
 const ADMIN_COMPANY_CODE = process.env.REAL_E2E_ADMIN_COMPANY_CODE ?? '';
 const SALES_EMAIL = process.env.REAL_E2E_SALES_EMAIL ?? '';
 const SALES_PASSWORD = process.env.REAL_E2E_SALES_PASSWORD ?? '';
+const IMAGE_FIXTURE = path.join(process.cwd(), 'tests/e2e-real/fixtures/product.png');
+const CUSTOMER_PASSWORD = 'ImpactPass123!Strong';
 
 async function signIn(page: Page, email: string, password: string, landing: string) {
   await page.goto('/');
@@ -24,6 +29,78 @@ async function openCompany(page: Page, code: string) {
   await expect(row).toBeVisible();
   await row.click();
   await expect(page.getByTestId('company-status')).toBeVisible();
+}
+
+async function csrfToken(page: Page): Promise<string> {
+  const response = await page.request.get('/api/auth/csrf');
+  expect(response.status()).toBe(200);
+  return (await response.json()).csrfToken as string;
+}
+
+async function apiPost(
+  page: Page,
+  pathName: string,
+  token: string,
+  data: Record<string, unknown>
+): Promise<Record<string, any>> {
+  const response = await page.request.post(pathName, {
+    headers: { 'X-CSRF-Token': token },
+    data,
+  });
+  if (!response.ok()) {
+    throw new Error(`${pathName} failed: ${response.status()} ${await response.text()}`);
+  }
+  return response.json();
+}
+
+async function signOut(page: Page) {
+  await page.getByRole('button', { name: /Sign out/ }).click();
+  await expect(page.getByTestId('real-auth-login')).toBeVisible();
+}
+
+async function signInCustomer(page: Page, username: string, temporaryPassword: string) {
+  await page.goto('/');
+  await page.locator('input[autocomplete="username"]').fill(username);
+  await page.locator('input[autocomplete="current-password"]').fill(temporaryPassword);
+  await page.getByRole('button', { name: /Sign in/ }).click();
+  const changePassword = page.getByTestId('real-auth-change-password');
+  if (await changePassword.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const inputs = page.locator('input[type="password"]');
+    await inputs.nth(0).fill(temporaryPassword);
+    await inputs.nth(1).fill(CUSTOMER_PASSWORD);
+    await inputs.nth(2).fill(CUSTOMER_PASSWORD);
+    await page.getByRole('button', { name: /Save password/ }).click();
+  }
+  await expect(page.getByTestId('catalog-search')).toBeVisible({ timeout: 20_000 });
+}
+
+async function submitPendingOrder(page: Page, skuId: string): Promise<Record<string, any>> {
+  const token = await csrfToken(page);
+  const before = await (await page.request.get('/api/cart')).json();
+  const add = await page.request.put(`/api/cart/items/${skuId}`, {
+    headers: { 'X-CSRF-Token': token },
+    data: { quantity: 10, expectedRevision: before.cart.revision },
+  });
+  if (!add.ok()) throw new Error(`cart add failed: ${add.status()} ${await add.text()}`);
+  const after = await (await page.request.get('/api/cart')).json();
+  const expectedShipDate = new Date(Date.now() + 14 * 24 * 3600 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const created = await apiPost(page, '/api/orders', token, {
+    idempotencyKey: randomUUID(),
+    expectedCartRevision: after.cart.revision,
+    shippingMethod: 'Sea',
+    destinationCountryAlpha3: 'USA',
+    expectedShipDate,
+    shippingRequirements: 'E2E impact test cartons.',
+  });
+  return created.order;
+}
+
+async function adminOrderStatus(page: Page, orderId: string): Promise<string> {
+  const response = await page.request.get(`/api/admin/orders/${orderId}`);
+  expect(response.status()).toBe(200);
+  return (await response.json()).order.status as string;
 }
 
 test('admin manages accounts, brands, sales assignment and status through real APIs', async ({
@@ -143,6 +220,127 @@ test('admin creates a company from the UI with a one-time credential', async ({ 
   await page.getByTestId('customer-company-search').fill(code);
   await expect(companyRow(page, code)).toBeVisible();
   await expect(page.getByTestId('customer-company-detail')).toContainText(code);
+});
+
+test('admin previews and confirms brand and company actions with pending orders', async ({
+  page,
+}, testInfo) => {
+  test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'Real-auth admin credentials are required.');
+  test.skip(testInfo.project.name !== 'real-desktop-1440', 'One destructive-impact pass at desktop 1440.');
+
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD, 'real-tab-products');
+  const adminToken = await csrfToken(page);
+  const stamp = Date.now().toString().slice(-7);
+
+  const warehouse = await apiPost(page, '/api/admin/warehouses', adminToken, {
+    code: `WH-IMP-${stamp}`,
+    name: '影响测试仓',
+    nameEn: 'Impact Test Warehouse',
+  });
+  const product = await apiPost(page, '/api/admin/catalog/products', adminToken, {
+    brandId: 'brand-aoking',
+    productCode: `IMP-${stamp}`,
+    title: '影响测试商品',
+    titleEn: `Impact Test Product ${stamp}`,
+    category: 'Business Backpacks',
+    material: 'Nylon',
+    capacityOrSize: '20L',
+    seriesId: null,
+    tagIds: [],
+  });
+  const productId = product.product.id as string;
+  const image = await page.request.post(`/api/admin/catalog/products/${productId}/images`, {
+    headers: { 'X-CSRF-Token': adminToken, 'Content-Type': 'image/png' },
+    data: await readFile(IMAGE_FIXTURE),
+  });
+  if (!image.ok()) throw new Error(`image upload failed: ${image.status()} ${await image.text()}`);
+  const sku = await apiPost(page, `/api/admin/catalog/products/${productId}/skus`, adminToken, {
+    skuCode: `IMP-${stamp}-BLK`,
+    colorName: '黑色',
+    colorNameEn: 'Black',
+    colorHex: '#222222',
+    basePriceCents: 4200,
+  });
+  const skuId = sku.sku.id as string;
+  await apiPost(page, `/api/admin/catalog/products/${productId}/publish`, adminToken, {});
+  await apiPost(page, '/api/admin/inventory/register', adminToken, {
+    skuId,
+    warehouseId: warehouse.warehouse.id,
+    onHand: 100,
+    unsellable: 0,
+    reason: 'E2E destructive-impact test stock',
+  });
+
+  const sixDigits = () => String(Math.floor(100000 + Math.random() * 900000));
+  const codeA = `C${sixDigits()}`;
+  let codeB = `C${sixDigits()}`;
+  while (codeB === codeA) codeB = `C${sixDigits()}`;
+  const companyA = await apiPost(page, '/api/admin/companies', adminToken, {
+    customerCode: codeA,
+    shortName: `Impact A ${codeA}`,
+    countryAlpha3: 'USA',
+    brandIds: ['brand-aoking'],
+  });
+  const companyB = await apiPost(page, '/api/admin/companies', adminToken, {
+    customerCode: codeB,
+    shortName: `Impact B ${codeB}`,
+    countryAlpha3: 'USA',
+    brandIds: ['brand-aoking'],
+  });
+
+  await signOut(page);
+  await signInCustomer(page, companyA.primaryUsername, companyA.temporaryPassword);
+  const orderA = await submitPendingOrder(page, skuId);
+  await signOut(page);
+  await signInCustomer(page, companyB.primaryUsername, companyB.temporaryPassword);
+  const orderB = await submitPendingOrder(page, skuId);
+  await signOut(page);
+
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD, 'real-tab-products');
+  await page.getByTestId('real-tab-customers').click();
+
+  // Brand revoke: cancel must not write; confirm must use the impact token.
+  await openCompany(page, codeA);
+  const brand = page.getByTestId('customer-brand-brand-aoking');
+  await expect(brand).toBeChecked();
+  await brand.click();
+  const impact = page.getByTestId('customer-impact-dialog');
+  await expect(impact).toBeVisible();
+  await expect(impact).toContainText(orderA.orderNo);
+  await page.getByTestId('customer-impact-cancel').click();
+  await expect(impact).toBeHidden();
+  await expect(brand).toBeChecked();
+  expect(await adminOrderStatus(page, orderA.id)).toBe('PENDING_CONFIRMATION');
+
+  await brand.click();
+  await expect(impact).toBeVisible();
+  await page.getByTestId('customer-impact-confirm').click();
+  await expect(page.getByTestId('admin-notice')).toContainText('Brand access revoked');
+  await expect(brand).not.toBeChecked();
+  expect(await adminOrderStatus(page, orderA.id)).toBe('CANCELLED');
+  await brand.click();
+  await expect(brand).toBeChecked();
+
+  // Company suspend: the same preview, cancel and token-confirmation flow.
+  await openCompany(page, codeB);
+  const status = page.getByTestId('company-status');
+  await expect(status).toHaveText('Active');
+  await page.getByTestId('company-status-toggle').click();
+  await expect(impact).toBeVisible();
+  await expect(impact).toContainText(orderB.orderNo);
+  await page.getByTestId('customer-impact-cancel').click();
+  await expect(impact).toBeHidden();
+  await expect(status).toHaveText('Active');
+  expect(await adminOrderStatus(page, orderB.id)).toBe('PENDING_CONFIRMATION');
+
+  await page.getByTestId('company-status-toggle').click();
+  await expect(impact).toBeVisible();
+  await page.getByTestId('customer-impact-confirm').click();
+  await expect(page.getByTestId('admin-notice')).toContainText('Company suspended');
+  await expect(status).toHaveText('Suspended');
+  expect(await adminOrderStatus(page, orderB.id)).toBe('CANCELLED');
+  await page.getByTestId('company-status-toggle').click();
+  await expect(status).toHaveText('Active');
 });
 
 test('sales staff cannot reach customer administration', async ({ page }, testInfo) => {

@@ -41,12 +41,20 @@ import { usdFromCents } from '../cart';
 const inputClass =
   'mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff681e]';
 
-type TempCredential = { title: string; username: string; password: string };
+type TempCredential = {
+  title: string;
+  username: string;
+  password: string;
+  companyId: string;
+  companyCode: string;
+  companyName: string;
+};
 
 type ImpactState = {
   title: string;
   description: string;
   success: string;
+  companyId: string;
   preview: OrderImpactDto;
   run: (token?: string) => Promise<unknown>;
 };
@@ -96,7 +104,9 @@ export const AdminCustomersView: React.FC<{
   const [formError, setFormError] = useState('');
   const [createBusy, setCreateBusy] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [tempCredential, setTempCredential] = useState<TempCredential | null>(null);
+  // Credentials are keyed by company so a delayed response cannot appear in
+  // another company's context, and are only cleared after the user saves them.
+  const [pendingCredentials, setPendingCredentials] = useState<Record<string, TempCredential>>({});
   const [pendingAccount, setPendingAccount] = useState<PendingAccount | null>(null);
   const [impact, setImpact] = useState<ImpactState | null>(null);
 
@@ -104,8 +114,37 @@ export const AdminCustomersView: React.FC<{
   // previously selected company can never overwrite the current selection.
   const detailRequestId = useRef(0);
   const selectedCompanyId = useRef<string | null>(null);
+  const accountCreateInFlight = useRef<Set<string>>(new Set());
+  const tempCredential = selectedId ? pendingCredentials[selectedId] ?? null : null;
 
   const canShowBrands = canManageBrands && canReadCatalog;
+
+  const rememberCredential = (
+    company: AdminCustomerCompanyDto,
+    title: string,
+    username: string,
+    password: string
+  ) => {
+    setPendingCredentials(current => ({
+      ...current,
+      [company.id]: {
+        title,
+        username,
+        password,
+        companyId: company.id,
+        companyCode: company.customerCode,
+        companyName: company.shortName,
+      },
+    }));
+  };
+
+  const closeCredential = (companyId: string) => {
+    setPendingCredentials(current => {
+      const next = { ...current };
+      delete next[companyId];
+      return next;
+    });
+  };
 
   const load = async () => {
     setLoading(true);
@@ -144,6 +183,7 @@ export const AdminCustomersView: React.FC<{
     setImpact(null);
     setDetailLoading(true);
     setError('');
+    setNotice('');
     try {
       const [accountItems, ids] = await Promise.all([
         canManageAccounts ? listCompanyAccounts(company.id) : Promise.resolve([]),
@@ -184,16 +224,25 @@ export const AdminCustomersView: React.FC<{
     if (ids) setBrandIds(ids);
   };
 
-  const run = async (action: () => Promise<unknown>, success: string) => {
+  const run = async (
+    action: () => Promise<unknown>,
+    success: string,
+    companyId: string | null = selectedCompanyId.current
+  ) => {
+    const contextCompanyId = companyId;
     setBusy(true);
     setError('');
     setNotice('');
     try {
       await action();
+      // Refresh whatever company is selected now; an action for A must not
+      // replace B's detail or show A's success message inside B's context.
       await reload();
+      if (contextCompanyId && selectedCompanyId.current !== contextCompanyId) return true;
       setNotice(success);
       return true;
     } catch (err) {
+      if (contextCompanyId && selectedCompanyId.current !== contextCompanyId) return false;
       setError(err instanceof Error ? err.message : t('The request failed.', '请求失败。'));
       return false;
     } finally {
@@ -243,11 +292,12 @@ export const AdminCustomersView: React.FC<{
         assignedSalesUserId: form.assignedSalesUserId || undefined,
         brandIds: form.brandIds,
       });
-      setTempCredential({
-        title: t('Customer company created', '客户公司已创建'),
-        username: result.primaryUsername,
-        password: result.temporaryPassword,
-      });
+      rememberCredential(
+        result.company,
+        t('Customer company created', '客户公司已创建'),
+        result.primaryUsername,
+        result.temporaryPassword
+      );
       setCreateOpen(false);
       setForm(EMPTY_FORM);
       setNotice(
@@ -270,16 +320,28 @@ export const AdminCustomersView: React.FC<{
   const addAccount = async () => {
     if (!detail || busy) return;
     const companyId = detail.id;
+    if (accountCreateInFlight.current.has(companyId)) return;
+    if (pendingCredentials[companyId]) {
+      setError(
+        t(
+          'Save the existing temporary password before creating another account.',
+          '请先保存现有的临时密码，再创建新账号。'
+        )
+      );
+      return;
+    }
+    accountCreateInFlight.current.add(companyId);
     setBusy(true);
     setError('');
     setNotice('');
     try {
       const result = await createCompanyAccount(companyId);
-      setTempCredential({
-        title: t('Customer account created', '客户账号已创建'),
-        username: result.username,
-        password: result.temporaryPassword,
-      });
+      rememberCredential(
+        detail,
+        t('Customer account created', '客户账号已创建'),
+        result.username,
+        result.temporaryPassword
+      );
       if (selectedCompanyId.current !== companyId) return;
       const nextAccounts = await listCompanyAccounts(companyId);
       if (selectedCompanyId.current !== companyId) return;
@@ -294,6 +356,7 @@ export const AdminCustomersView: React.FC<{
       if (selectedCompanyId.current !== companyId) return;
       setError(err instanceof Error ? err.message : t('The request failed.', '请求失败。'));
     } finally {
+      accountCreateInFlight.current.delete(companyId);
       setBusy(false);
     }
   };
@@ -306,7 +369,8 @@ export const AdminCustomersView: React.FC<{
       () => setCustomerStatus(account.id, next),
       next === 'suspended'
         ? t('Account suspended and sessions revoked.', '账号已停用，登录会话已撤销。')
-        : t('Account reactivated.', '账号已重新启用。')
+        : t('Account reactivated.', '账号已重新启用。'),
+      detail.id
     );
   };
 
@@ -323,6 +387,7 @@ export const AdminCustomersView: React.FC<{
               '停用该客户会撤销所有客户会话，并取消下列待确认订单。'
             ),
             success: t('Company suspended and affected pending orders cancelled.', '客户已停用，受影响的待确认订单已取消。'),
+            companyId: company.id,
             preview,
             run: token =>
               setCompanyStatus(company.id, 'suspended', {
@@ -333,6 +398,7 @@ export const AdminCustomersView: React.FC<{
           return;
         }
       } catch (err) {
+        if (selectedCompanyId.current !== company.id) return;
         setError(err instanceof Error ? err.message : t('The request failed.', '请求失败。'));
         return;
       }
@@ -341,7 +407,8 @@ export const AdminCustomersView: React.FC<{
       () => setCompanyStatus(company.id, next),
       next === 'suspended'
         ? t('Company suspended and sessions revoked.', '客户已停用，登录会话已撤销。')
-        : t('Company reactivated.', '客户已重新启用。')
+        : t('Company reactivated.', '客户已重新启用。'),
+      company.id
     );
   };
 
@@ -351,7 +418,8 @@ export const AdminCustomersView: React.FC<{
     if (granted) {
       await run(
         () => setCompanyBrandGrant(companyId, brand.id, true),
-        t('Brand access granted.', '品牌授权已添加。')
+        t('Brand access granted.', '品牌授权已添加。'),
+        companyId
       );
       return;
     }
@@ -366,6 +434,7 @@ export const AdminCustomersView: React.FC<{
             '撤销该品牌后，客户目录将不再显示该品牌，并取消下列待确认订单。'
           ),
           success: t('Brand access revoked and affected pending orders cancelled.', '品牌授权已撤销，受影响的待确认订单已取消。'),
+          companyId,
           preview,
           run: token =>
             setCompanyBrandGrant(companyId, brand.id, false, {
@@ -376,12 +445,14 @@ export const AdminCustomersView: React.FC<{
         return;
       }
     } catch (err) {
+      if (selectedCompanyId.current !== companyId) return;
       setError(err instanceof Error ? err.message : t('The request failed.', '请求失败。'));
       return;
     }
     await run(
       () => setCompanyBrandGrant(companyId, brand.id, false),
-      t('Brand access revoked.', '品牌授权已撤销。')
+      t('Brand access revoked.', '品牌授权已撤销。'),
+      companyId
     );
   };
 
@@ -389,8 +460,16 @@ export const AdminCustomersView: React.FC<{
     if (!impact) return;
     const current = impact;
     setImpact(null);
-    await run(() => current.run(current.preview.impactToken), current.success);
+    await run(
+      () => current.run(current.preview.impactToken),
+      current.success,
+      current.companyId
+    );
   };
+
+  const otherCredentials = Object.values(pendingCredentials).filter(
+    credential => credential.companyId !== selectedId
+  );
 
   if (loading) return <LoadingBlock label={t('Loading customers…', '正在加载客户…')} />;
 
@@ -404,6 +483,31 @@ export const AdminCustomersView: React.FC<{
             className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800"
           >
             {notice}
+          </div>
+        )}
+        {otherCredentials.length > 0 && (
+          <div
+            data-testid="pending-credential-banner"
+            className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"
+          >
+            <span className="font-semibold">
+              {t('Temporary credentials are waiting for:', '以下客户有待保存的临时凭据：')}
+            </span>
+            <span className="ml-2 inline-flex flex-wrap gap-1.5">
+              {otherCredentials.map(credential => (
+                <button
+                  key={credential.companyId}
+                  type="button"
+                  onClick={() => {
+                    const company = companies.find(item => item.id === credential.companyId);
+                    if (company) void selectCompany(company);
+                  }}
+                  className="rounded-full border border-amber-300 bg-white px-2 py-0.5 font-mono font-bold"
+                >
+                  {credential.companyCode}
+                </button>
+              ))}
+            </span>
           </div>
         )}
 
@@ -701,7 +805,8 @@ export const AdminCustomersView: React.FC<{
                       onClick={() =>
                         void run(
                           () => setCompanySalesAssignment(detail.id, salesDraft || null),
-                          t('Sales assignment saved.', '业务员归属已保存。')
+                          t('Sales assignment saved.', '业务员归属已保存。'),
+                          detail.id
                         )
                       }
                       data-testid="company-sales-save"
@@ -878,7 +983,7 @@ export const AdminCustomersView: React.FC<{
                 <button
                   type="button"
                   aria-label={t('Close', '关闭')}
-                  onClick={() => setTempCredential(null)}
+                  onClick={() => closeCredential(tempCredential.companyId)}
                   className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200"
                 >
                   <X className="h-4 w-4" />
@@ -891,6 +996,15 @@ export const AdminCustomersView: React.FC<{
                 )}
               </p>
               <dl className="mt-3 space-y-2 text-xs">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+                  <dt className="text-[10px] text-slate-500">{t('Company', '客户公司')}</dt>
+                  <dd
+                    className="mt-0.5 font-mono font-bold"
+                    data-testid="temp-credential-company"
+                  >
+                    {tempCredential.companyCode} · {tempCredential.companyName}
+                  </dd>
+                </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
                   <dt className="text-[10px] text-slate-500">{t('Login', '登录名')}</dt>
                   <dd className="mt-0.5 font-mono font-bold" data-testid="temp-credential-username">
@@ -918,7 +1032,7 @@ export const AdminCustomersView: React.FC<{
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTempCredential(null)}
+                  onClick={() => closeCredential(tempCredential.companyId)}
                   data-testid="temp-credential-close"
                   className="fo-btn fo-btn-dark"
                 >
