@@ -13,13 +13,20 @@ services:
       - caddy_config:/config
     # Caddy redirects every HTTP request to HTTPS, so the base healthcheck
     # (wget http://127.0.0.1/) would follow the redirect to an IP-address
-    # certificate and fail. Probe Caddy's local admin endpoint instead.
+    # certificate and fail. Probe the real site over HTTPS instead, with the
+    # public hostname pinned to the container loopback: SNI and the certificate
+    # are still validated for DOMAIN, and a missing index, a 404 or a failed
+    # certificate issuance fails the probe instead of only proving that the
+    # Caddy process is still alive.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS --max-time 4 --resolve "$${DOMAIN}:443:127.0.0.1" "https://$${DOMAIN}/" | grep -qF 'id="root"'
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 10s
+      start_period: 30s
 
 volumes:
   caddy_data:

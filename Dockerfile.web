@@ -11,6 +11,10 @@ ENV VITE_REAL_AUTH=${VITE_REAL_AUTH}
 RUN npm run build
 
 FROM caddy:2.9.1-alpine
+# The production healthcheck probes the real HTTPS site with curl (hostname
+# pinned to the loopback), so the probe validates the certificate the browser
+# sees instead of only the Caddy process.
+RUN apk add --no-cache curl
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/dist /srv
 EXPOSE 80
