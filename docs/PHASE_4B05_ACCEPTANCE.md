@@ -63,19 +63,24 @@ runs:
 - Cross-company last-stock race: one confirmation succeeds, the other returns
   409 with no reservation; revoke-first/confirm-first and re-grant/old-key
   barriers pass.
-- Latest full database suite: 116/118. The two remaining failures were test
-  fixture errors, now fixed: the new concurrency barrier selected a non-existent
-  `inventory_balances.id` (now `sku_id`), and the expiry scenario queried an
-  extra unused product instead of the product returned by
-  `createConfirmedOrder`.
+- Latest full database suite: 117/118. The remaining failure was the new
+  concurrency barrier's wait condition: the second confirmation waiter is often
+  blocked by the first waiter's tuple lock, so a direct
+  `pg_blocking_pids(holderPid)` count saw only one. The test now walks the
+  recursive blocker chain and releases the inventory row only after both HTTP
+  transactions are queued; the outcome assertion remains exactly one success
+  and one `409 insufficient_stock`. Earlier fixture fixes in the same suite were
+  the non-existent `inventory_balances.id` (`SELECT sku_id`) and an extra
+  unused product in the expiry scenario (now uses the product returned by
+  `createConfirmedOrder`).
 - Latest complete Real regression: 20 passed and 9 skipped by existing viewport
   conditions. The new 1440 desktop and 390 mobile flows passed through
   buyer-authority grant/revoke/re-grant, price approval, acceptance,
   two-warehouse confirmation, extension, approved release and the customer
   `CANCELLED` state.
 
-The two database fixture fixes and the final `git diff --check` were applied
-after that run and are queued for the reviewer's re-run.
+The barrier fix and the final `git diff --check` were applied after the
+reviewer's 117/118 run and are queued for the reviewer's re-run.
 
 ## 4. Acceptance matrix
 
@@ -86,7 +91,7 @@ after that run and are queued for the reviewer's re-run.
 | Plans/prices | Epoch semantics, revert-to-reference, quantity-only inheritance, stale/rejected approvals, acceptance invalidation |
 | Authorization | Per-account grant/revoke/re-grant, PENDING-only invalidation, plan restored to `SUBMITTED`, confirmed evidence retained |
 | Confirmation | Allocation normalization/validation, two-warehouse split, deterministic locks, atomic final snapshot and idempotent replay |
-| Concurrency | Company-lock permission barrier; two companies queued on one last-stock row (one 200, one 409, no failed reservation/ledger/audit/history) |
+| Concurrency | Company-lock permission barrier; two companies queued on one last-stock row using a recursive blocker chain (one 200, one 409, no failed reservation/ledger/audit/history) |
 | Warehouse | Two-warehouse reserve/release, sellable formula, `on_hand`/`unsellable` unchanged, reconciliation endpoint |
 | Deadline | 72h/240h/312h checks, DB clock after locks, at-expiry-only reminder, stock held, extension recovery |
 | Release | Unpaid/not-shipped verification, approved-release binding in SQL, single ledger application, no double deduct |
