@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22.14.0-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html vite.config.ts tsconfig.json ./
+COPY src ./src
+ARG VITE_REAL_AUTH=false
+ENV VITE_REAL_AUTH=${VITE_REAL_AUTH}
+RUN npm run build
+
+FROM caddy:2.9.1-alpine
+# The production healthcheck probes the real HTTPS site with curl (hostname
+# pinned to the loopback), so the probe validates the certificate the browser
+# sees instead of only the Caddy process.
+RUN apk add --no-cache curl
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+EXPOSE 80

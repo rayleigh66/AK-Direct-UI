@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   calculateSKUAvailableStock,
@@ -21,11 +21,28 @@ import {
   Truck,
   Ship,
   MapPin,
-  Calendar,
   CheckCircle2,
   FileText,
 } from 'lucide-react';
 import { Order } from '../../types';
+import { customerProductTitle, customerSkuColor } from '../../utils/customerDisplay';
+import { QuantityField } from '../ui/QuantityField';
+import { HelpTooltip } from '../ui/HelpTooltip';
+import { EnglishDateField } from '../ui/EnglishDateField';
+import { formatEnglishDate } from '../../utils/dateDisplay';
+
+function shippingDraftKey(companyId?: string) {
+  return `aoking-shipping-draft:${companyId ?? 'guest'}`;
+}
+
+function readShippingDraft(companyId?: string) {
+  try {
+    const raw = sessionStorage.getItem(shippingDraftKey(companyId));
+    return raw ? (JSON.parse(raw) as Record<string, string>) : null;
+  } catch {
+    return null;
+  }
+}
 
 export const OrderListView: React.FC = () => {
   const {
@@ -35,6 +52,8 @@ export const OrderListView: React.FC = () => {
     promotions,
     currentCompanyTierInfo,
     currentCompany,
+    currentCustomerUser,
+    brandGrants,
     updateCartQuantity,
     removeFromCart,
     clearCart,
@@ -42,19 +61,83 @@ export const OrderListView: React.FC = () => {
     setActiveTab,
   } = useApp();
 
-  const [shippingMethod, setShippingMethod] = useState<Order['shipping_method']>('Sea');
+  const initialShippingDraft = useMemo(
+    () => readShippingDraft(currentCompany?.id),
+    [currentCompany?.id]
+  );
+  const [shippingMethod, setShippingMethod] = useState<Order['shipping_method']>(() => {
+    const saved = initialShippingDraft?.shippingMethod;
+    return saved === 'Sea' || saved === 'Air' || saved === 'Express' || saved === 'Customer Pickup'
+      ? (saved as Order['shipping_method'])
+      : 'Sea';
+  });
   const [destinationCountry, setDestinationCountry] = useState<string>(
-    currentCompany?.country_alpha3 || 'USA'
+    initialShippingDraft?.destinationCountry || currentCompany?.country_alpha3 || 'USA'
   );
-  const [expectedDate, setExpectedDate] = useState<string>('2026-11-25');
+  const [expectedDate, setExpectedDate] = useState<string>(
+    initialShippingDraft?.expectedDate ||
+      new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+  );
   const [shippingRequirements, setShippingRequirements] = useState<string>(
-    'Standard export master cartons with pallet stretch wrap. AOKING barcode labels required.'
+    initialShippingDraft?.shippingRequirements ||
+      'Standard export master cartons with pallet stretch wrap. AOKING barcode labels required.'
   );
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        shippingDraftKey(currentCompany?.id),
+        JSON.stringify({ shippingMethod, destinationCountry, expectedDate, shippingRequirements })
+      );
+    } catch {
+      /* local draft is a convenience; ignore storage failures */
+    }
+  }, [currentCompany?.id, shippingMethod, destinationCountry, expectedDate, shippingRequirements]);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
+  const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [errorMessage, setErrorMessage] = useState('');
-  const [submittedOrderNo, setSubmittedOrderNo] = useState<string | null>(null);
+  const [submittedOrder, setSubmittedOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    setQuantityDrafts(
+      Object.fromEntries(cart.map((item) => [item.sku_id, String(item.quantity)]))
+    );
+  }, [cart]);
 
   const tierDiscount = currentCompanyTierInfo?.currentTier.discount_rate ?? 0;
+
+  const applyQuantity = (skuId: string, nextQuantity: number) => {
+    const result = updateCartQuantity(skuId, nextQuantity);
+    if (!result.success) {
+      setLineErrors((prev) => ({
+        ...prev,
+        [skuId]: result.message ?? 'Invalid quantity.',
+      }));
+      return false;
+    }
+    setLineErrors((prev) => {
+      const next = { ...prev };
+      delete next[skuId];
+      return next;
+    });
+    setQuantityDrafts((prev) => ({ ...prev, [skuId]: String(nextQuantity) }));
+    return true;
+  };
+
+  const commitQuantityDraft = (skuId: string) => {
+    const raw = quantityDrafts[skuId] ?? '';
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < SKU_MOQ) {
+      setLineErrors((prev) => ({
+        ...prev,
+        [skuId]: `Minimum ${SKU_MOQ} whole PCS per SKU. Use Remove to delete this line.`,
+      }));
+      return;
+    }
+    applyQuantity(skuId, parsed);
+  };
 
   // Real-time privacy check on requirements
   const privacyCheck = checkPrivacyViolations(shippingRequirements);
@@ -76,6 +159,23 @@ export const OrderListView: React.FC = () => {
     const priceInfo = skuObj
       ? calculateEffectiveUnitPrice(skuObj.base_price_usd, skuObj.id, tierDiscount, promotions)
       : { effectivePrice: 0, isPromo: false, originalPrice: 0, isStacked: false };
+    const brandAuthorized = !!prodObj &&
+      brandGrants.some(
+        grant =>
+          grant.company_id === currentCompany?.id && grant.brand_id === prodObj.brand_id
+      );
+    const unavailableReason =
+      !currentCustomerUser || currentCustomerUser.status !== 'active'
+        ? 'Your customer account is inactive.'
+        : !currentCompany || currentCompany.status !== 'active'
+          ? 'Your customer company is inactive.'
+          : !prodObj || prodObj.active === false
+            ? 'This product is no longer available.'
+            : !skuObj || skuObj.sellable_status !== 'active'
+              ? 'This SKU is no longer available.'
+              : !brandAuthorized
+                ? 'Your company is no longer authorized for this brand.'
+                : '';
 
     return {
       skuId: item.sku_id,
@@ -86,26 +186,45 @@ export const OrderListView: React.FC = () => {
       unitPrice: priceInfo.effectivePrice,
       isPromo: priceInfo.isPromo,
       subtotal: priceInfo.effectivePrice * item.quantity,
+      unavailableReason,
     };
   });
 
   const totalAmountUsd = cartLinesDetailed.reduce((sum, item) => sum + item.subtotal, 0);
   const totalPcs = cartLinesDetailed.reduce((sum, item) => sum + item.quantity, 0);
+  const hasUnavailableLine = cartLinesDetailed.some(item => item.unavailableReason);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
     setErrorMessage('');
 
     if (cart.length === 0) {
-      setErrorMessage('清单为空，无法提交');
+      setErrorMessage('Your order list is empty.');
       return;
     }
-
+    if (!expectedDate) {
+      setErrorMessage('Choose an expected ship date.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expectedDate)) {
+      setErrorMessage('Expected ship date must be a valid date.');
+      return;
+    }
     if (privacyCheck.hasViolation) {
-      setErrorMessage(privacyCheck.message || '隐私安全检查未通过');
+      setErrorMessage(privacyCheck.message ?? 'Privacy check failed.');
+      return;
+    }
+    if (hasUnavailableLine) {
+      setErrorMessage('Remove unavailable products or restore their availability before submitting.');
+      return;
+    }
+    if (Object.keys(lineErrors).length > 0) {
+      setErrorMessage('Resolve the quantity errors before submitting.');
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     const res = submitOrder({
       shippingMethod,
@@ -114,40 +233,72 @@ export const OrderListView: React.FC = () => {
       shippingRequirements,
     });
 
-    setSubmitting(false);
     if (res.success) {
-      setSubmittedOrderNo(res.orderId || 'NEW-ORDER');
+      try {
+        sessionStorage.removeItem(shippingDraftKey(currentCompany?.id));
+      } catch {
+        /* ignore */
+      }
+      setSubmittedOrder(
+        res.order
+          ? { ...res.order, lines: res.order.lines.map((line) => ({ ...line })) }
+          : null
+      );
     } else {
-      setErrorMessage(res.error || '提交失败');
+      submittingRef.current = false;
+      setSubmitting(false);
+      setErrorMessage(res.error || 'Order request failed.');
     }
   };
 
-  if (submittedOrderNo) {
+  if (submittedOrder) {
+    const submittedPcs = submittedOrder.lines.reduce((sum, line) => sum + line.quantity, 0);
+    const submittedTotal = submittedOrder.total_confirmed_usd ?? submittedOrder.total_quoted_usd;
     return (
       <div className="max-w-2xl mx-auto py-12 px-4 text-center space-y-6">
         <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
           <CheckCircle2 className="w-8 h-8" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-900">订购申请已成功提交！</h2>
-          <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
-            您的批发订购申请已发送至负责业务员（Tom Miller）。
-            业务员将核实交期与多仓现货情况，核准后将为您<strong>原子预占库存 72 小时</strong>并发送形式发票。
+          <h2 className="text-xl font-bold text-slate-900">Order request submitted</h2>
+          <p className="text-xs font-mono font-semibold text-slate-500 mt-1">
+            {submittedOrder.order_no}
+          </p>
+          <p className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-xs text-slate-500">
+            <span>Sent to your sales representative for final confirmation.</span>
+            <HelpTooltip label="What happens after submission" align="right">
+              They will verify lead time and multi-warehouse availability, then create a 72-hour
+              demo stock reservation and issue a proforma invoice.
+            </HelpTooltip>
           </p>
         </div>
 
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-2 text-slate-600 max-w-sm mx-auto text-left">
           <div className="flex justify-between">
-            <span className="text-slate-400">总订购数量:</span>
-            <span className="font-mono font-semibold text-slate-800">{totalPcs} PCS</span>
+            <span className="text-slate-400">Order number:</span>
+            <span data-testid="success-order-no" className="font-mono font-semibold text-slate-800">{submittedOrder.order_no}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-400">参考总金额:</span>
-            <span className="font-mono font-bold text-slate-900">USD ${totalAmountUsd.toFixed(2)}</span>
+            <span className="text-slate-400">Total quantity:</span>
+            <span data-testid="success-total-pcs" className="font-mono font-semibold text-slate-800">
+              {submittedPcs} PCS
+            </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-400">当前订单状态:</span>
-            <span className="font-semibold text-amber-600">待业务员确认 (PENDING_CONFIRMATION)</span>
+            <span className="text-slate-400">Reference total:</span>
+            <span data-testid="success-total-usd" className="font-mono font-bold text-slate-900">
+              USD ${submittedTotal.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Expected ship:</span>
+            <span data-testid="success-expected-ship" className="font-semibold text-slate-800">
+              {formatEnglishDate(submittedOrder.expected_ship_date)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Current status:</span>
+            <span className="font-semibold text-amber-600">Pending confirmation</span>
           </div>
         </div>
 
@@ -156,16 +307,16 @@ export const OrderListView: React.FC = () => {
             onClick={() => setActiveTab('orders')}
             className="px-6 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition-colors"
           >
-            查看我的订单进度
+            View my orders
           </button>
           <button
             onClick={() => {
-              setSubmittedOrderNo(null);
+              setSubmittedOrder(null);
               setActiveTab('catalog');
             }}
             className="px-6 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
           >
-            继续浏览现货
+            Continue shopping
           </button>
         </div>
       </div>
@@ -178,28 +329,28 @@ export const OrderListView: React.FC = () => {
         <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
           <FileText className="w-8 h-8" />
         </div>
-        <h2 className="text-base font-bold text-slate-800">订购清单为空</h2>
+        <h2 className="text-base font-bold text-slate-800">Your order list is empty</h2>
         <p className="text-xs text-slate-500 max-w-sm mx-auto">
-          您尚未选择任何 SKU。请前往现货商城挑选心仪款式，每个 SKU 起订量为 10 PCS。
+          Choose a colour in the catalog first. Each SKU has a 10 PCS minimum order quantity.
         </p>
         <button
           onClick={() => setActiveTab('catalog')}
           className="mt-2 px-5 py-2.5 bg-slate-900 text-white text-xs font-semibold rounded-xl hover:bg-slate-800 transition-colors"
         >
-          前往现货商城 (Catalog)
+          Browse the catalog
         </button>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-24">
+    <div className="max-w-5xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-24">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold text-slate-900">订购清单 (Order List)</h1>
+          <h1 className="text-lg font-bold text-slate-900">Order list</h1>
           <p className="text-xs text-slate-500">
-            客户公司: <span className="font-medium text-slate-700">{currentCompany?.short_name}</span> · 每个 SKU 独立满足起订量 10 PCS
+            Company: <span className="font-medium text-slate-700">{currentCompany?.short_name}</span> · 10 PCS MOQ per SKU
           </p>
         </div>
         <button
@@ -207,7 +358,7 @@ export const OrderListView: React.FC = () => {
           className="text-xs text-slate-400 hover:text-rose-600 flex items-center gap-1 transition-colors"
         >
           <Trash2 className="w-3.5 h-3.5" />
-          <span>清空清单</span>
+          <span>Clear list</span>
         </button>
       </div>
 
@@ -224,7 +375,11 @@ export const OrderListView: React.FC = () => {
                   <div className="flex items-center gap-3.5">
                     <img
                       src={item.product.primary_image}
-                      alt={item.product.title}
+                      alt={customerProductTitle(item.product)}
+                      width={64}
+                      height={64}
+                      loading="lazy"
+                      decoding="async"
                       className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-100"
                     />
                     <div>
@@ -232,7 +387,7 @@ export const OrderListView: React.FC = () => {
                         {item.product.product_code} · {item.sku.sku_code}
                       </div>
                       <div className="text-xs font-bold text-slate-900 line-clamp-1">
-                        {item.product.title}
+                        {customerProductTitle(item.product)}
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
                         <span className="flex items-center gap-1">
@@ -240,75 +395,91 @@ export const OrderListView: React.FC = () => {
                             className="w-2.5 h-2.5 rounded-full border border-black/20"
                             style={{ backgroundColor: item.sku.color_hex }}
                           />
-                          <span>{item.sku.color_name}</span>
+                          <span>{customerSkuColor(item.sku)}</span>
                         </span>
                         <span>·</span>
                         <span className="font-mono text-slate-700 font-semibold">
                           USD ${item.unitPrice.toFixed(2)}
                         </span>
                         {item.isPromo && (
-                          <span className="text-[10px] text-rose-600 font-bold">促</span>
+                          <span className="text-[10px] text-rose-600 font-bold">Promo</span>
                         )}
                       </div>
                       <div className="text-[10px] text-slate-400 mt-0.5">
-                        多仓可订库存: <strong className="text-slate-700 font-mono">{item.availableStock} PCS</strong>
+                        Available: <strong className="text-slate-700 font-mono">{item.availableStock} PCS</strong>
                         {!isStockEnough && (
                           <span className="text-rose-600 font-semibold ml-1">
-                            (超出当前可订量!)
+                            (exceeds available stock)
                           </span>
                         )}
                       </div>
+                      {item.unavailableReason && (
+                        <p role="alert" className="text-[10px] font-semibold text-rose-600 mt-1">
+                          {item.unavailableReason} Remove it before submitting.
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   {/* Quantity Stepper & Subtotal */}
                   <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-4 self-end sm:self-center">
-                    <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => updateCartQuantity(item.skuId, item.quantity - 1)}
-                        className="w-9 h-9 flex items-center justify-center text-slate-600 hover:bg-slate-200"
-                        title={item.quantity <= SKU_MOQ ? '低于起订量 10 将移除' : '减少数量'}
-                      >
-                        {item.quantity <= SKU_MOQ ? (
-                          <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                        ) : (
+                    <div>
+                      <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => applyQuantity(item.skuId, Math.max(SKU_MOQ, item.quantity - 1))}
+                          className="w-11 h-11 flex items-center justify-center text-slate-600 hover:bg-slate-200"
+                          aria-label="Decrease quantity"
+                        >
                           <Minus className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                      <input
-                        type="number"
-                        min={SKU_MOQ}
-                        max={item.availableStock}
-                        value={item.quantity}
-                        onChange={e => {
-                          const val = parseInt(e.target.value) || 0;
-                          updateCartQuantity(item.skuId, val);
-                        }}
-                        className="w-14 h-9 text-center font-mono font-bold text-xs bg-transparent focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => updateCartQuantity(item.skuId, item.quantity + 1)}
-                        disabled={item.quantity >= item.availableStock}
-                        className="w-9 h-9 flex items-center justify-center text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
+                        </button>
+                        <QuantityField
+                          ariaLabel={`Quantity for ${item.sku.sku_code}`}
+                          testId={`cart-quantity-${item.skuId}`}
+                          min={SKU_MOQ}
+                          max={item.availableStock}
+                          value={quantityDrafts[item.skuId] ?? String(item.quantity)}
+                          onValueChange={value =>
+                            setQuantityDrafts(prev => ({ ...prev, [item.skuId]: value }))
+                          }
+                          onBlur={() => commitQuantityDraft(item.skuId)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              commitQuantityDraft(item.skuId);
+                            }
+                          }}
+                          className="w-14 h-11 text-center font-mono font-bold text-xs bg-transparent focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => applyQuantity(item.skuId, item.quantity + 1)}
+                          disabled={item.quantity >= item.availableStock}
+                          aria-label="Increase quantity"
+                          className="w-11 h-11 flex items-center justify-center text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {lineErrors[item.skuId] && (
+                        <p role="alert" className="mt-1 max-w-[190px] text-[10px] font-semibold text-rose-600">
+                          {lineErrors[item.skuId]}
+                        </p>
+                      )}
                     </div>
 
                     <div className="text-right min-w-[80px]">
                       <div className="text-xs font-bold font-mono text-slate-900 tabular-nums">
                         ${item.subtotal.toFixed(2)}
                       </div>
-                      <div className="text-[10px] text-slate-400">小计 USD</div>
+                      <div className="text-[10px] text-slate-400">Line total USD</div>
                     </div>
 
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.skuId)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-50 transition-colors"
-                      title="移除商品"
+                      className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-50 transition-colors"
+                      aria-label="Remove item"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -321,9 +492,13 @@ export const OrderListView: React.FC = () => {
           {/* PRD Non-Instant Notice */}
           <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs text-amber-900 leading-relaxed">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <strong>特别提醒 (PRD 1.0 & D10):</strong> 客户在线提交的是【订购申请】，不是自动成交或在线支付订单。
-              订单提交时<strong>不会立即锁库</strong>；由业务员人工核验数量无误并确认后，系统才在单笔原子事务内为您预占库存。
+            <div className="flex flex-wrap items-center gap-1.5">
+              <strong>Order request, not an instant sale.</strong>
+              <HelpTooltip label="Order request and reservation details">
+                Submitting does not lock stock. A sales representative verifies quantities and
+                availability before the demo whole-order reservation is created. This is not a
+                database transaction.
+              </HelpTooltip>
             </div>
           </div>
         </div>
@@ -333,20 +508,20 @@ export const OrderListView: React.FC = () => {
           <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
             <h2 className="text-sm font-bold text-slate-900 pb-2 border-b border-slate-100 flex items-center gap-2">
               <Truck className="w-4 h-4 text-slate-700" />
-              <span>运输与交货要求</span>
+              <span>Shipping & delivery preferences</span>
             </h2>
 
             {/* Shipping Method */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                期望运输方式 (Shipping Method)
+                Shipping method
               </label>
               <div className="grid grid-cols-2 gap-1.5">
                 {[
-                  { id: 'Sea', label: '海运拼箱/整柜 (Sea)', icon: Ship },
-                  { id: 'Air', label: '空运托盘 (Air)', icon: Plane },
-                  { id: 'Express', label: '国际快递 (Express)', icon: Truck },
-                  { id: 'Customer Pickup', label: '客户自提 (Pickup)', icon: MapPin },
+                  { id: 'Sea', label: 'Sea freight', icon: Ship },
+                  { id: 'Air', label: 'Air freight', icon: Plane },
+                  { id: 'Express', label: 'Express courier', icon: Truck },
+                  { id: 'Customer Pickup', label: 'Customer pickup', icon: MapPin },
                 ].map(m => {
                   const Icon = m.icon;
                   return (
@@ -371,56 +546,53 @@ export const OrderListView: React.FC = () => {
             {/* Destination Country (ISO alpha-3) */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                目的国家/地区 (ISO Alpha-3 Code)
+                Destination country (ISO alpha-3)
               </label>
               <select
                 value={destinationCountry}
                 onChange={e => setDestinationCountry(e.target.value)}
                 className="w-full h-11 px-3 rounded-xl border border-slate-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
               >
-                <option value="USA">USA — 美国 (United States)</option>
-                <option value="DEU">DEU — 德国 (Germany)</option>
-                <option value="JPN">JPN — 日本 (Japan)</option>
-                <option value="GBR">GBR — 英国 (United Kingdom)</option>
-                <option value="FRA">FRA — 法国 (France)</option>
-                <option value="AUS">AUS — 澳大利亚 (Australia)</option>
-                <option value="CAN">CAN — 加拿大 (Canada)</option>
-                <option value="ITA">ITA — 意大利 (Italy)</option>
-                <option value="SGP">SGP — 新加坡 (Singapore)</option>
-                <option value="UAE">UAE — 阿联酋 (United Arab Emirates)</option>
+                <option value="USA">USA — United States</option>
+                <option value="DEU">DEU — Germany</option>
+                <option value="JPN">JPN — Japan</option>
+                <option value="GBR">GBR — United Kingdom</option>
+                <option value="FRA">FRA — France</option>
+                <option value="AUS">AUS — Australia</option>
+                <option value="CAN">CAN — Canada</option>
+                <option value="ITA">ITA — Italy</option>
+                <option value="SGP">SGP — Singapore</option>
+                <option value="UAE">UAE — United Arab Emirates</option>
               </select>
             </div>
 
             {/* Expected Ship Date */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                期望发货日期 (Expected Ship Date)
+                Expected ship date
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={expectedDate}
-                  onChange={e => setExpectedDate(e.target.value)}
-                  className="w-full h-11 pl-10 pr-3 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900"
-                  required
-                />
-                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
-              </div>
+              <EnglishDateField
+                value={expectedDate}
+                onChange={setExpectedDate}
+                ariaLabel="Expected ship date"
+                testId="expected-ship-date"
+                required
+              />
             </div>
 
             {/* Shipping Requirements (with strict privacy filter) */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-semibold text-slate-700">
-                  运输包装要求与备注
+                  Packing requirements & notes
                 </label>
-                <span className="text-[10px] text-slate-400">严禁填写个人信息</span>
+                <span className="text-[10px] text-slate-400">No personal information</span>
               </div>
               <textarea
                 value={shippingRequirements}
                 onChange={e => setShippingRequirements(e.target.value)}
                 rows={3}
-                placeholder="例如：需打免熏蒸托盘、外箱贴 AOKING 麦头。请勿填写姓名、电话或地址！"
+                placeholder="e.g. fumigation-free pallet, AOKING shipping marks. Do not enter names, phone numbers or addresses."
                 className={`w-full p-3 rounded-xl border text-xs focus:outline-none focus:ring-2 ${
                   privacyCheck.hasViolation
                     ? 'border-rose-400 bg-rose-50 text-rose-900 focus:ring-rose-500'
@@ -437,7 +609,7 @@ export const OrderListView: React.FC = () => {
               ) : (
                 <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>隐私合规：未检测到联系方式或地址敏感数据</span>
+                  <span>Privacy check passed: no contact details or address detected</span>
                 </div>
               )}
             </div>
@@ -445,21 +617,21 @@ export const OrderListView: React.FC = () => {
             {/* Financial Summary */}
             <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
               <div className="flex justify-between text-slate-500">
-                <span>订购总件数:</span>
+                <span>Total quantity:</span>
                 <span className="font-mono font-medium text-slate-900">{totalPcs} PCS</span>
               </div>
               <div className="flex justify-between text-slate-500">
-                <span>客户等级折扣:</span>
+                <span>Member discount:</span>
                 <span className="text-emerald-700 font-semibold font-mono">
                   -{(tierDiscount * 100).toFixed(0)}% OFF
                 </span>
               </div>
               <div className="flex justify-between text-slate-500">
-                <span>预估运费:</span>
-                <span className="text-slate-500">待业务员人工核算</span>
+                <span>Estimated freight:</span>
+                <span className="text-slate-500">Confirmed by sales</span>
               </div>
               <div className="pt-2 border-t border-slate-100 flex justify-between items-baseline">
-                <span className="font-bold text-slate-900">参考总计 (USD):</span>
+                <span className="font-bold text-slate-900">Reference total (USD):</span>
                 <span className="text-xl font-extrabold font-mono text-slate-900 tabular-nums">
                   ${totalAmountUsd.toFixed(2)}
                 </span>
@@ -467,17 +639,18 @@ export const OrderListView: React.FC = () => {
             </div>
 
             {errorMessage && (
-              <div className="p-2.5 bg-rose-50 text-rose-700 border border-rose-200 text-xs rounded-xl">
+              <div role="alert" aria-live="polite" className="p-2.5 bg-rose-50 text-rose-700 border border-rose-200 text-xs rounded-xl">
                 {errorMessage}
               </div>
             )}
 
             <button
               type="submit"
-              disabled={submitting || privacyCheck.hasViolation}
+              data-testid="submit-order"
+              disabled={submitting || privacyCheck.hasViolation || hasUnavailableLine}
               className="w-full h-12 rounded-[11px] bg-[#ff681e] hover:bg-[#ed5610] disabled:opacity-50 text-white font-bold text-xs tracking-wide transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(255,104,30,0.25)]"
             >
-              <span>{submitting ? '正在提交订购申请...' : '提交现货订购申请'}</span>
+              <span>{submitting ? 'Submitting order request...' : 'Submit order request'}</span>
             </button>
           </form>
         </div>

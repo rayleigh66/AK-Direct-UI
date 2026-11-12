@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { DEMO_IMAGE_LIBRARY } from './demoImageLibrary';
+import { APPROVED_TIER_RULES } from './tierModel';
 import {
   Brand,
   BrandGrant,
@@ -19,19 +21,47 @@ import {
   CustomerNotification,
   InternalEmailTemplate,
   AuditLog,
+  SeriesDefinition,
+  FeatureTagDefinition,
 } from '../types';
+
+export const INITIAL_SERIES: SeriesDefinition[] = [
+  { id: 'core', nameZh: '日常核心', nameEn: 'Everyday Core', order: 1, active: true },
+  { id: 'commute', nameZh: '城市通勤', nameEn: 'City Commute', order: 2, active: true },
+  { id: 'travel', nameZh: '旅行周末', nameEn: 'Travel & Weekender', order: 3, active: true },
+  { id: 'outdoor', nameZh: '户外探索', nameEn: 'Trail & Outdoor', order: 4, active: true },
+  { id: 'compact', nameZh: '轻便随身', nameEn: 'Compact Carry', order: 5, active: true },
+];
+
+export const INITIAL_FEATURE_TAGS: FeatureTagDefinition[] = [
+  { code: 'WATERPROOF', nameZh: '防水', nameEn: 'Waterproof', tone: 'blue', order: 1, active: true },
+  {
+    code: 'WATER_RESISTANT',
+    nameZh: '防泼水',
+    nameEn: 'Water-resistant',
+    tone: 'sky',
+    order: 2,
+    active: true,
+  },
+  { code: 'LAPTOP', nameZh: '电脑保护仓', nameEn: 'Laptop compartment', tone: 'purple', order: 3, active: true },
+  { code: 'RECYCLED', nameZh: '再生材料', nameEn: 'Recycled materials', tone: 'green', order: 4, active: true },
+  { code: 'LIGHTWEIGHT', nameZh: '轻量化', nameEn: 'Lightweight', tone: 'grey', order: 5, active: true },
+  { code: 'ANTI_THEFT', nameZh: '防盗设计', nameEn: 'Anti-theft', tone: 'orange', order: 6, active: true },
+];
 
 export const INITIAL_BRANDS: Brand[] = [
   {
     id: 'brand-aoking',
     code: 'AOKING',
     name: 'AOKING (奥王)',
+    name_en: 'AOKING',
     is_default_granted: true,
   },
   {
     id: 'brand-voyager',
     code: 'VOYAGER',
     name: 'VOYAGER Outdoor (领航者)',
+    name_en: 'VOYAGER Outdoor',
     is_default_granted: false,
   },
 ];
@@ -48,21 +78,25 @@ export const INITIAL_PRODUCTS: Product[] = [
     brand_id: 'brand-aoking',
     product_code: 'AK-9042',
     title: 'AOKING 商务防水精英双肩包 (Elite Waterproof Travel Pack)',
+    title_en: 'Elite Waterproof Travel Pack',
     category: 'Business Backpacks',
+    active: true,
+    series_id: 'core',
+    tag_codes: ['WATER_RESISTANT', 'LAPTOP'],
+    description_en:
+      'A clean everyday backpack with a padded 17-inch laptop compartment, water-resistant shell and thoughtful internal organisation.',
     description: '采用高强度哑光防水面料与防割防泼水涂层，内置 17.3 英寸加厚防震独立电脑舱与 USB 快速充能端口。人体工学 S 型蜂窝减压肩带与隐形防盗后袋。',
     material: '900D Matte High-Density Polyester / Water-Resistant YKK Zippers',
     capacity_or_size: '32L (48 x 33 x 18 cm)',
-    primary_image: '/src/assets/images/aoking_business_backpack_1793546722780.jpg',
-    gallery_images: [
-      '/src/assets/images/aoking_business_backpack_1793546722780.jpg',
-      '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
-    ],
+    primary_image: DEMO_IMAGE_LIBRARY[0].url,
+    gallery_images: [DEMO_IMAGE_LIBRARY[0].url],
     skus: [
       {
         id: 'sku-9042-blk',
         product_id: 'prod-9042',
         sku_code: 'AK-9042-BLK',
         color_name: '哑光暗夜黑 (Matte Black)',
+        color_name_en: 'Matte Black',
         color_hex: '#1c1c1e',
         base_price_usd: 38.0,
         sellable_status: 'active',
@@ -72,6 +106,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-9042',
         sku_code: 'AK-9042-GRY',
         color_name: '深空炭灰 (Charcoal Grey)',
+        color_name_en: 'Charcoal Grey',
         color_hex: '#3a3a3c',
         base_price_usd: 38.0,
         sellable_status: 'active',
@@ -81,6 +116,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-9042',
         sku_code: 'AK-9042-NAV',
         color_name: '深海湛蓝 (Deep Navy)',
+        color_name_en: 'Deep Navy',
         color_hex: '#1b2a47',
         base_price_usd: 38.0,
         sellable_status: 'active', // Stock = 0, for testing D08 / T06 Restock
@@ -90,6 +126,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-9042',
         sku_code: 'AK-9042-OLV',
         color_name: '战术军绿 (Olive Green)',
+        color_name_en: 'Olive Green',
         color_hex: '#3e4a3d',
         base_price_usd: 38.0,
         sellable_status: 'active', // Stock = 6 (< 10 MOQ), for testing low stock restock
@@ -101,13 +138,19 @@ export const INITIAL_PRODUCTS: Product[] = [
     brand_id: 'brand-aoking',
     product_code: 'AK-7710',
     title: 'AOKING 航空级全铝镁框防爆登机箱 20" (AeroLite Polycarbonate Spinner)',
+    title_en: 'AeroLite Polycarbonate Spinner',
     category: 'Travel Luggage',
+    active: true,
+    series_id: 'travel',
+    tag_codes: [],
+    description_en:
+      'A lightweight cabin spinner with a flexible polycarbonate shell, aluminium frame and smooth dual-wheel mobility.',
     description: '德国拜耳三层复合 PC 韧性箱壳，航空级加厚铝镁合金防撞防爆中框与四角包边。静音万向双排万向轮，内嵌式海关 TSA 双重锁。',
     material: '100% Bayer Makrolon Polycarbonate / Aviation Aluminum Alloy Frame',
     capacity_or_size: '20 Inch Cabin Size (38L, 3.4kg)',
-    primary_image: '/src/assets/images/aoking_hardshell_luggage_1793546722486.jpg',
+    primary_image: DEMO_IMAGE_LIBRARY[1].url,
     gallery_images: [
-      '/src/assets/images/aoking_hardshell_luggage_1793546722486.jpg',
+      DEMO_IMAGE_LIBRARY[1].url,
     ],
     skus: [
       {
@@ -115,6 +158,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-7710',
         sku_code: 'AK-7710-SLV',
         color_name: '石墨钛银 (Graphite Silver)',
+        color_name_en: 'Graphite Silver',
         color_hex: '#5a5d62',
         base_price_usd: 65.0,
         sellable_status: 'active',
@@ -124,6 +168,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-7710',
         sku_code: 'AK-7710-BLK',
         color_name: '曜石酷黑 (Obsidian Black)',
+        color_name_en: 'Obsidian Black',
         color_hex: '#111215',
         base_price_usd: 65.0,
         sellable_status: 'active',
@@ -133,6 +178,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-7710',
         sku_code: 'AK-7710-GLD',
         color_name: '香槟浅金 (Champagne Gold)',
+        color_name_en: 'Champagne Gold',
         color_hex: '#b39d7b',
         base_price_usd: 68.0,
         sellable_status: 'active', // Active promo: $55.00, non-stackable
@@ -144,13 +190,19 @@ export const INITIAL_PRODUCTS: Product[] = [
     brand_id: 'brand-aoking',
     product_code: 'AK-8015',
     title: 'AOKING 城市机能战术卷顶双肩包 (Tactical Rolltop Commuter)',
+    title_en: 'Tactical Rolltop Commuter',
     category: 'Urban Commuter',
+    active: true,
+    series_id: 'commute',
+    tag_codes: ['RECYCLED', 'LIGHTWEIGHT', 'LAPTOP'],
+    description_en:
+      'An expandable rolltop commuter with modular webbing, a padded laptop sleeve and a separate shoe compartment.',
     description: '灵动可扩容卷顶闭合架构，模块化战术织带外挂系统，两侧深口弹性保温水壶兜，下沉式独立鞋仓/脏衣仓。',
     material: '1000D Ballistic Cordura / Duraflex High-Strength Buckles',
     capacity_or_size: '28L - 35L Expandable (50 x 30 x 16 cm)',
-    primary_image: '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+    primary_image: DEMO_IMAGE_LIBRARY[2].url,
     gallery_images: [
-      '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+      DEMO_IMAGE_LIBRARY[2].url,
     ],
     skus: [
       {
@@ -158,6 +210,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-8015',
         sku_code: 'AK-8015-NVY',
         color_name: '战术海军蓝 (Tactical Navy)',
+        color_name_en: 'Tactical Navy',
         color_hex: '#1a2639',
         base_price_usd: 32.0,
         sellable_status: 'active', // Active promo: $28.00, STACKABLE with tier discount!
@@ -167,6 +220,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-8015',
         sku_code: 'AK-8015-BLK',
         color_name: '暗夜战术黑 (Stealth Black)',
+        color_name_en: 'Stealth Black',
         color_hex: '#212224',
         base_price_usd: 32.0,
         sellable_status: 'active',
@@ -178,13 +232,19 @@ export const INITIAL_PRODUCTS: Product[] = [
     brand_id: 'brand-aoking',
     product_code: 'AK-3028',
     title: 'AOKING 尊享头层牛皮公文包 (Executive Leather Laptop Briefcase)',
+    title_en: 'Executive Leather Laptop Briefcase',
     category: 'Executive Briefcases',
+    active: true,
+    series_id: 'commute',
+    tag_codes: ['LAPTOP'],
+    description_en:
+      'A refined full-grain leather briefcase with a padded laptop section, detachable shoulder strap and polished hardware.',
     description: '甄选进口头层植鞣纳帕牛皮，细腻触感经久耐磨。定制精抛光银色金属卡扣，可拆卸真皮减压垫宽肩带，背后设有拉杆箱固定插带。',
     material: 'Full-Grain Tuscan Calfskin / Brushed Alloy Hardware',
     capacity_or_size: '15L (40 x 30 x 9 cm)',
-    primary_image: '/src/assets/images/aoking_executive_briefcase_1793546722874.jpg',
+    primary_image: DEMO_IMAGE_LIBRARY[3].url,
     gallery_images: [
-      '/src/assets/images/aoking_executive_briefcase_1793546722874.jpg',
+      DEMO_IMAGE_LIBRARY[3].url,
     ],
     skus: [
       {
@@ -192,6 +252,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-3028',
         sku_code: 'AK-3028-BRN',
         color_name: '意式浓缩棕 (Espresso Brown)',
+        color_name_en: 'Espresso Brown',
         color_hex: '#3b2219',
         base_price_usd: 52.0,
         sellable_status: 'active',
@@ -201,6 +262,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-3028',
         sku_code: 'AK-3028-BLK',
         color_name: '经典商务黑 (Classic Black)',
+        color_name_en: 'Classic Black',
         color_hex: '#171717',
         base_price_usd: 52.0,
         sellable_status: 'active',
@@ -212,11 +274,17 @@ export const INITIAL_PRODUCTS: Product[] = [
     brand_id: 'brand-voyager',
     product_code: 'VOY-1001',
     title: 'VOYAGER 复古粗帆布周末旅行包 (Heritage Weekend Duffle)',
+    title_en: 'Heritage Weekend Duffle',
     category: 'Travel Luggage',
+    active: true,
+    series_id: 'travel',
+    tag_codes: [],
+    description_en:
+      'A heritage-inspired weekend duffle in washed canvas and leather trim, sized for short trips.',
     description: '非 AOKING 授权品牌测试商品，用于验证 T02 未授权品牌访问拒绝机制。',
     material: '16oz Washed Canvas & Crazy Horse Leather',
     capacity_or_size: '45L',
-    primary_image: '/src/assets/images/aoking_urban_commuter_pack_1793546722814.jpg',
+    primary_image: DEMO_IMAGE_LIBRARY[2].url,
     gallery_images: [],
     skus: [
       {
@@ -224,6 +292,7 @@ export const INITIAL_PRODUCTS: Product[] = [
         product_id: 'prod-voy-1001',
         sku_code: 'VOY-1001-KHK',
         color_name: '卡其大地 (Khaki)',
+        color_name_en: 'Khaki',
         color_hex: '#a38f6b',
         base_price_usd: 45.0,
         sellable_status: 'active',
@@ -256,8 +325,8 @@ export const INITIAL_INVENTORY: InventoryBalance[] = [
   // AK-7710-GLD (Champagne Gold) - Total available: 120
   { warehouse_id: 'wh-sh', sku_id: 'sku-7710-gld', on_hand: 120, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
 
-  // AK-8015-NVY (Tactical Navy) - Total available: 300
-  { warehouse_id: 'wh-sh', sku_id: 'sku-8015-nvy', on_hand: 200, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
+  // AK-8015-NVY (Tactical Navy) - 100 PCS reserved for paid order ord-002; available: 200
+  { warehouse_id: 'wh-sh', sku_id: 'sku-8015-nvy', on_hand: 200, reserved: 100, unsellable: 0, updated_at: '2026-10-31' },
   { warehouse_id: 'wh-nb', sku_id: 'sku-8015-nvy', on_hand: 100, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
 
   // AK-8015-BLK (Stealth Black) - Total available: 175
@@ -273,13 +342,8 @@ export const INITIAL_INVENTORY: InventoryBalance[] = [
   { warehouse_id: 'wh-sh', sku_id: 'sku-voy-1001-khk', on_hand: 80, reserved: 0, unsellable: 0, updated_at: '2026-10-31' },
 ];
 
-export const INITIAL_TIER_RULES: TierRule[] = [
-  { id: 'tier-1', tier_level: 1, name: 'Tier 1 基础批发 (Bronze)', threshold_usd: 0, discount_rate: 0.0 },
-  { id: 'tier-2', tier_level: 2, name: 'Tier 2 银牌批发 (Silver)', threshold_usd: 10000, discount_rate: 0.05 },
-  { id: 'tier-3', tier_level: 3, name: 'Tier 3 金牌伙伴 (Gold)', threshold_usd: 50000, discount_rate: 0.10 },
-  { id: 'tier-4', tier_level: 4, name: 'Tier 4 铂金核心 (Platinum)', threshold_usd: 150000, discount_rate: 0.15 },
-  { id: 'tier-5', tier_level: 5, name: 'Tier 5 钻石分销 (Diamond)', threshold_usd: 350000, discount_rate: 0.20 },
-];
+// The Mock rules and the Real preview use the same approved five-level model.
+export const INITIAL_TIER_RULES: TierRule[] = APPROVED_TIER_RULES.map(rule => ({ ...rule }));
 
 export const INITIAL_PROMOTIONS: Promotion[] = [
   {
@@ -441,7 +505,11 @@ export const INITIAL_ORDERS: Order[] = [
     assigned_sales_id: 'sales-1',
     reservation_expires_at: '2026-11-04T12:00:00Z',
     reservation_extended_count: 0,
-    customer_visible_note: '业务员 Tom 已确认订购单，并成功锁定上海主仓现货库存。库存预占有效期为 72 小时，请尽快完成线下 T/T 汇款。',
+    reservation_allocations: [
+      { sku_id: 'sku-9042-blk', warehouse_id: 'wh-sh', quantity: 20 },
+      { sku_id: 'sku-7710-slv', warehouse_id: 'wh-sh', quantity: 10 },
+    ],
+    customer_visible_note: 'Your order has been confirmed and a demo reservation was created in the Shanghai warehouse. The reservation is valid for 72 hours; please complete the offline T/T payment.',
     internal_note: '客户拟拼整柜海运，订金待查。预占到期前若未见水单需邮件跟进。',
     created_at: '2026-10-28 14:22:00',
     updated_at: '2026-10-28 15:10:00',
@@ -475,7 +543,10 @@ export const INITIAL_ORDERS: Order[] = [
     payment_recorded_at: '2026-10-22 10:15:00',
     payment_amount_usd: 2520.0,
     payment_reference: 'WIRE-20261021-BOA9981',
-    customer_visible_note: '全额货款 USD $2,520.00 已核对入账。仓库正在安排空运托盘分拣与打带。',
+    reservation_allocations: [
+      { sku_id: 'sku-8015-nvy', warehouse_id: 'wh-sh', quantity: 100 },
+    ],
+    customer_visible_note: 'Full payment of USD $2,520.00 has been verified. The warehouse is preparing the air-freight pallet.',
     internal_note: '招行美金账户已收到，水单齐全，已计入客户历史累计采购额。',
     created_at: '2026-10-20 09:30:00',
     updated_at: '2026-10-22 10:15:00',
@@ -513,7 +584,7 @@ export const INITIAL_ORDERS: Order[] = [
     tracking_no: 'DHL-8890214300',
     actual_ship_date: '2026-10-15',
     estimated_delivery_date: '2026-10-22',
-    customer_visible_note: '货物已整单出库并交付 DHL Express，预计 5-7 工作日到达目的地口岸。',
+    customer_visible_note: 'The entire order has been dispatched with DHL Express and is expected to arrive at the destination port in 5–7 business days.',
     internal_note: 'DHL 提货完毕，面单复印件已归档。',
     created_at: '2026-10-10 11:00:00',
     updated_at: '2026-10-15 17:30:00',
@@ -538,8 +609,8 @@ export const INITIAL_NOTIFICATIONS: CustomerNotification[] = [
   {
     id: 'notif-001',
     company_id: 'comp-001',
-    title: '订单 ORD-20261028-001 已确认',
-    message: '业务员 Tom 已确认订购申请并为您预占现货库存，预占期限为 72 小时。',
+    title: 'Order ORD-20261028-001 confirmed',
+    message: 'Your order request was confirmed and demo stock was reserved for 72 hours.',
     event_type: 'ORDER_CONFIRMED',
     related_id: 'ord-001',
     is_read: false,
@@ -548,8 +619,8 @@ export const INITIAL_NOTIFICATIONS: CustomerNotification[] = [
   {
     id: 'notif-002',
     company_id: 'comp-001',
-    title: '付款入账通知：ORD-20261020-002',
-    message: 'USD $2,520.00 货款已核对入账，已计入公司历史有效采购累计额。',
+    title: 'Payment received: ORD-20261020-002',
+    message: 'USD $2,520.00 has been verified and added to your company\'s historical purchase total.',
     event_type: 'PAYMENT_RECEIVED',
     related_id: 'ord-002',
     is_read: true,
@@ -558,8 +629,8 @@ export const INITIAL_NOTIFICATIONS: CustomerNotification[] = [
   {
     id: 'notif-003',
     company_id: 'comp-001',
-    title: '物流发货更新：ORD-20261010-003',
-    message: '货物已整单发出，承运商: DHL Express, 运单号: DHL-8890214300。',
+    title: 'Shipment update: ORD-20261010-003',
+    message: 'The entire order has shipped with DHL Express. Tracking: DHL-8890214300.',
     event_type: 'SHIPMENT_DISPATCHED',
     related_id: 'ord-003',
     is_read: true,
@@ -579,7 +650,7 @@ export const INITIAL_EMAIL_TEMPLATES: InternalEmailTemplate[] = [
 
 Your wholesale spot-order #ORD-20261028-001 has been reviewed and officially confirmed by AOKING Direct Sales Division.
 
-All items have been atomistically reserved in our Shanghai export warehouse:
+All items have been reserved for this frontend demo (not a database transaction) in our Shanghai export warehouse:
 - AK-9042-BLK (Matte Black): 20 PCS @ USD $34.20
 - AK-7710-SLV (Graphite Silver): 10 PCS @ USD $58.50
 Total Order Value: USD $1,269.00
@@ -618,7 +689,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
     actor: 'Tom Miller (Sales)',
     action: 'CONFIRM_ORDER',
     target: 'ORD-20261028-001',
-    details: 'Atomic stock reserved: 20 pcs AK-9042-BLK, 10 pcs AK-7710-SLV. Expiry 72h.',
+    details: 'Frontend mock reservation: 20 pcs AK-9042-BLK, 10 pcs AK-7710-SLV. Expiry 72h.',
   },
   {
     id: 'audit-004',

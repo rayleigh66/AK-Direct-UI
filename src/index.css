@@ -3,31 +3,185 @@
 :root {
   --ink: #151515;
   --ink-soft: #3f4142;
-  --muted: #858789;
+  --muted: #6b6d6f;
   --line: #e8e8e6;
   --surface: #ffffff;
   --bg: #f8f8f6;
   --orange: #ff681e;
+  --orange-strong: #ed5610;
   --orange-pale: #fff1e8;
-  --orange-deep: #dd4a00;
-  --green: #198364;
+  --orange-deep: #c24400;
+  --green: #16775b;
   --green-pale: #eaf7f0;
-  --red: #d34f36;
+  --red: #bf3f28;
   --red-pale: #fff0ed;
-  --yellow: #aa750e;
+  --yellow: #8a5d00;
   --yellow-pale: #fff7e5;
+  --nav-active-bg: #171717;
+  --card-border: #eaeae7;
+  --table-head-bg: #fafaf9;
+  --subtle-bg: #f6f6f5;
+  --focus: var(--orange-strong);
   --radius: 17px;
+  --radius-btn: 9px;
+  --radius-sm: 12px;
   --shadow: 0 8px 32px rgba(15, 15, 15, 0.035);
+  --shadow-popover: 0 12px 45px rgba(0, 0, 0, 0.08);
 }
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
   body {
     background-color: var(--bg);
     color: var(--ink);
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     -webkit-tap-highlight-color: transparent;
   }
   .font-mono, .tabular-nums {
-    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  body {
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: var(--orange-pale);
+    color: var(--ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .fo-card {
+    background: var(--surface);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .fo-card-pad {
+    padding: 1.25rem;
+  }
+  .fo-eyebrow {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.7px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .fo-page-title {
+    font-size: 1.45rem;
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -0.8px;
+    color: var(--ink);
+  }
+  .fo-muted {
+    color: var(--muted);
+  }
+  .fo-btn {
+    min-height: 40px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-btn);
+    background: var(--surface);
+    color: var(--ink-soft);
+    padding: 0.55rem 0.9rem;
+    font-size: 12px;
+    font-weight: 700;
+    transition: border-color 170ms ease, transform 170ms ease, background 170ms ease;
+  }
+  .fo-btn:hover {
+    border-color: var(--muted);
+  }
+  .fo-btn-primary {
+    background: var(--orange);
+    border-color: var(--orange);
+    color: var(--ink);
+    box-shadow: 0 4px 12px rgba(255, 104, 30, 0.15);
+  }
+  .fo-btn-primary:hover {
+    background: var(--orange-strong);
+  }
+  .fo-btn-dark {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+  }
+  .fo-input {
+    min-height: 40px;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-btn);
+    background: var(--surface);
+    color: var(--ink);
+    padding: 0.55rem 0.75rem;
+    font-size: 12px;
+  }
+  .fo-input:focus {
+    border-color: var(--orange);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(255, 104, 30, 0.16);
+  }
+  .fo-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .fo-table thead {
+    background: var(--table-head-bg);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .fo-table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 700;
+  }
+  .fo-table td {
+    padding: 11px 12px;
+    border-top: 1px solid var(--line);
+  }
+  .fo-table tbody tr:hover {
+    background: #fafaf8;
+  }
+  .fo-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 6px;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 800;
+  }
+  .fo-tag::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: currentColor;
+  }
+}
+
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

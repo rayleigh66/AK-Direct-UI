@@ -15,6 +15,7 @@ import {
   UserCheck,
   Building2,
   FileCheck,
+  ShoppingCart,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -32,6 +33,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenTestMatrix }) => {
     isMobileSimulator,
     toggleMobileSimulator,
     unreadNotificationCount,
+    cart,
     setActiveTab,
   } = useApp();
 
@@ -106,9 +108,18 @@ export const Header: React.FC<HeaderProps> = ({ onOpenTestMatrix }) => {
               </button>
               <button
                 onClick={() => setActiveTab('cart')}
-                className="hover:text-slate-900 transition-colors whitespace-nowrap"
+                data-testid="header-order-list"
+                className="relative flex items-center gap-1.5 hover:text-slate-900 transition-colors whitespace-nowrap"
               >
-                订购清单 (Order List)
+                <ShoppingCart className="w-4 h-4" aria-hidden="true" />
+                <span>订购清单 (Order List)</span>
+                {cart.reduce((sum, item) => sum + item.quantity, 0) > 0 && (
+                  <span className="grid h-4 min-w-[16px] place-items-center rounded-full bg-[#ff681e] px-1 text-[9px] font-bold leading-none text-white">
+                    {cart.reduce((sum, item) => sum + item.quantity, 0) > 99
+                      ? '99+'
+                      : cart.reduce((sum, item) => sum + item.quantity, 0)}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setActiveTab('orders')}

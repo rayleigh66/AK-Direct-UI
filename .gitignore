@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+backups/
+test-results/
+playwright-report/

@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import {
   Store,
   ShoppingCart,
+  Package,
   Clock,
   Award,
   ClipboardList,
@@ -22,6 +23,7 @@ import {
   Building2,
   CheckCircle2,
 } from 'lucide-react';
+import { BrandLockup } from './BrandLockup';
 
 interface SidebarProps {
   isMobileOpen: boolean;
@@ -44,34 +46,47 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
   const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false);
   const totalCartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const navGroups = [
-    {
-      label: '现货采购 · 客户协同',
-      links: [
-        { id: 'catalog', label: '商城现货 (Catalog)', icon: Store },
-        { id: 'cart', label: '订购清单 (Order List)', icon: ShoppingCart, count: totalCartCount > 0 ? totalCartCount : null },
-        { id: 'orders', label: '我的订单 (My Orders)', icon: Clock },
-        { id: 'membership', label: '会员等级 (Membership)', icon: Award },
-      ],
-    },
-    {
-      label: '履约协同 · 业务员',
-      links: [
-        { id: 'sales_orders', label: '订单核准与锁库', icon: ClipboardList },
-        { id: 'restock_manage', label: '客户补货需求', icon: Boxes },
-        { id: 'internal_mailbox', label: '业务员内部邮件', icon: Mail },
-      ],
-    },
-    {
-      label: '运营配置 · 管理员',
-      links: [
-        { id: 'admin_companies', label: '客户与账户建档', icon: Users },
-        { id: 'inventory_import', label: '多仓库存与导入', icon: Layers },
-        { id: 'promo_tier', label: '促销与等级配置', icon: Settings },
-        { id: 'audit_logs', label: '敏感操作审计日志', icon: ShieldCheck },
-      ],
-    },
-  ];
+  const customer = currentRole === 'customer';
+  const navGroups = customer
+    ? [
+        {
+          label: 'SOURCING · CUSTOMER',
+          links: [
+            { id: 'catalog', label: 'Catalog', icon: Store },
+            {
+              id: 'cart',
+              label: 'Order list',
+              icon: ShoppingCart,
+              count: totalCartCount > 0 ? totalCartCount : null,
+            },
+            { id: 'orders', label: 'My orders', icon: Clock },
+            { id: 'membership', label: 'Membership', icon: Award },
+          ],
+        },
+      ]
+    : currentRole === 'sales'
+      ? [
+          {
+            label: '履约协同 · 业务员',
+            links: [
+              { id: 'sales_orders', label: '订单核准与锁库', icon: ClipboardList },
+              { id: 'restock_manage', label: '客户补货需求', icon: Boxes },
+              { id: 'internal_mailbox', label: '业务员内部邮件', icon: Mail },
+            ],
+          },
+        ]
+      : [
+          {
+            label: '运营配置 · 管理员',
+            links: [
+              { id: 'admin_products', label: '商品目录管理', icon: Package },
+              { id: 'admin_companies', label: '客户与账户建档', icon: Users },
+              { id: 'inventory_import', label: '多仓库存与导入', icon: Layers },
+              { id: 'promo_tier', label: '促销与等级配置', icon: Settings },
+              { id: 'audit_logs', label: '敏感操作审计日志', icon: ShieldCheck },
+            ],
+          },
+        ];
 
   return (
     <>
@@ -85,24 +100,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:sticky top-0 left-0 bottom-0 z-40 w-[248px] bg-white border-r border-[#e8e8e6] flex flex-col h-screen transition-transform duration-200 ${
+        className={`fixed lg:sticky top-0 left-0 bottom-0 z-50 w-[248px] bg-white border-r border-[#e8e8e6] flex flex-col h-screen transition-transform duration-200 ${
           isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         {/* Brand Header */}
-        <div className="h-[76px] px-6 flex items-center gap-3 border-b border-[#e8e8e6] shrink-0">
-          <div className="relative w-9 h-9 bg-[#171717] rounded-[10px] flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
-            <div className="w-[19px] h-[19px] border-2 border-white rotate-45 rounded-[3px]" />
-            <div className="absolute right-1.5 bottom-1.5 w-[11px] h-[11px] bg-[#ff681e] rounded-[2px]" />
-          </div>
-          <div>
-            <div className="text-[17px] font-extrabold tracking-[-0.9px] text-[#151515] leading-none">
-              AOKING<span className="text-[#ff681e]">Direct</span>
-            </div>
-            <div className="text-[9px] font-bold tracking-[2.1px] text-[#989b9b] mt-1 uppercase">
-              SPOT OPERATIONS
-            </div>
-          </div>
+        <div className="h-[76px] px-6 flex items-center border-b border-[#e8e8e6] shrink-0">
+          <BrandLockup size="sm" testId="brand-lockup-sidebar" />
         </div>
 
         {/* Scrollable Navigation */}
@@ -147,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
         </div>
 
         {/* Sidebar Bottom Note & Profile */}
-        <div className="p-3 border-t border-[#e8e8e6] shrink-0 space-y-3 bg-[#fafaf9]">
+        <div className="p-3 border-t border-[#e8e8e6] shrink-0 space-y-3 bg-[#fafaf9] pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           {/* Status Note with Pulse */}
           <div className="bg-white border border-[#eeeee9] p-3 rounded-[11px] flex items-start gap-2.5 shadow-2xs">
             <span className="relative flex h-2 w-2 mt-1 shrink-0">
@@ -156,7 +160,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
             </span>
             <div className="min-w-0">
               <div className="text-[11px] font-bold text-[#151515] leading-tight">
-                现货订购 · 业务规则运行中
+                {customer ? 'Spot ordering · rules active' : '现货订购 · 业务规则运行中'}
               </div>
               <div className="text-[9px] text-[#aaa] font-mono mt-0.5 tracking-wide">
                 PRD V0.3 COMPLIANT / DEMO
@@ -196,18 +200,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
             {isRoleMenuOpen && (
               <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-xl shadow-xl border border-[#e8e8e6] p-2 z-50 text-xs space-y-1">
                 <div className="px-2 py-1 text-[10px] font-bold text-[#999] uppercase tracking-wider">
-                  切换用户角色
+                  {customer ? 'Switch demo role' : '切换用户角色'}
                 </div>
                 <button
                   onClick={() => {
                     switchRole('customer', 'user-001a');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
                   <div>
-                    <div className="font-semibold text-[#151515]">AK000123A (Apex 采购 1)</div>
-                    <div className="text-[10px] text-[#888]">Tier 3 金牌伙伴 (10% 折扣)</div>
+                    <div className="font-semibold text-[#151515]">AK000123A (Apex buyer 1)</div>
+                    <div className="text-[10px] text-[#888]">Tier 3 Gold Partner · 10% off</div>
                   </div>
                   {currentRole === 'customer' && currentCustomerUser?.id === 'user-001a' && (
                     <CheckCircle2 className="w-4 h-4 text-[#ff681e]" />
@@ -218,12 +223,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('customer', 'user-001b');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
                   <div>
-                    <div className="font-semibold text-[#151515]">AK000123B (Apex 采购 2)</div>
-                    <div className="text-[10px] text-[#888]">同公司共享等级与订单验证</div>
+                    <div className="font-semibold text-[#151515]">AK000123B (Apex buyer 2)</div>
+                    <div className="text-[10px] text-[#888]">Shares company tier and orders</div>
                   </div>
                   {currentRole === 'customer' && currentCustomerUser?.id === 'user-001b' && (
                     <CheckCircle2 className="w-4 h-4 text-[#ff681e]" />
@@ -234,12 +240,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('sales');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
                   <div className="flex items-center gap-1.5">
                     <UserCheck className="w-3.5 h-3.5 text-[#ff681e]" />
-                    <span className="font-semibold text-[#151515]">业务员 (Tom Miller)</span>
+                    <span className="font-semibold text-[#151515]">{customer ? 'Sales (Tom Miller)' : '业务员 (Tom Miller)'}</span>
                   </div>
                   {currentRole === 'sales' && <CheckCircle2 className="w-4 h-4 text-[#ff681e]" />}
                 </button>
@@ -248,12 +255,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                   onClick={() => {
                     switchRole('admin');
                     setIsRoleMenuOpen(false);
+                    onCloseMobile();
                   }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[#f6f6f5] flex items-center justify-between"
                 >
                   <div className="flex items-center gap-1.5">
                     <Building2 className="w-3.5 h-3.5 text-[#aa750e]" />
-                    <span className="font-semibold text-[#151515]">业务管理员 (Admin Lin)</span>
+                    <span className="font-semibold text-[#151515]">{customer ? 'Administrator (Admin Lin)' : '业务管理员 (Admin Lin)'}</span>
                   </div>
                   {currentRole === 'admin' && <CheckCircle2 className="w-4 h-4 text-[#ff681e]" />}
                 </button>

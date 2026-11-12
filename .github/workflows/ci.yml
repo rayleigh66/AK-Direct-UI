@@ -1,0 +1,152 @@
+name: Prototype checks
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+permissions:
+  contents: read
+
+jobs:
+  local-prototype:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify hashed production assets
+        run: npm run verify:assets
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Customer mobile E2E
+        run: npm run test:e2e
+
+      - name: Production preview smoke
+        run: npm run test:e2e:preview
+
+  backend-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_DB: aoking_direct_test
+          POSTGRES_USER: aoking_test
+          POSTGRES_PASSWORD: aoking_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aoking_test -d aoking_direct_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: API TypeScript check
+        run: npm run api:lint
+
+      - name: API build
+        run: npm run api:build
+
+      - name: API unit tests
+        run: npm run api:test
+
+      - name: Database integration tests
+        env:
+          NODE_ENV: test
+          TEST_DATABASE_DESTRUCTIVE: 'yes'
+          TEST_DATABASE_URL: postgres://aoking_test:aoking_test_password@127.0.0.1:5432/aoking_direct_test
+        run: npm run api:test:db
+
+      - name: Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          rm .env
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Isolated Docker Compose smoke and persistence checks
+        run: |
+          mkdir -p backups
+          bash scripts/test-smoke-isolation.sh
+
+  real-catalog-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Start the real-auth stack
+        env:
+          VITE_REAL_AUTH: 'true'
+          WEB_PORT: '18080'
+        run: |
+          cp .env.example .env
+          sed -i 's/^WEB_PORT=.*/WEB_PORT=18080/; s/^VITE_REAL_AUTH=.*/VITE_REAL_AUTH=true/' .env
+          docker compose up -d --build --wait
+
+      - name: Real-auth catalogue, shared cart, order and sales E2E
+        run: bash scripts/real-auth-e2e.sh
+
+      - name: Media restore security tests (isolated Compose project)
+        run: bash scripts/test-media-restore.sh
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v

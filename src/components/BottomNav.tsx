@@ -14,6 +14,7 @@ import {
   Mail,
   Boxes,
   Users,
+  Package,
   Settings,
 } from 'lucide-react';
 
@@ -24,8 +25,8 @@ export const BottomNav: React.FC = () => {
 
   if (currentRole === 'customer') {
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden">
-        <div className="grid grid-cols-4 items-center h-16 max-w-lg mx-auto px-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-4 items-center h-16 max-w-lg mx-auto px-2" data-testid="customer-bottom-nav">
           <button
             onClick={() => setActiveTab('catalog')}
             className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${
@@ -33,11 +34,13 @@ export const BottomNav: React.FC = () => {
             }`}
           >
             <Store className="w-5 h-5" />
-            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">商城现货</span>
+            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">Catalog</span>
           </button>
 
           <button
             onClick={() => setActiveTab('cart')}
+            aria-label="Order list"
+            data-testid="nav-order-list"
             className={`min-h-[44px] flex flex-col items-center justify-center relative transition-colors ${
               activeTab === 'cart' ? 'text-slate-900 font-semibold' : 'text-slate-500'
             }`}
@@ -50,7 +53,7 @@ export const BottomNav: React.FC = () => {
                 </span>
               )}
             </div>
-            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">订购清单</span>
+            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">Order list</span>
           </button>
 
           <button
@@ -60,7 +63,7 @@ export const BottomNav: React.FC = () => {
             }`}
           >
             <Clock className="w-5 h-5" />
-            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">我的订单</span>
+            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">Orders</span>
           </button>
 
           <button
@@ -75,7 +78,7 @@ export const BottomNav: React.FC = () => {
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-500" />
               )}
             </div>
-            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">会员等级</span>
+            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">Membership</span>
           </button>
         </div>
       </nav>
@@ -85,7 +88,7 @@ export const BottomNav: React.FC = () => {
   if (currentRole === 'sales') {
     return (
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden">
-        <div className="grid grid-cols-4 items-center h-16 max-w-lg mx-auto px-2">
+        <div className="grid grid-cols-3 items-center h-16 max-w-lg mx-auto px-2">
           <button
             onClick={() => setActiveTab('sales_orders')}
             className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${
@@ -116,15 +119,6 @@ export const BottomNav: React.FC = () => {
             <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">内部邮件</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('inventory_import')}
-            className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${
-              activeTab === 'inventory_import' ? 'text-slate-900 font-semibold' : 'text-slate-500'
-            }`}
-          >
-            <Boxes className="w-5 h-5" />
-            <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">库存监控</span>
-          </button>
         </div>
       </nav>
     );
@@ -133,7 +127,17 @@ export const BottomNav: React.FC = () => {
   // Admin
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 lg:hidden">
-      <div className="grid grid-cols-4 items-center h-16 max-w-lg mx-auto px-2">
+      <div className="grid grid-cols-5 items-center h-16 max-w-lg mx-auto px-1">
+        <button
+          onClick={() => setActiveTab('admin_products')}
+          className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${
+            activeTab === 'admin_products' ? 'text-slate-900 font-semibold' : 'text-slate-500'
+          }`}
+        >
+          <Package className="w-5 h-5" />
+          <span className="text-[10px] tracking-tight mt-1 whitespace-nowrap">商品管理</span>
+        </button>
+
         <button
           onClick={() => setActiveTab('admin_companies')}
           className={`min-h-[44px] flex flex-col items-center justify-center transition-colors ${

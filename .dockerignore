@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+dist
+apps/api/dist
+test-results
+playwright-report
+coverage
+.env
+.env.*
+backups
+tests
+apps/api/tests
+docs
+*.log
+.DS_Store

@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { useApp } from '../../context/AppContext';
+import { formatEnglishDate } from '../../utils/dateDisplay';
 import {
   Bell,
   CheckCircle2,
@@ -36,12 +37,12 @@ export const NotificationsView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-24">
+    <div className="max-w-4xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-24">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold text-slate-900">站内通知 (In-App Notifications)</h1>
+          <h1 className="text-lg font-bold text-slate-900">Notifications</h1>
           <p className="text-xs text-slate-500">
-            订单确认、到货提醒、货款到账与物流发货进度通知
+            Order confirmations, restock alerts, payments and shipment updates
           </p>
         </div>
       </div>
@@ -49,17 +50,17 @@ export const NotificationsView: React.FC = () => {
       <div className="p-3.5 bg-slate-100 rounded-xl text-xs text-slate-600 flex items-start gap-2">
         <MailCheck className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
         <div>
-          <strong>双通道通知规范 (PRD D27 / D30):</strong> 客户重要业务通知同时生成站内通知（在此展示）
-          并生成正式客户英文邮件草稿投递至业务员内部工作邮箱。业务员核验后将通过公司邮箱向您发送。
-          平台不收集您的私人联系邮箱。
+          <strong>How notifications work:</strong> important updates appear here
+          and an English email draft is prepared for your sales representative. They send it through the company mailbox after review.
+          The platform does not collect your personal email address.
         </div>
       </div>
 
       {myNotifications.length === 0 ? (
         <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
           <Bell className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-          <h2 className="text-sm font-bold text-slate-700">暂无新通知</h2>
-          <p className="text-xs text-slate-400 mt-1">当业务员确认您的订单或补货到货时，系统将在此提醒。</p>
+          <h2 className="text-sm font-bold text-slate-700">No notifications yet</h2>
+          <p className="text-xs text-slate-400 mt-1">Order confirmations and restock alerts will appear here.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -86,7 +87,7 @@ export const NotificationsView: React.FC = () => {
                     )}
                   </div>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    {notif.created_at}
+                    {formatEnglishDate(notif.created_at)}
                   </span>
                 </div>
 
@@ -103,7 +104,7 @@ export const NotificationsView: React.FC = () => {
                       }}
                       className="text-[11px] font-semibold text-indigo-700 hover:underline"
                     >
-                      查看相关订单详情 →
+                      View related order →
                     </button>
                   </div>
                 )}

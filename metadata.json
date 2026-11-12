@@ -1,6 +1,0 @@
-{
-  "name": "AOKING Direct",
-  "description": "B2B brand spot-order management platform for AOKING wholesale distributors and partners with SKU inventory, tiered pricing, and order lifecycle management.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

@@ -5,6 +5,10 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { SearchableCombobox } from '../ui/SearchableCombobox';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
+import { TierBadge } from '../ui/TierBadge';
+import { ISO_COUNTRIES, countrySearchText } from '../../data/isoCountries';
 import {
   Building2,
   UserPlus,
@@ -16,6 +20,7 @@ import {
   Users,
   Check,
   AlertCircle,
+  FastForward,
 } from 'lucide-react';
 
 export const CompanyAccountsView: React.FC = () => {
@@ -23,17 +28,24 @@ export const CompanyAccountsView: React.FC = () => {
     currentRole,
     companies,
     customerUsers,
+    tierRules,
     brands,
     brandGrants,
     adminCreateCompany,
     adminCreateSecondaryAccount,
     adminToggleBrandGrant,
+    simulateTimeTravelInactivity,
   } = useApp();
 
   // Form states
   const [customerCode, setCustomerCode] = useState('C000888');
   const [shortName, setShortName] = useState('Nordic Travel Gear AS');
   const [countryAlpha3, setCountryAlpha3] = useState('NOR');
+  const countryOptions = ISO_COUNTRIES.map(country => ({
+    value: country.code,
+    label: `${country.code} — ${country.nameEn} / ${country.nameZh}`,
+    keywords: countrySearchText(country),
+  }));
   const [internalNickname, setInternalNickname] = useState('北欧挪威核心分销');
 
   // Security Credentials Dialog
@@ -46,6 +58,8 @@ export const CompanyAccountsView: React.FC = () => {
 
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [formError, setFormError] = useState('');
+  const [qaCompanyId, setQaCompanyId] = useState(companies[0]?.id ?? '');
+  const [qaMessage, setQaMessage] = useState('');
 
   // RBAC Check (PRD D24 / T27)
   const isSalesperson = currentRole === 'sales';
@@ -102,7 +116,7 @@ export const CompanyAccountsView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24">
+    <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
       {/* Header */}
       <div>
         <h1 className="text-lg font-bold text-slate-900">
@@ -141,7 +155,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   内部客户编号 (必填, C+6位)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={customerCode}
                   onChange={e => setCustomerCode(e.target.value.toUpperCase())}
@@ -156,7 +170,7 @@ export const CompanyAccountsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   公司商业简称 (必填)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={shortName}
                   onChange={e => setShortName(e.target.value)}
@@ -168,25 +182,27 @@ export const CompanyAccountsView: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  国家代码 (ISO 3166-1 Alpha-3)
+                  国家/地区 (ISO 3166-1 Alpha-3)
                 </label>
-                <input
-                  type="text"
+                <SearchableCombobox
+                  options={countryOptions}
                   value={countryAlpha3}
-                  onChange={e => setCountryAlpha3(e.target.value.toUpperCase())}
-                  placeholder="如 USA, DEU, JPN"
-                  maxLength={3}
-                  className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-xs uppercase focus:ring-2 focus:ring-slate-900 focus:outline-none"
-                  required
+                  onChange={setCountryAlpha3}
+                  ariaLabel="搜索并选择客户国家或地区"
+                  placeholder="搜索中文名、英文名或三位代码"
+                  emptyText="没有匹配的国家或地区"
+                  testId="company-country-combobox"
                 />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">标准 3 位英文大写代码</span>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  支持中文、英文名称与三位代码检索
+                </span>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   内部专属昵称 (选填, 仅内部可见)
                 </label>
-                <input
+                <SelectAllOnFocusInput
                   type="text"
                   value={internalNickname}
                   onChange={e => setInternalNickname(e.target.value)}
@@ -231,6 +247,7 @@ export const CompanyAccountsView: React.FC = () => {
           {companies.map(comp => {
             const accounts = customerUsers.filter(u => u.company_id === comp.id);
             const myGrants = brandGrants.filter(g => g.company_id === comp.id);
+            const tier = tierRules.find(rule => rule.id === comp.tier_id);
 
             return (
               <div key={comp.id} className="p-5 space-y-4">
@@ -240,6 +257,7 @@ export const CompanyAccountsView: React.FC = () => {
                       <span className="font-mono font-bold text-slate-900 text-sm">
                         {comp.customer_code}
                       </span>
+                      <TierBadge tier={tier} testId={`company-tier-${comp.customer_code}`} />
                       <span className="font-bold text-slate-900 text-sm">
                         {comp.short_name}
                       </span>
@@ -327,6 +345,61 @@ export const CompanyAccountsView: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* Internal QA only: inactivity simulation was removed from the customer membership page. */}
+      {currentRole === 'admin' && (
+        <div
+          className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-sm"
+          data-testid="tier-qa-panel"
+        >
+          <div className="flex items-center gap-2">
+            <FastForward className="w-4 h-4 text-indigo-600" />
+            <h2 className="text-sm font-bold text-slate-900">Demo QA：客户未采购计时模拟</h2>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+              仅内部 QA
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            前端 Mock，不是真实等级变更，不对客户展示。正式系统应由后台按最后有效采购日期计算。
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={qaCompanyId}
+              onChange={event => setQaCompanyId(event.target.value)}
+              className="h-10 px-3 rounded-lg border border-slate-300 bg-white text-xs"
+              aria-label="QA company"
+            >
+              {companies.map(company => (
+                <option key={company.id} value={company.id}>
+                  {company.customer_code} — {company.short_name}
+                </option>
+              ))}
+            </select>
+            {[6, 12, 18, 30].map(months => (
+              <button
+                key={months}
+                type="button"
+                onClick={() => {
+                  const result = simulateTimeTravelInactivity(qaCompanyId, months);
+                  setQaMessage(
+                    result.success
+                      ? `已将 ${qaCompanyId} 的未采购计时 +${months} 个月（Demo）。`
+                      : result.error ?? '模拟失败。'
+                  );
+                }}
+                className="min-h-[40px] px-3 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
+              >
+                +{months} months
+              </button>
+            ))}
+          </div>
+          {qaMessage && (
+            <div role="status" className="p-2.5 rounded-lg bg-slate-50 text-xs text-slate-700">
+              {qaMessage}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* One-Time Temporary Password Display Modal (PRD D26, T28, T29) */}
       {createdCredential && (

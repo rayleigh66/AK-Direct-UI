@@ -42,6 +42,8 @@ export interface Brand {
   id: string;
   code: string; // e.g. "AOKING"
   name: string;
+  /** Customer-facing English label. */
+  name_en?: string;
   is_default_granted: boolean;
 }
 
@@ -56,9 +58,32 @@ export interface ProductSKU {
   product_id: string;
   sku_code: string; // e.g. "AK-9042-BLK"
   color_name: string;
+  /** Customer-facing English label; internal IDs/SKUs remain unchanged. */
+  color_name_en?: string;
+  /** Optional per-colour image; fallback is the product primary image. */
+  image_url?: string;
   color_hex: string;
   base_price_usd: number;
   sellable_status: 'active' | 'discontinued';
+}
+
+export interface SeriesDefinition {
+  id: string;
+  nameZh: string;
+  nameEn: string;
+  order: number;
+  active: boolean;
+}
+
+export type FeatureTagTone = 'orange' | 'blue' | 'sky' | 'green' | 'grey' | 'purple';
+
+export interface FeatureTagDefinition {
+  code: string;
+  nameZh: string;
+  nameEn: string;
+  tone: FeatureTagTone;
+  order: number;
+  active: boolean;
 }
 
 export interface Product {
@@ -66,12 +91,20 @@ export interface Product {
   brand_id: string;
   product_code: string; // e.g. "AK-9042"
   title: string;
+  /** Customer-facing English title; internal product_code and Demo IDs are unchanged. */
+  title_en?: string;
   category: 'Business Backpacks' | 'Travel Luggage' | 'Urban Commuter' | 'Executive Briefcases';
   description: string;
+  /** Customer-facing English description. */
+  description_en?: string;
   material: string;
   capacity_or_size: string;
   primary_image: string;
   gallery_images: string[];
+  /** Optional for legacy Demo products; defaults to visible. New admin drafts start hidden. */
+  active?: boolean;
+  series_id?: string;
+  tag_codes?: string[];
   skus: ProductSKU[];
 }
 
@@ -94,6 +127,8 @@ export interface TierRule {
   id: string;
   tier_level: number; // 1, 2, 3, 4, 5
   name: string; // e.g. "Tier 1 - Standard", "Tier 2 - Silver"
+  /** Customer-facing English label. */
+  name_en?: string;
   threshold_usd: number; // Cumulative spend threshold in USD
   discount_rate: number; // 0.05 = 5% off
 }
@@ -164,6 +199,8 @@ export interface Order {
   assigned_sales_id: string;
   reservation_expires_at?: string; // ISO timestamp
   reservation_extended_count?: number;
+  /** Frontend-only mock allocation; never a database transaction. */
+  reservation_allocations?: { sku_id: string; warehouse_id: string; quantity: number }[];
   
   // Payment
   payment_recorded_at?: string;

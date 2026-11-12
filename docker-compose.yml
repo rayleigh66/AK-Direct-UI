@@ -1,0 +1,148 @@
+name: aoking-direct
+
+services:
+  db:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aoking_direct}
+      POSTGRES_USER: ${POSTGRES_USER:-aoking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    mem_limit: 768m
+    cpus: 1.0
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${MIGRATE_IMAGE:-aoking-direct-migrate:4b04}
+    command:
+      - sh
+      - -c
+      - node apps/api/dist/db/migrate.js && node apps/api/dist/db/provision-runtime-role.js
+    environment:
+      NODE_ENV: production
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set MIGRATION_DATABASE_URL in .env}
+      RUNTIME_DB_USER: ${RUNTIME_DB_USER:?Set RUNTIME_DB_USER in .env}
+      RUNTIME_DB_PASSWORD: ${RUNTIME_DB_PASSWORD:?Set RUNTIME_DB_PASSWORD in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${API_IMAGE:-aoking-direct-api:4b04}
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      MEDIA_ROOT: /app/media
+      NODE_OPTIONS: "--max-old-space-size=192"
+      # Fail secure: production is deployed behind Caddy HTTPS. Local HTTP
+      # development sets COOKIE_SECURE=false explicitly in .env.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      CUSTOMER_SESSION_IDLE_HOURS: ${CUSTOMER_SESSION_IDLE_HOURS:-24}
+      CUSTOMER_SESSION_ABSOLUTE_DAYS: ${CUSTOMER_SESSION_ABSOLUTE_DAYS:-30}
+      INTERNAL_SESSION_IDLE_HOURS: ${INTERNAL_SESSION_IDLE_HOURS:-2}
+      INTERNAL_SESSION_ABSOLUTE_HOURS: ${INTERNAL_SESSION_ABSOLUTE_HOURS:-12}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+      LOGIN_WINDOW_MINUTES: ${LOGIN_WINDOW_MINUTES:-15}
+      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      ORDER_NUMBER_TIME_ZONE: ${ORDER_NUMBER_TIME_ZONE:-UTC}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - media_data:/app/media
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_REAL_AUTH: ${VITE_REAL_AUTH:-false}
+    image: ${WEB_IMAGE:-aoking-direct-web:4b04}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16.4-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        while true; do
+          if ! /bin/sh /scripts/backup-container.sh; then
+            echo "Backup attempt failed; retrying in 1 hour." >&2;
+            sleep 3600;
+            continue;
+          fi;
+          sleep 86400;
+        done
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-aoking_direct}
+      PGUSER: ${POSTGRES_USER:-aoking}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - ./scripts/backup-container.sh:/scripts/backup-container.sh:ro
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+      - media_data:/media:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      # The API mounts the media volume first so Docker initialises it with
+      # the node-owned directory from the API image (not root-owned).
+      api:
+        condition: service_healthy
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  media_data:

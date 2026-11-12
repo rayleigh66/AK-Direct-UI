@@ -5,6 +5,9 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AccessBoundary } from '../AccessBoundary';
+import { SearchableCombobox } from '../ui/SearchableCombobox';
+import { SelectAllOnFocusInput } from '../ui/SelectAllOnFocusInput';
 import { Promotion } from '../../types';
 import {
   Sparkles,
@@ -18,6 +21,7 @@ import {
 
 export const PromoTierConfigView: React.FC = () => {
   const {
+    currentRole,
     promotions,
     tierRules,
     products,
@@ -27,20 +31,33 @@ export const PromoTierConfigView: React.FC = () => {
 
   // Promotion Form state
   const [selectedSkuId, setSelectedSkuId] = useState(products[0]?.skus[0]?.id || '');
+  const skuOptions = products.flatMap(product =>
+    product.skus.map(sku => ({
+      value: sku.id,
+      label: `${sku.sku_code} — ${product.product_code} — ${product.title} / ${
+        product.title_en ?? ''
+      } — ${sku.color_name}${sku.color_name_en ? ` / ${sku.color_name_en}` : ''}`,
+      keywords: `${sku.sku_code} ${product.product_code} ${product.title} ${
+        product.title_en ?? ''
+      } ${sku.color_name} ${sku.color_name_en ?? ''}`,
+    }))
+  );
   const [promoPrice, setPromoPrice] = useState(29.9);
   const [startDate, setStartDate] = useState('2026-11-01');
   const [endDate, setEndDate] = useState('2026-12-15');
   const [stackDiscount, setStackDiscount] = useState(false);
   const [promoSuccessMsg, setPromoSuccessMsg] = useState('');
+  const [promoFormError, setPromoFormError] = useState('');
 
   // Tier Edit states
   const [editingTierId, setEditingTierId] = useState<string | null>(null);
   const [editThreshold, setEditThreshold] = useState<number>(0);
   const [editDiscountRate, setEditDiscountRate] = useState<number>(0);
+  const [tierFormError, setTierFormError] = useState('');
 
   const handleAddPromo = (e: React.FormEvent) => {
     e.preventDefault();
-    adminAddOrUpdatePromotion({
+    const result = adminAddOrUpdatePromotion({
       sku_id: selectedSkuId,
       promo_price_usd: promoPrice,
       start_at: startDate,
@@ -48,18 +65,38 @@ export const PromoTierConfigView: React.FC = () => {
       stack_tier_discount: stackDiscount,
       status: 'active',
     });
+    if (!result.success) {
+      setPromoFormError(result.error ?? '促销配置无效。');
+      setPromoSuccessMsg('');
+      return;
+    }
 
+    setPromoFormError('');
     setPromoSuccessMsg('新限时促销已配置并生效！已更新全平台对应 SKU 参考批发价。');
     setTimeout(() => setPromoSuccessMsg(''), 3000);
   };
 
   const handleSaveTier = (tierId: string) => {
-    adminUpdateTierRule(tierId, editThreshold, editDiscountRate / 100);
+    const result = adminUpdateTierRule(tierId, editThreshold, editDiscountRate / 100);
+    if (!result.success) {
+      setTierFormError(result.error ?? '等级配置无效。');
+      return;
+    }
+    setTierFormError('');
     setEditingTierId(null);
   };
 
+  if (currentRole !== 'admin') {
+    return (
+      <AccessBoundary
+        title="促销与等级配置仅对管理员开放"
+        message="业务员不能修改促销或客户等级。这是前端视图守卫；正式权限必须在后端再次校验。"
+      />
+    );
+  }
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24">
+    <div className="max-w-6xl mx-auto space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
       {/* Header */}
       <div>
         <h1 className="text-lg font-bold text-slate-900">
@@ -92,29 +129,25 @@ export const PromoTierConfigView: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 选择促销 SKU
               </label>
-              <select
+              <SearchableCombobox
+                options={skuOptions}
                 value={selectedSkuId}
-                onChange={e => setSelectedSkuId(e.target.value)}
-                className="w-full h-11 px-3 rounded-xl border border-slate-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
-              >
-                {products.flatMap(p =>
-                  p.skus.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.sku_code} — {p.title} ({s.color_name}) [原价 ${s.base_price_usd}]
-                    </option>
-                  ))
-                )}
-              </select>
+                onChange={setSelectedSkuId}
+                ariaLabel="搜索并选择促销 SKU"
+                placeholder="搜索 SKU 编码、产品款号或中英文名称"
+                emptyText="没有匹配的 SKU"
+                testId="promo-sku-combobox"
+              />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 促销批发价 USD
               </label>
-              <input
+              <SelectAllOnFocusInput
                 type="number"
                 step="0.1"
-                min="1"
+                min="0.01"
                 value={promoPrice}
                 onChange={e => setPromoPrice(parseFloat(e.target.value) || 0)}
                 className="w-full h-11 px-3 rounded-xl border border-slate-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -172,6 +205,12 @@ export const PromoTierConfigView: React.FC = () => {
               <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-900"></div>
             </label>
           </div>
+
+          {promoFormError && (
+            <div role="alert" className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
+              {promoFormError}
+            </div>
+          )}
 
           <div className="flex justify-end">
             <button
@@ -244,6 +283,12 @@ export const PromoTierConfigView: React.FC = () => {
           <span className="text-xs text-slate-400">管理员可随时微调档位</span>
         </div>
 
+        {tierFormError && (
+          <div role="alert" className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
+            {tierFormError}
+          </div>
+        )}
+
         <div className="overflow-x-auto rounded-xl border border-slate-100">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-400 uppercase text-[10px]">
@@ -264,8 +309,9 @@ export const PromoTierConfigView: React.FC = () => {
                     <td className="p-3 font-semibold text-slate-800">{tier.name}</td>
                     <td className="p-3 text-right font-mono">
                       {isEditing ? (
-                        <input
+                        <SelectAllOnFocusInput
                           type="number"
+                          min={0}
                           value={editThreshold}
                           onChange={e => setEditThreshold(parseInt(e.target.value) || 0)}
                           className="w-28 p-1 border rounded text-right font-mono text-xs"
@@ -276,8 +322,10 @@ export const PromoTierConfigView: React.FC = () => {
                     </td>
                     <td className="p-3 text-right font-mono text-emerald-700 font-bold">
                       {isEditing ? (
-                        <input
+                        <SelectAllOnFocusInput
                           type="number"
+                          min={0}
+                          max={100}
                           value={editDiscountRate}
                           onChange={e => setEditDiscountRate(parseFloat(e.target.value) || 0)}
                           className="w-16 p-1 border rounded text-right font-mono text-xs"
