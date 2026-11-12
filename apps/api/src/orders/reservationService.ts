@@ -490,7 +490,7 @@ export async function decideReservationExtension(
       await client.query(
         `UPDATE order_extension_requests
          SET status = 'APPROVED', decided_by_user_id = $2, decided_by_label = $3,
-             decided_at = now(), decision_note = $4, previous_expires_at = $5,
+             decided_at = clock_timestamp(), decision_note = $4, previous_expires_at = $5,
              new_expires_at = $6
          WHERE id = $1`,
         [
@@ -568,7 +568,7 @@ export async function decideReservationExtension(
       await client.query(
         `UPDATE order_extension_requests
          SET status = 'REJECTED', decided_by_user_id = $2, decided_by_label = $3,
-             decided_at = now(), decision_note = $4
+             decided_at = clock_timestamp(), decision_note = $4
          WHERE id = $1`,
         [requestId, auth.user.id, auth.user.username, note]
       );
@@ -626,7 +626,10 @@ export async function requestOrderRelease(
   const expectedRevision = revision(input.expectedRevision);
   const expectedVersion = requireReservationVersion(input.expectedReservationVersion);
   const key = requireIdempotencyKey(input.idempotencyKey);
-  const reason = text(input.reason, 'reason', 1000);
+  // The approved release copies the reason into orders.cancel_reason, whose
+  // database CHECK caps it at 500 characters. Reject over-long input here
+  // instead of failing the approval transaction with a 500.
+  const reason = text(input.reason, 'reason', 500);
   const verificationNote = text(input.verificationNote, 'verificationNote', 1000);
   if (input.paymentVerification !== 'unpaid') {
     throw new HttpError(
@@ -700,7 +703,7 @@ export async function requestOrderRelease(
         (id, order_id, company_id, requested_by_user_id, requested_by_label,
          reason, payment_verification, shipment_verification, verification_note,
          verified_by_user_id, verified_at, expected_reservation_version)
-       VALUES ($1, $2, $3, $4, $5, $6, 'unpaid', 'not_shipped', $7, $4, now(), $8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, 'unpaid', 'not_shipped', $7, $4, clock_timestamp(), $8)`,
       [
         id,
         orderId,
@@ -886,7 +889,7 @@ export async function decideOrderRelease(
       await client.query(
         `UPDATE order_release_requests
          SET status = 'APPROVED', decided_by_user_id = $2, decided_by_label = $3,
-             decided_at = now(), decision_note = $4, executed_at = now()
+             decided_at = clock_timestamp(), decision_note = $4, executed_at = clock_timestamp()
          WHERE id = $1`,
         [requestId, auth.user.id, auth.user.username, note]
       );
@@ -978,6 +981,9 @@ export async function decideOrderRelease(
          WHERE id = $1`,
         [reservation.id, auth.user.id, request.reason]
       );
+      // The release request and its verification note are internal evidence.
+      // Keep them on the reservation/request records, but never echo internal
+      // sales notes into the customer-facing cancellation fields.
       await client.query(
         `UPDATE orders
          SET status = 'CANCELLED', cancelled_at = now(), cancel_reason = $2,
@@ -986,8 +992,8 @@ export async function decideOrderRelease(
          WHERE id = $1`,
         [
           order.id,
-          request.reason,
-          `Order cancelled after an approved full release. Reason: ${request.reason}`,
+          'Full release approved by AOKING Direct.',
+          'This order was cancelled after an approved full release. Please submit a new order.',
         ]
       );
       await client.query(
@@ -1059,7 +1065,7 @@ export async function decideOrderRelease(
       await client.query(
         `UPDATE order_release_requests
          SET status = 'REJECTED', decided_by_user_id = $2, decided_by_label = $3,
-             decided_at = now(), decision_note = $4
+             decided_at = clock_timestamp(), decision_note = $4
          WHERE id = $1`,
         [requestId, auth.user.id, auth.user.username, note]
       );
@@ -1134,9 +1140,21 @@ export async function runExpiryScan(
     if (auth) {
       await assertCurrentSession(client, auth, 'orders.approve_extension');
     }
+    // A single transaction-scoped advisory lock serialises scans across API
+    // replicas. Candidates are ordered by (expires_at, id) but each scan then
+    // locks company -> order -> reservation; two concurrent scans with
+    // different orderings could otherwise deadlock when an extension moves a
+    // deadline between them. A competing scan returns an empty batch and the
+    // next periodic tick retries.
+    const scanLock = await client.query<{ locked: boolean }>(
+      'SELECT pg_try_advisory_xact_lock(918273645) AS locked'
+    );
+    if (!scanLock.rows[0]?.locked) {
+      return { scanned: 0, expired: 0, reminded: 0, skipped: 0 };
+    }
     // Business approval only requires an at-expiry reminder. The scan does not
-    // send a pre-expiry reminder. Candidate selection is unlocked; each row is
-    // then serialized through company -> order -> reservation.
+    // send a pre-expiry reminder. Each row is then serialized through
+    // company -> order -> reservation.
     const candidates = await client.query<{
       id: string;
       order_id: string;
@@ -1151,6 +1169,7 @@ export async function runExpiryScan(
       [limit]
     );
     let expired = 0;
+    let reminded = 0;
     let skipped = 0;
     for (const candidate of candidates.rows) {
       const order = await lockOrderForApproval(client, candidate.order_id);
@@ -1172,17 +1191,22 @@ export async function runExpiryScan(
         skipped += 1;
         continue;
       }
+      // Read deadline_at from the row itself. Passing the node-postgres Date
+      // back would truncate PostgreSQL microseconds to milliseconds and defeat
+      // the (reservation_id, deadline_at, kind) uniqueness key.
       const reminder = await client.query(
         `INSERT INTO order_deadline_reminders
           (id, reservation_id, order_id, deadline_at, kind)
-         VALUES ($1, $2, $3, $4, 'EXPIRED')
+         SELECT $1, r.id, r.order_id, r.expires_at, 'EXPIRED'
+         FROM order_reservations r WHERE r.id = $2
          ON CONFLICT (reservation_id, deadline_at, kind) DO NOTHING`,
-        [randomUUID(), reservation.id, order.id, reservation.expires_at]
+        [randomUUID(), reservation.id]
       );
-      if (reminder.rowCount !== 1) {
-        skipped += 1;
-        continue;
-      }
+      // A conflict means the reminder for this exact deadline was already
+      // emitted. It must not suppress marking the reservation overdue: the
+      // stock/status transition is the source of truth, the reminder is an
+      // at-most-once outbox side effect.
+      reminded += reminder.rowCount === 1 ? 1 : 0;
       {
         await client.query(
           `UPDATE order_reservations
@@ -1242,7 +1266,7 @@ export async function runExpiryScan(
         expired += 1;
       }
     }
-    return { scanned: candidates.rows.length, expired, reminded: 0, skipped };
+    return { scanned: candidates.rows.length, expired, reminded, skipped };
   });
 }
 

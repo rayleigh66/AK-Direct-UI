@@ -14,8 +14,6 @@ import {
   checkPrivacyViolations,
   formatOrderNumber,
   multiplyCents,
-  orderBusinessDate,
-  orderNumberDatePart,
   orderPayloadDigest,
   sumCents,
   validateDelivery,
@@ -298,9 +296,20 @@ export async function submitOrder(
     });
     const referenceTotalCents = sumCents(computed.map(item => item.lineReferenceCents));
 
-    const now = new Date();
-    const businessDate = orderBusinessDate(now, config.orderNumberTimeZone);
-    const datePart = orderNumberDatePart(now, config.orderNumberTimeZone);
+    // Derive the business date and YYMMDD part from one PostgreSQL timestamp so
+    // the order number cannot disagree with the row's own submitted_at across a
+    // replica clock skew or a midnight boundary.
+    const businessDateRow = await client.query<{
+      business_date: string;
+      date_part: string;
+    }>(
+      `SELECT to_char(ts, 'YYYY-MM-DD') AS business_date,
+              to_char(ts, 'YYMMDD') AS date_part
+       FROM (SELECT clock_timestamp() AT TIME ZONE $1 AS ts) clock`,
+      [config.orderNumberTimeZone]
+    );
+    const businessDate = businessDateRow.rows[0].business_date;
+    const datePart = businessDateRow.rows[0].date_part;
     const sequenceRow = await client.query<{ next_seq: number }>(
       `INSERT INTO order_sequences (order_date, next_seq)
        VALUES ($1::date, 1)

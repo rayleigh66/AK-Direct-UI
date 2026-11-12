@@ -772,7 +772,10 @@ export async function decidePlanAcceptance(
       );
     }
 
-    if (plan.requires_price_approval) {
+    // A pending/rejected price change blocks acceptance of that price, but it
+    // must never prevent the buyer from rejecting the plan and returning it to
+    // sales. Rejection records a plan outcome, not an order cancellation.
+    if (outcome === 'ACCEPTED' && plan.requires_price_approval) {
       const approval = await approvalForPlan(
         client,
         orderId,
@@ -801,7 +804,7 @@ export async function decidePlanAcceptance(
        WHERE order_id = $1 AND outcome = 'ACCEPTED' AND invalidated_at IS NULL`,
       [orderId]
     );
-    if (outcome === 'ACCEPTED' && accepted.rowCount) {
+    if (accepted.rowCount) {
       throw new HttpError(409, 'already_accepted', 'This plan has already been accepted.');
     }
 
@@ -973,14 +976,24 @@ export async function decidePriceApproval(
     if (order.status !== 'PENDING_CONFIRMATION') {
       throw new HttpError(409, 'order_status_conflict', 'This order is no longer pending confirmation.');
     }
-    if (order.current_plan_version !== expectedPlanVersion) {
+    // The approver may present either the plan version captured on the
+    // approval request (as the queue does) or the current plan version. A
+    // quantity-only edit keeps the same price fingerprint/epoch and
+    // intentionally inherits the pending approval, so requiring the request's
+    // original version to still be current would strand that approval. The
+    // current plan is authorised separately below against the approval's
+    // fingerprint and epoch.
+    if (
+      expectedPlanVersion !== approval.requested_plan_version &&
+      expectedPlanVersion !== order.current_plan_version
+    ) {
       throw new HttpError(
         409,
         'plan_version_conflict',
         'A newer plan version exists. Reject this stale request and review the latest plan.'
       );
     }
-    const plan = await planRow(client, order.id, expectedPlanVersion, true);
+    const plan = await planRow(client, order.id, order.current_plan_version, true);
     if (
       !plan ||
       plan.price_fingerprint !== approval.price_fingerprint ||

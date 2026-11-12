@@ -9,10 +9,6 @@ const SALES_EMAIL = process.env.REAL_E2E_SALES_EMAIL ?? '';
 const SALES_PASSWORD = process.env.REAL_E2E_SALES_PASSWORD ?? '';
 const BUSINESS_EMAIL = process.env.REAL_E2E_BUSINESS_ADMIN_EMAIL ?? '';
 const BUSINESS_PASSWORD = process.env.REAL_E2E_BUSINESS_ADMIN_PASSWORD ?? '';
-const ORDER_USERNAME = process.env.REAL_E2E_ORDER_CUSTOMER_USERNAME ?? '';
-const ORDER_TEMP_PASSWORD = process.env.REAL_E2E_ORDER_CUSTOMER_PASSWORD ?? '';
-const ORDER_USERNAME_MOBILE = process.env.REAL_E2E_ORDER_CUSTOMER_USERNAME_MOBILE ?? '';
-const ORDER_TEMP_PASSWORD_MOBILE = process.env.REAL_E2E_ORDER_CUSTOMER_PASSWORD_MOBILE ?? '';
 const ORDER_PASSWORD = 'OrderCustomerPass123!Strong';
 const IMAGE_FIXTURE = path.join(process.cwd(), 'tests/e2e-real/fixtures/product.png');
 
@@ -328,8 +324,13 @@ test('business_admin manages buyer authority, then price approval → buyer acce
 
   // --- Salesperson requests an extension ----------------------------------
   await confirmDrawer.getByTestId('extension-hours').fill('24');
+  // A missing reason must produce a visible in-drawer error, not a silent API
+  // call. Then the corrected form succeeds and the notice is visible.
+  await confirmDrawer.getByTestId('extension-submit').click();
+  await expect(confirmDrawer.getByTestId('order-drawer-error')).toBeVisible();
   await confirmDrawer.getByTestId('extension-reason').fill('E2E extension request');
   await confirmDrawer.getByTestId('extension-submit').click();
+  await expect(confirmDrawer.getByTestId('order-drawer-notice')).toBeVisible();
   await expect(confirmDrawer.getByTestId('order-drawer-notice')).toContainText(
     'Extension request submitted'
   );
@@ -358,7 +359,13 @@ test('business_admin manages buyer authority, then price approval → buyer acce
   await releaseDrawer
     .getByTestId('release-verification-note')
     .fill('Checked unpaid ledger and not-shipped warehouse log');
+  // The explicit unpaid / not-shipped affirmations are required.
   await releaseDrawer.getByTestId('release-submit').click();
+  await expect(releaseDrawer.getByTestId('order-drawer-error')).toBeVisible();
+  await releaseDrawer.getByTestId('release-verify-unpaid').check();
+  await releaseDrawer.getByTestId('release-verify-not-shipped').check();
+  await releaseDrawer.getByTestId('release-submit').click();
+  await expect(releaseDrawer.getByTestId('order-drawer-notice')).toBeVisible();
   await expect(releaseDrawer.getByTestId('order-drawer-notice')).toContainText(
     'Release request submitted'
   );
@@ -397,4 +404,251 @@ test('business_admin manages buyer authority, then price approval → buyer acce
     await expect(page.getByTestId('real-sidebar')).toBeHidden();
   }
   void openInternalSidebar;
+});
+
+test('ordinary buyer accounts cannot accept and revocation forces a fresh buyer acceptance', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'Real-auth admin credentials are required.');
+  test.skip(!SALES_EMAIL || !SALES_PASSWORD, 'A real salesperson is required.');
+  test.skip(!BUSINESS_EMAIL || !BUSINESS_PASSWORD, 'A real business administrator is required.');
+
+  const mobile = testInfo.project.name.includes('mobile');
+  const unique = `${Date.now().toString().slice(-7)}${mobile ? '6' : '2'}`;
+  const customerCode = `C${String(Number(unique) % 1_000_000).padStart(6, '0')}`;
+  const warehouseCode = `WH-CNF-${unique}`;
+  const productCode = `CNFR-${unique}`;
+  const skuCode = `CNFR-${unique}-BLK`;
+  const expectedDate = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  // This test owns its company and both accounts, so its first-login password
+  // changes cannot disturb the shared accounts used by the 4B-04 suites.
+  const adminCsrf = await apiLogin(request, ADMIN_EMAIL, ADMIN_PASSWORD);
+  const salesUsers = await apiJson<{ users: Array<{ id: string; email: string }> }>(
+    request,
+    adminCsrf,
+    'GET',
+    '/api/admin/sales-users'
+  );
+  const salesUserId = salesUsers.users.find(user => user.email === SALES_EMAIL)?.id;
+  expect(salesUserId, 'The E2E salesperson must exist').toBeTruthy();
+  const createdCompany = await apiJson<{
+    company: { id: string };
+    primaryUsername: string;
+    temporaryPassword: string;
+  }>(request, adminCsrf, 'POST', '/api/admin/companies', {
+    customerCode,
+    shortName: `Revocation E2E ${unique}`,
+    countryAlpha3: 'USA',
+    assignedSalesUserId: salesUserId,
+    brandIds: ['brand-aoking'],
+  });
+  const orderCompanyId = createdCompany.company.id;
+  const customerUsername = createdCompany.primaryUsername;
+  const customerTempPassword = createdCompany.temporaryPassword;
+  const subaccount = await apiJson<{ username: string; temporaryPassword: string }>(
+    request,
+    adminCsrf,
+    'POST',
+    `/api/admin/companies/${orderCompanyId}/accounts`,
+    {}
+  );
+  const ordinaryUsername = subaccount.username;
+  const ordinaryTempPassword = subaccount.temporaryPassword;
+  const companyCode = customerCode;
+  const confirmerCompanies = await apiJson<{
+    companies: Array<{
+      companyId: string;
+      customerCode: string;
+      accounts: Array<{ customerUserId: string; username: string }>;
+    }>;
+  }>(request, adminCsrf, 'GET', '/api/admin/buyer-confirmation-accounts');
+  const ownedCompany = confirmerCompanies.companies.find(
+    company => company.customerCode === customerCode
+  );
+  const authorizedAccount = ownedCompany?.accounts.find(
+    account => account.username === customerUsername
+  );
+  expect(authorizedAccount, 'The primary account must exist').toBeTruthy();
+  await apiJson(
+    request,
+    adminCsrf,
+    'POST',
+    `/api/admin/companies/${ownedCompany!.companyId}/buyer-authorizations`,
+    {
+      customerUserId: authorizedAccount!.customerUserId,
+      idempotencyKey: `e2e-grant-${unique}`,
+    }
+  );
+  const warehouse = await apiJson<{ warehouse: { id: string } }>(
+    request,
+    adminCsrf,
+    'POST',
+    '/api/admin/warehouses',
+    { code: warehouseCode, name: '认可测试仓', nameEn: 'Acceptance Warehouse' }
+  );
+  const product = await apiJson<{ product: { id: string } }>(
+    request,
+    adminCsrf,
+    'POST',
+    '/api/admin/catalog/products',
+    {
+      brandId: 'brand-aoking',
+      productCode,
+      title: '认可撤销测试背包',
+      titleEn: `Acceptance Revocation Pack ${unique}`,
+      descriptionEn: 'Ordinary buyer and revocation E2E product',
+      category: 'Business Backpacks',
+      material: 'Polyester',
+      capacityOrSize: '20L',
+    }
+  );
+  const productId = product.product.id;
+  const imageResponse = await request.post(
+    `/api/admin/catalog/products/${productId}/images`,
+    {
+      headers: { 'X-CSRF-Token': adminCsrf, 'Content-Type': 'image/png' },
+      data: await readFile(IMAGE_FIXTURE),
+    }
+  );
+  expect(imageResponse.status()).toBe(201);
+  const sku = await apiJson<{ sku: { id: string } }>(
+    request,
+    adminCsrf,
+    'POST',
+    `/api/admin/catalog/products/${productId}/skus`,
+    {
+      skuCode,
+      colorName: '哑光黑',
+      colorNameEn: 'Matte Black',
+      colorHex: '#1c1c1e',
+      basePriceCents: 4200,
+      initialInventory: {
+        warehouseId: warehouse.warehouse.id,
+        onHand: 40,
+        unsellable: 0,
+      },
+    }
+  );
+  const skuId = sku.sku.id;
+  await apiJson(request, adminCsrf, 'POST', `/api/admin/catalog/products/${productId}/publish`, {});
+
+  const customerCsrf = await apiLogin(request, customerUsername, customerTempPassword);
+  await apiJson(request, customerCsrf, 'POST', '/api/auth/change-password', {
+    currentPassword: customerTempPassword,
+    newPassword: ORDER_PASSWORD,
+  });
+  const cart = await apiJson<{ cart: { revision: number } }>(
+    request,
+    customerCsrf,
+    'GET',
+    '/api/cart'
+  );
+  await apiJson(request, customerCsrf, 'PUT', `/api/cart/items/${skuId}`, {
+    quantity: 10,
+    expectedRevision: cart.cart.revision,
+  });
+  const submitted = await apiJson<{
+    order: { id: string; orderNo: string; revision: number };
+  }>(request, customerCsrf, 'POST', '/api/orders', {
+    idempotencyKey: `e2e-revocation-${unique}`,
+    expectedCartRevision: cart.cart.revision + 1,
+    shippingMethod: 'Sea',
+    destinationCountryAlpha3: 'USA',
+    expectedShipDate: expectedDate,
+    shippingRequirements: 'Acceptance revocation E2E.',
+  });
+  const orderNo = submitted.order.orderNo;
+
+  // A reference-price plan needs no price approval, so this scenario focuses
+  // on buyer authority and acceptance invalidation.
+  const salesCsrf = await apiLogin(request, SALES_EMAIL, SALES_PASSWORD);
+  await apiJson(request, salesCsrf, 'POST', `/api/sales/orders/${submitted.order.id}/plans`, {
+    expectedRevision: submitted.order.revision,
+    expectedPlanVersion: 0,
+    lines: [{ skuId, quantity: 10, unitPriceCents: 4200 }],
+    idempotencyKey: `e2e-revocation-plan-${unique}`,
+  });
+
+  // --- The ordinary account has no acceptance control ---------------------
+  await page.goto('/');
+  await signIn(page, ordinaryUsername, ordinaryTempPassword);
+  await changePasswordIfAsked(page, ordinaryTempPassword);
+  await page.getByTestId('real-tab-orders').click();
+  const ordinaryOrder = page.getByTestId('customer-order-card').filter({ hasText: orderNo });
+  await expect(ordinaryOrder).toBeVisible({ timeout: 20_000 });
+  await ordinaryOrder.click();
+  await expect(page.getByTestId('order-plan')).toBeVisible();
+  await expect(page.getByTestId('order-plan')).toContainText(skuCode);
+  await expect(page.getByTestId('order-plan-accept')).toHaveCount(0);
+  await expect(page.getByTestId('order-plan-reject')).toHaveCount(0);
+  await signOut(page);
+
+  // --- The designated account accepts -------------------------------------
+  await signIn(page, customerUsername, ORDER_PASSWORD);
+  await page.getByTestId('real-tab-orders').click();
+  const authorizedOrder = page.getByTestId('customer-order-card').filter({ hasText: orderNo });
+  await expect(authorizedOrder).toBeVisible({ timeout: 20_000 });
+  await authorizedOrder.click();
+  await expect(page.getByTestId('order-plan-accept')).toBeVisible();
+  await page.getByTestId('order-plan-accept').click();
+  await expect(page.getByTestId('order-plan')).toContainText('ACCEPTED');
+  await signOut(page);
+
+  // --- Revocation invalidates the acceptance ------------------------------
+  await signIn(page, BUSINESS_EMAIL, BUSINESS_PASSWORD);
+  await waitForInternalWorkspace(page);
+  await openInternalTab(page, 'approvals');
+  const companySelect = page.getByTestId('confirmer-company');
+  await expect(companySelect).toBeVisible({ timeout: 20_000 });
+  const companyOption = companySelect.locator('option', { hasText: companyCode! });
+  await expect(companyOption).toHaveCount(1, { timeout: 20_000 });
+  await companySelect.selectOption((await companyOption.getAttribute('value'))!);
+  const accountRow = page
+    .getByTestId('confirmer-account')
+    .filter({ hasText: customerUsername });
+  await expect(accountRow.getByTestId('confirmer-revoke')).toBeVisible({ timeout: 20_000 });
+  await accountRow.getByTestId('confirmer-revoke').click();
+  await expect(accountRow.getByTestId('confirmer-grant')).toBeVisible({ timeout: 20_000 });
+  await expectNoHorizontalOverflow(page);
+  await signOut(page);
+
+  // The plan is returned to SUBMITTED and the revoked account cannot accept.
+  await signIn(page, customerUsername, ORDER_PASSWORD);
+  await page.getByTestId('real-tab-orders').click();
+  const revokedOrder = page.getByTestId('customer-order-card').filter({ hasText: orderNo });
+  await expect(revokedOrder).toBeVisible({ timeout: 20_000 });
+  await revokedOrder.click();
+  await expect(page.getByTestId('order-plan')).toContainText('SUBMITTED');
+  await expect(page.getByTestId('order-plan-accept')).toHaveCount(0);
+  await signOut(page);
+
+  // --- Re-granting creates a new instance and requires a fresh acceptance --
+  await signIn(page, BUSINESS_EMAIL, BUSINESS_PASSWORD);
+  await waitForInternalWorkspace(page);
+  await openInternalTab(page, 'approvals');
+  const regrantSelect = page.getByTestId('confirmer-company');
+  await expect(regrantSelect).toBeVisible({ timeout: 20_000 });
+  const regrantOption = regrantSelect.locator('option', { hasText: companyCode! });
+  await regrantSelect.selectOption((await regrantOption.getAttribute('value'))!);
+  const regrantRow = page
+    .getByTestId('confirmer-account')
+    .filter({ hasText: customerUsername });
+  await expect(regrantRow.getByTestId('confirmer-grant')).toBeVisible({ timeout: 20_000 });
+  await regrantRow.getByTestId('confirmer-grant').click();
+  await expect(regrantRow.getByTestId('confirmer-revoke')).toBeVisible({ timeout: 20_000 });
+  await signOut(page);
+
+  await signIn(page, customerUsername, ORDER_PASSWORD);
+  await page.getByTestId('real-tab-orders').click();
+  const reGrantedOrder = page.getByTestId('customer-order-card').filter({ hasText: orderNo });
+  await expect(reGrantedOrder).toBeVisible({ timeout: 20_000 });
+  await reGrantedOrder.click();
+  await expect(page.getByTestId('order-plan-accept')).toBeVisible();
+  await page.getByTestId('order-plan-accept').click();
+  await expect(page.getByTestId('order-plan')).toContainText('ACCEPTED');
+  await screenshot(page, `customer-reaccepted-${testInfo.project.name}`);
+  await expectNoHorizontalOverflow(page);
+  await signOut(page);
 });

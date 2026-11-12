@@ -1371,6 +1371,22 @@ describeDb('Phase 4B-05 order confirmation', () => {
     );
     expect(paid.status).toBe(422);
     expect(paid.body.error.code).toBe('payment_verification_required');
+    const unknown = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/release-requests`,
+      {
+        expectedRevision: order.revision,
+        expectedReservationVersion: reservation.version,
+        reason: 'try unknown',
+        paymentVerification: 'unknown',
+        shipmentVerification: 'not_shipped',
+        verificationNote: 'status unknown',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(unknown.status).toBe(422);
+    expect(unknown.body.error.code).toBe('payment_verification_required');
     const shipped = await post(
       sales.agent,
       `/api/sales/orders/${order.id}/release-requests`,
@@ -1535,6 +1551,734 @@ describeDb('Phase 4B-05 order confirmation', () => {
     expect(approved.body.order.confirmation.reservation.totalExtensionHours).toBe(24);
   }, 60_000);
 
+  it('anchors the 72h deadline and enforces the 240h additional / 312h hard extension ceiling', async () => {
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501A');
+    const { order } = await createConfirmedOrder(customer, sales, business, {
+      qty: 10,
+      w1: 100,
+    });
+    const reservation = order.confirmation.reservation;
+    const hours = (from: string, to: string) => (Date.parse(to) - Date.parse(from)) / 3_600_000;
+    expect(hours(reservation.confirmedAt, reservation.expiresAt)).toBe(72);
+    expect(hours(reservation.confirmedAt, reservation.hardDeadlineAt)).toBe(312);
+
+    const tooMany = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      {
+        expectedRevision: order.revision,
+        expectedReservationVersion: reservation.version,
+        additionalHours: 241,
+        reason: 'over the request maximum',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(tooMany.status).toBe(400);
+    expect(tooMany.body.error.code).toBe('invalid_extension_hours');
+
+    // Exactly 240 additional hours is the approved maximum and lands on the
+    // 312h hard ceiling without exceeding it.
+    const ceilingRequest = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      {
+        expectedRevision: order.revision,
+        expectedReservationVersion: reservation.version,
+        additionalHours: 240,
+        reason: 'use the full approved extension',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(ceilingRequest.status).toBe(201);
+    const approved = await post(
+      business.agent,
+      `/api/admin/order-approvals/extension/${ceilingRequest.body.request.id}/decision`,
+      {
+        decision: 'APPROVED',
+        expectedReservationVersion: reservation.version,
+        idempotencyKey: randomUUID(),
+      },
+      business.csrf
+    );
+    expect(approved.status).toBe(200);
+    const extended = approved.body.order.confirmation.reservation;
+    expect(extended.totalExtensionHours).toBe(240);
+    expect(Date.parse(extended.expiresAt)).toBe(Date.parse(extended.hardDeadlineAt));
+
+    const beyondTotal = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      {
+        expectedRevision: approved.body.order.revision,
+        expectedReservationVersion: extended.version,
+        additionalHours: 1,
+        reason: 'no total extension hours remain',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(beyondTotal.status).toBe(422);
+    expect(beyondTotal.body.error.code).toBe('extension_limit_exceeded');
+
+    // Even with hours left, the deadline can never move past first
+    // confirmation + 312h.
+    await pool.query(
+      `UPDATE order_reservations
+       SET expires_at = hard_deadline_at - interval '30 minutes', total_extension_hours = 0
+       WHERE order_id = $1`,
+      [order.id]
+    );
+    const beyondHardDeadline = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      {
+        expectedRevision: approved.body.order.revision,
+        expectedReservationVersion: extended.version,
+        additionalHours: 1,
+        reason: 'cross the hard ceiling',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(beyondHardDeadline.status).toBe(422);
+    expect(beyondHardDeadline.body.error.code).toBe('extension_exceeds_hard_deadline');
+
+    // An overdue reservation must recover past the database clock.
+    await pool.query(
+      `UPDATE order_reservations
+       SET expires_at = clock_timestamp() - interval '2 hours',
+           total_extension_hours = 0
+       WHERE order_id = $1`,
+      [order.id]
+    );
+    const noRecovery = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      {
+        expectedRevision: approved.body.order.revision,
+        expectedReservationVersion: extended.version,
+        additionalHours: 1,
+        reason: 'still in the past',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(noRecovery.status).toBe(422);
+    expect(noRecovery.body.error.code).toBe('extension_does_not_recover');
+  }, 60_000);
+
+  it('makes extension requests idempotent and refuses a second pending request', async () => {
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501A');
+    const { order } = await createConfirmedOrder(customer, sales, business, {
+      qty: 10,
+      w1: 100,
+    });
+    const reservation = order.confirmation.reservation;
+    const key = randomUUID();
+    const body = {
+      expectedRevision: order.revision,
+      expectedReservationVersion: reservation.version,
+      additionalHours: 24,
+      reason: 'idempotent extension',
+      idempotencyKey: key,
+    };
+    const first = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      body,
+      sales.csrf
+    );
+    expect(first.status).toBe(201);
+    const replay = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      body,
+      sales.csrf
+    );
+    expect(replay.status).toBe(201);
+    expect(replay.body.request.id).toBe(first.body.request.id);
+    const second = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/extension-requests`,
+      { ...body, idempotencyKey: randomUUID() },
+      sales.csrf
+    );
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('extension_already_pending');
+  }, 60_000);
+
+  it('allows self-approval and records the requester and decider separately', async () => {
+    const admin = await login('conf.admin@example.test');
+    const selfId = await createInternal('Conf Self', 'conf.self@example.test', [
+      'sales',
+      'sales_writer',
+      'business_admin',
+    ]);
+    const company = await createCompany({ assignedSalesUserId: selfId, letters: ['A'] });
+    await grantBuyer(admin, company.companyId, company.customers[0].userId);
+    const self = await login('conf.self@example.test');
+    const customer = await login(company.customers[0].username);
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(self, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 3900 },
+    ]);
+    expect(plan.plan.priceApprovalStatus).toBe('PENDING');
+
+    const decision = await post(
+      self.agent,
+      `/api/admin/order-approvals/price/${plan.plan.priceApproval.id}/decision`,
+      {
+        decision: 'APPROVED',
+        note: 'same person holds both roles',
+        expectedPlanVersion: plan.plan.version,
+        idempotencyKey: randomUUID(),
+      },
+      self.csrf
+    );
+    expect(decision.status).toBe(200);
+    expect(decision.body.order.currentPlan.priceApprovalStatus).toBe('APPROVED');
+
+    const approval = await pool.query(
+      `SELECT requested_by_user_id, decided_by_user_id, requested_by_label, decided_by_label
+       FROM order_price_approvals WHERE id = $1`,
+      [plan.plan.priceApproval.id]
+    );
+    expect(approval.rows[0]).toMatchObject({
+      requested_by_user_id: selfId,
+      decided_by_user_id: selfId,
+    });
+    expect(approval.rows[0].requested_by_label).toBeTruthy();
+    expect(approval.rows[0].decided_by_label).toBeTruthy();
+
+    const accepted = await acceptPlan(customer, decision.body.order);
+    expect(accepted.currentPlan.status).toBe('ACCEPTED');
+  }, 60_000);
+
+  it('returns a declined price change to the salesperson and blocks customer acceptance', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4000 },
+    ]);
+    const rejected = await approvePrice(business, plan.order, 'REJECTED');
+    expect(rejected.order.currentPlan.status).toBe('REJECTED');
+    expect(rejected.order.currentPlan.priceApprovalStatus).toBe('REJECTED');
+
+    const blocked = await post(
+      customer.agent,
+      `/api/orders/${order.id}/plan-decision`,
+      {
+        expectedRevision: rejected.order.revision,
+        expectedPlanVersion: rejected.order.currentPlan.version,
+        planDigest: rejected.order.currentPlan.planDigest,
+        outcome: 'ACCEPTED',
+        idempotencyKey: randomUUID(),
+      },
+      customer.csrf
+    );
+    expect(blocked.status).toBe(409);
+    expect(['plan_not_acceptable', 'price_approval_rejected']).toContain(
+      blocked.body.error.code
+    );
+
+    // A different price creates a new epoch/approval; the salesperson can then
+    // resubmit, get approval and let the buyer accept.
+    const resubmitted = await savePlan(sales, rejected.order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4100 },
+    ]);
+    expect(resubmitted.plan.priceApprovalStatus).toBe('PENDING');
+    expect(resubmitted.plan.priceApproval.id).not.toBe(plan.plan.priceApproval.id);
+    const approved = await approvePrice(business, resubmitted.order);
+    const accepted = await acceptPlan(customer, approved.order);
+    expect(accepted.currentPlan.status).toBe('ACCEPTED');
+  }, 60_000);
+
+  it('treats buyer rejection as a plan outcome rather than an order cancellation', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4200 },
+    ]);
+    const rejected = await acceptPlan(customer, plan.order, 'REJECTED');
+    expect(rejected.status).toBe('PENDING_CONFIRMATION');
+    expect(rejected.currentPlan.status).toBe('REJECTED');
+    expect(rejected.confirmation).toBeNull();
+
+    const resubmitted = await savePlan(sales, rejected, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4200 },
+    ]);
+    expect(resubmitted.plan.version).toBeGreaterThan(plan.plan.version);
+    const accepted = await acceptPlan(customer, resubmitted.order);
+    expect(accepted.currentPlan.status).toBe('ACCEPTED');
+    expect(accepted.status).toBe('PENDING_CONFIRMATION');
+  }, 60_000);
+
+  it('decides a pending price approval that survived a quantity-only plan edit', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const priced = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4000 },
+    ]);
+    const approvalId = priced.plan.priceApproval.id;
+    const quantityOnly = await savePlan(sales, priced.order, [
+      { skuId: item.skuId, quantity: 12, unitPriceCents: 4000 },
+    ]);
+    expect(quantityOnly.plan.version).toBe(priced.plan.version + 1);
+    expect(quantityOnly.plan.priceApproval.id).toBe(approvalId);
+
+    // The approvals drawer sends the request-time version, not the newer
+    // quantity-only version. It must still be decidable.
+    const detail = await business.agent.get(`/api/admin/order-approvals/price/${approvalId}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.approval.request.requestedPlanVersion).toBe(priced.plan.version);
+    const decision = await post(
+      business.agent,
+      `/api/admin/order-approvals/price/${approvalId}/decision`,
+      {
+        decision: 'APPROVED',
+        note: 'approved after a quantity-only edit',
+        expectedPlanVersion: detail.body.approval.request.requestedPlanVersion,
+        idempotencyKey: randomUUID(),
+      },
+      business.csrf
+    );
+    expect(decision.status).toBe(200);
+    expect(decision.body.order.currentPlan.version).toBe(quantityOnly.plan.version);
+    expect(decision.body.order.currentPlan.priceApprovalStatus).toBe('APPROVED');
+    const accepted = await acceptPlan(customer, decision.body.order);
+    expect(accepted.currentPlan.status).toBe('ACCEPTED');
+
+    // A version that is neither the request-time nor the current plan version
+    // remains a conflict.
+    const stale = await post(
+      business.agent,
+      `/api/admin/order-approvals/price/${approvalId}/decision`,
+      {
+        decision: 'APPROVED',
+        expectedPlanVersion: priced.plan.version - 1,
+        idempotencyKey: randomUUID(),
+      },
+      business.csrf
+    );
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('approval_already_decided');
+  }, 60_000);
+
+  it('lets the buyer reject a plan while its price change is pending approval', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4000 },
+    ]);
+    expect(plan.plan.priceApprovalStatus).toBe('PENDING');
+
+    const rejected = await acceptPlan(customer, plan.order, 'REJECTED');
+    expect(rejected.status).toBe('PENDING_CONFIRMATION');
+    expect(rejected.currentPlan.status).toBe('REJECTED');
+    // The customer projection exposes only an active ACCEPTED outcome; the
+    // rejection is retained in the acceptance history and database evidence.
+    expect(rejected.acceptance).toBeNull();
+    const recorded = await pool.query(
+      `SELECT outcome, reason FROM order_plan_acceptances
+       WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [order.id]
+    );
+    expect(recorded.rows[0]).toMatchObject({
+      outcome: 'REJECTED',
+      reason: 'Please revise',
+    });
+  }, 60_000);
+
+  it('invalidates an acceptance after a quantity-only plan change', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4200 },
+    ]);
+    const accepted = await acceptPlan(customer, plan.order);
+    expect(accepted.acceptance.outcome).toBe('ACCEPTED');
+
+    const quantityOnly = await savePlan(sales, accepted, [
+      { skuId: item.skuId, quantity: 14, unitPriceCents: 4200 },
+    ]);
+    expect(quantityOnly.order.acceptance).toBeNull();
+    expect(quantityOnly.order.currentPlan.status).toBe('SUBMITTED');
+  }, 60_000);
+
+  it('supersedes plans, acceptances and pending price approvals when an administrator cancels pending orders', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const customer = await login('AK000501A');
+
+    // Order A has an accepted plan. Order B is waiting for a price decision.
+    const acceptedItem = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, acceptedItem.skuId, 10);
+    const acceptedOrder = await submitOrder(customer);
+    const acceptedPlan = await savePlan(sales, acceptedOrder, [
+      { skuId: acceptedItem.skuId, quantity: 10, unitPriceCents: 4200 },
+    ]);
+    await acceptPlan(customer, acceptedPlan.order);
+
+    const pendingItem = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, pendingItem.skuId, 10);
+    const pendingOrder = await submitOrder(customer);
+    const pendingPlan = await savePlan(sales, pendingOrder, [
+      { skuId: pendingItem.skuId, quantity: 10, unitPriceCents: 3900 },
+    ]);
+    expect(pendingPlan.plan.priceApprovalStatus).toBe('PENDING');
+
+    const preview = await admin.agent.get(
+      `/api/admin/orders/impact?kind=company_suspend&targetId=${companyAId}`
+    );
+    expect(preview.status).toBe(200);
+    const suspended = await patch(
+      admin.agent,
+      `/api/admin/companies/${companyAId}/status`,
+      {
+        status: 'suspended',
+        confirmAffectedOrders: true,
+        impactToken: preview.body.impact.impactToken,
+      },
+      admin.csrf
+    );
+    expect(suspended.status).toBe(200);
+
+    const orders = await pool.query(
+      'SELECT id, status FROM orders WHERE id = ANY($1::uuid[])',
+      [[acceptedOrder.id, pendingOrder.id]]
+    );
+    expect(orders.rows.every(row => row.status === 'CANCELLED')).toBe(true);
+    const planStates = await pool.query(
+      `SELECT id, status FROM order_plans WHERE order_id = ANY($1::uuid[])`,
+      [[acceptedOrder.id, pendingOrder.id]]
+    );
+    expect(planStates.rows.some(row => row.status === 'ACCEPTED')).toBe(false);
+    const acceptances = await pool.query(
+      `SELECT invalidated_at FROM order_plan_acceptances
+       WHERE order_id = $1 AND outcome = 'ACCEPTED'`,
+      [acceptedOrder.id]
+    );
+    expect(acceptances.rows[0].invalidated_at).not.toBeNull();
+    const approval = await pool.query(
+      'SELECT status FROM order_price_approvals WHERE id = $1',
+      [pendingPlan.plan.priceApproval.id]
+    );
+    expect(approval.rows[0].status).toBe('SUPERSEDED');
+  }, 60_000);
+
+  it('releases both warehouses and lets the customer submit a new order', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501B');
+    const item = await createPublishedProduct(admin, { w1: 20, w2: 12 });
+    await addToCart(customer, item.skuId, 20);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 20, unitPriceCents: 4200 },
+    ]);
+    const accepted = await acceptPlan(customer, plan.order);
+    const confirmed = await confirm(sales, accepted, [
+      { skuId: item.skuId, warehouseId: warehouse1Id, quantity: 12 },
+      { skuId: item.skuId, warehouseId: warehouse2Id, quantity: 8 },
+    ]);
+    expect(confirmed.status).toBe(200);
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({
+      on_hand: 20,
+      reserved: 12,
+    });
+    expect(await inventory(item.skuId, warehouse2Id)).toMatchObject({
+      on_hand: 12,
+      reserved: 8,
+    });
+    // The reconciliation endpoint reports mismatches only; a correct
+    // two-warehouse reservation produces no rows.
+    const reconciled = await business.agent.get(
+      '/api/admin/order-approvals/reconciliation'
+    );
+    expect(reconciled.status).toBe(200);
+    expect(reconciled.body.rows).toEqual([]);
+
+    const reservation = confirmed.body.order.confirmation.reservation;
+    const request = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/release-requests`,
+      {
+        expectedRevision: confirmed.body.order.revision,
+        expectedReservationVersion: reservation.version,
+        reason: 'two-warehouse release',
+        paymentVerification: 'unpaid',
+        shipmentVerification: 'not_shipped',
+        verificationNote: 'Checked payment ledger and outbound log',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(request.status).toBe(201);
+    const released = await post(
+      business.agent,
+      `/api/admin/order-approvals/release/${request.body.request.id}/decision`,
+      {
+        decision: 'APPROVED',
+        expectedReservationVersion: reservation.version,
+        idempotencyKey: randomUUID(),
+      },
+      business.csrf
+    );
+    expect(released.status).toBe(200);
+    expect(released.body.order.status).toBe('CANCELLED');
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({
+      on_hand: 20,
+      reserved: 0,
+    });
+    expect(await inventory(item.skuId, warehouse2Id)).toMatchObject({
+      on_hand: 12,
+      reserved: 0,
+    });
+
+    // A released order is final: the customer must submit a new order.
+    await addToCart(customer, item.skuId, 10);
+    const replacement = await submitOrder(customer);
+    expect(replacement.id).not.toBe(order.id);
+    expect(replacement.orderNo).toMatch(/^OD-[0-9]{6}-[0-9]{4}$/);
+  }, 60_000);
+
+  it('blocks confirmation after the buyer authority was revoked', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4200 },
+    ]);
+    const accepted = await acceptPlan(customer, plan.order);
+    const authorizations = await admin.agent.get(
+      `/api/admin/companies/${companyAId}/buyer-authorizations`
+    );
+    const active = authorizations.body.authorizations.find(
+      (row: { customerUserId: string; status: string }) =>
+        row.customerUserId === customer.userId && row.status === 'active'
+    );
+    const revoked = await post(
+      admin.agent,
+      `/api/admin/buyer-authorizations/${active.id}/revoke`,
+      { reason: 'revoked before confirmation', idempotencyKey: randomUUID() },
+      admin.csrf
+    );
+    expect(revoked.status).toBe(200);
+
+    const blocked = await confirm(sales, accepted, [
+      { skuId: item.skuId, warehouseId: warehouse1Id, quantity: 10 },
+    ]);
+    expect([403, 409]).toContain(blocked.status);
+    const reservation = await pool.query(
+      'SELECT count(*)::text AS count FROM order_reservations WHERE order_id = $1',
+      [order.id]
+    );
+    expect(reservation.rows[0].count).toBe('0');
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({ reserved: 0 });
+  }, 60_000);
+
+  it('rejects malformed identifiers and an over-long release reason with 400s', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501A');
+
+    const malformedPath = await post(
+      sales.agent,
+      '/api/sales/orders/not-a-uuid/plans',
+      { expectedRevision: 1, expectedPlanVersion: 0, lines: [], idempotencyKey: randomUUID() },
+      sales.csrf
+    );
+    expect(malformedPath.status).toBe(400);
+    expect(malformedPath.body.error.code).toBe('invalid_request');
+
+    const { order } = await createConfirmedOrder(customer, sales, business, { qty: 10, w1: 100 });
+    const reservation = order.confirmation.reservation;
+    const overLong = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/release-requests`,
+      {
+        expectedRevision: order.revision,
+        expectedReservationVersion: reservation.version,
+        reason: 'x'.repeat(501),
+        paymentVerification: 'unpaid',
+        shipmentVerification: 'not_shipped',
+        verificationNote: 'checked',
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(overLong.status).toBe(400);
+    expect(overLong.body.error.code).toBe('invalid_request');
+
+    const malformedWarehouse = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/confirm`,
+      {},
+      sales.csrf
+    );
+    expect(malformedWarehouse.status).toBe(400);
+  }, 60_000);
+
+  it('marks an overdue reservation expired even when its reminder row already exists', async () => {
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501C');
+    const { order, item } = await createConfirmedOrder(customer, sales, business, {
+      qty: 10,
+      w1: 100,
+    });
+    await pool.query(
+      `UPDATE order_reservations
+       SET expires_at = clock_timestamp() - interval '1 minute'
+       WHERE order_id = $1`,
+      [order.id]
+    );
+    await pool.query(
+      `INSERT INTO order_deadline_reminders (id, reservation_id, order_id, deadline_at, kind)
+       SELECT $1, id, order_id, expires_at, 'EXPIRED'
+       FROM order_reservations WHERE order_id = $2`,
+      [randomUUID(), order.id]
+    );
+    const scan = await post(
+      business.agent,
+      '/api/admin/order-approvals/expiry-scan',
+      {},
+      business.csrf
+    );
+    expect(scan.status).toBe(200);
+    expect(scan.body.result.expired).toBe(1);
+    expect(scan.body.result.reminded).toBe(0);
+    const reservation = await pool.query(
+      'SELECT status FROM order_reservations WHERE order_id = $1',
+      [order.id]
+    );
+    expect(reservation.rows[0].status).toBe('EXPIRED');
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({ reserved: 10 });
+  }, 60_000);
+
+  it('shares the daily order-number sequence and refuses the 10000th order', async () => {
+    const admin = await login('conf.admin@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    const dayRow = await pool.query<{ day: string; date_part: string }>(
+      `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+              to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYMMDD') AS date_part`
+    );
+    const { day, date_part: datePart } = dayRow.rows[0];
+    await pool.query(
+      `INSERT INTO order_sequences (order_date, next_seq) VALUES ($1::date, 9998)
+       ON CONFLICT (order_date) DO UPDATE SET next_seq = 9998`,
+      [day]
+    );
+
+    await addToCart(customer, item.skuId, 10);
+    const last = await submitOrder(customer);
+    expect(last.orderNo).toBe(`OD-${datePart}-9999`);
+
+    await addToCart(customer, item.skuId, 10);
+    const cart = await customer.agent.get('/api/cart');
+    const exhausted = await post(
+      customer.agent,
+      '/api/orders',
+      {
+        idempotencyKey: randomUUID(),
+        expectedCartRevision: cart.body.cart.revision,
+        shippingMethod: 'Sea',
+        destinationCountryAlpha3: 'USA',
+        expectedShipDate: '2026-12-15',
+        shippingRequirements: 'Exhaustion probe.',
+      },
+      customer.csrf
+    );
+    expect(exhausted.status).toBe(503);
+    expect(exhausted.body.error.code).toBe('order_sequence_exhausted');
+    // The failed transaction rolled back the sequence increment and did not
+    // create a second order.
+    const sequence = await pool.query(
+      'SELECT next_seq FROM order_sequences WHERE order_date = $1::date',
+      [day]
+    );
+    expect(sequence.rows[0].next_seq).toBe(9999);
+    const orders = await pool.query('SELECT count(*)::text AS count FROM orders');
+    expect(orders.rows[0].count).toBe('1');
+  }, 60_000);
+
+  it('rejects unknown and inactive warehouse allocations without reserving stock', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const customer = await login('AK000501A');
+    const item = await createPublishedProduct(admin, { w1: 100 });
+    await addToCart(customer, item.skuId, 10);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 10, unitPriceCents: 4200 },
+    ]);
+    const accepted = await acceptPlan(customer, plan.order);
+
+    const unknown = await confirm(sales, accepted, [
+      { skuId: item.skuId, warehouseId: randomUUID(), quantity: 10 },
+    ]);
+    expect(unknown.status).toBe(422);
+    expect(unknown.body.error.code).toBe('unknown_warehouse');
+
+    const created = await post(
+      admin.agent,
+      '/api/admin/warehouses',
+      { code: `WH-CNF-OLD-${Date.now()}`, name: '停用仓', nameEn: 'Inactive warehouse' },
+      admin.csrf
+    );
+    expect(created.status).toBe(201);
+    const inactiveId = created.body.warehouse.id as string;
+    const deactivated = await patch(
+      admin.agent,
+      `/api/admin/warehouses/${inactiveId}`,
+      { active: false },
+      admin.csrf
+    );
+    expect(deactivated.status).toBe(200);
+    const inactive = await confirm(sales, accepted, [
+      { skuId: item.skuId, warehouseId: inactiveId, quantity: 10 },
+    ]);
+    expect(inactive.status).toBe(422);
+    expect(inactive.body.error.code).toBe('inactive_warehouse');
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({ reserved: 0 });
+  }, 60_000);
+
   it('rejects direct SQL reserved writes, immutable FOR SHARE, double reserve and unapproved release under the runtime role', async () => {
     const role = `aoking_runtime_conf_${process.pid}`;
     const password = 'RuntimeConfirmation123!';
@@ -1566,6 +2310,24 @@ describeDb('Phase 4B-05 order confirmation', () => {
              inventory_before, inventory_after, version_after)
            VALUES ($1, $2, $3, 'reserve', 1, 0, 1, 2)`,
           [randomUUID(), randomUUID(), randomUUID()]
+        )
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        runtimePool.query('DELETE FROM order_plans WHERE false')
+      ).rejects.toThrow(/permission denied/i);
+      // The release request INSERT grant excludes the decision/execution
+      // columns, so the runtime role cannot forge an APPROVED request.
+      await expect(
+        runtimePool.query(
+          `INSERT INTO order_release_requests
+            (id, order_id, company_id, requested_by_user_id, requested_by_label,
+             reason, payment_verification, shipment_verification, verification_note,
+             verified_by_user_id, verified_at, expected_reservation_version,
+             status, decided_by_user_id, decided_at, executed_at)
+           VALUES ($1, $2, $3, $4, 'forged', 'forged', 'unpaid', 'not_shipped',
+                   'forged', $4, clock_timestamp(), 1, 'APPROVED', $4,
+                   clock_timestamp(), clock_timestamp())`,
+          [randomUUID(), randomUUID(), companyAId, salesId]
         )
       ).rejects.toThrow(/permission denied/i);
 
@@ -1627,7 +2389,63 @@ describeDb('Phase 4B-05 order confirmation', () => {
       expect(await inventory(lineRow.sku_id, lineRow.warehouse_id)).toMatchObject({
         reserved: 12,
       });
-      void business;
+
+      // The whole business flow also runs under the least-privilege role.
+      const extension = await post(
+        sales.agent,
+        `/api/sales/orders/${order.id}/extension-requests`,
+        {
+          expectedRevision: confirmed.body.order.revision,
+          expectedReservationVersion: confirmed.body.order.confirmation.reservation.version,
+          additionalHours: 24,
+          reason: 'runtime-role extension',
+          idempotencyKey: randomUUID(),
+        },
+        sales.csrf
+      );
+      expect(extension.status).toBe(201);
+      const extended = await post(
+        business.agent,
+        `/api/admin/order-approvals/extension/${extension.body.request.id}/decision`,
+        {
+          decision: 'APPROVED',
+          expectedReservationVersion:
+            confirmed.body.order.confirmation.reservation.version,
+          idempotencyKey: randomUUID(),
+        },
+        business.csrf
+      );
+      expect(extended.status).toBe(200);
+      const releaseRequest = await post(
+        sales.agent,
+        `/api/sales/orders/${order.id}/release-requests`,
+        {
+          expectedRevision: extended.body.order.revision,
+          expectedReservationVersion: extended.body.order.confirmation.reservation.version,
+          reason: 'runtime-role release',
+          paymentVerification: 'unpaid',
+          shipmentVerification: 'not_shipped',
+          verificationNote: 'verified under the runtime role',
+          idempotencyKey: randomUUID(),
+        },
+        sales.csrf
+      );
+      expect(releaseRequest.status).toBe(201);
+      const released = await post(
+        business.agent,
+        `/api/admin/order-approvals/release/${releaseRequest.body.request.id}/decision`,
+        {
+          decision: 'APPROVED',
+          expectedReservationVersion:
+            extended.body.order.confirmation.reservation.version,
+          idempotencyKey: randomUUID(),
+        },
+        business.csrf
+      );
+      expect(released.status).toBe(200);
+      expect(released.body.order.status).toBe('CANCELLED');
+      expect(await inventory(lineRow.sku_id, warehouse1Id)).toMatchObject({ reserved: 0 });
+      expect(await inventory(lineRow.sku_id, warehouse2Id)).toMatchObject({ reserved: 0 });
     } finally {
       await runtimePool.end();
       await pool.query(`DROP OWNED BY "${role}"`);

@@ -35,7 +35,7 @@ import { shippingMethodLabel } from '../../utils/orderStatus';
 import { QuantityField } from '../../components/ui/QuantityField';
 import { SideDrawer } from '../../components/ui/SideDrawer';
 import { HelpTooltip } from '../../components/ui/HelpTooltip';
-import { formatEnglishDate } from '../../utils/dateDisplay';
+import { formatEnglishDate, formatEnglishDateTime } from '../../utils/dateDisplay';
 import { useInternalLanguage } from '../internalLanguage';
 
 type OrderView = CustomerOrderDto | InternalOrderDto;
@@ -80,9 +80,20 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
   const [extensionReason, setExtensionReason] = useState('');
   const [releaseReason, setReleaseReason] = useState('');
   const [verificationNote, setVerificationNote] = useState('');
+  const [verifiedUnpaid, setVerifiedUnpaid] = useState(false);
+  const [verifiedNotShipped, setVerifiedNotShipped] = useState(false);
   const detailRequest = useRef(0);
   const customerRequest = useRef(0);
   const { language } = useInternalLanguage();
+
+  // Action feedback lives at the top of the scrollable drawer body. Move the
+  // body back to that position so a success/error after a long form is visible.
+  useEffect(() => {
+    if (!notice && !actionError) return;
+    const body = document.querySelector('[data-testid="order-detail-drawer-body"]');
+    (body as HTMLElement | null)?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }, [notice, actionError]);
+
   const text = (en: string, zh: string) => (scope === 'customer' ? en : language === 'zh' ? zh : en);
   const localizedError = (value: string) =>
     scope === 'customer' || language === 'en' || /[\u3400-\u9fff]/.test(value)
@@ -124,7 +135,10 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       .catch(() => setWarehouses([]));
   }, [scope]);
 
-  const loadDetail = async (id: string): Promise<void> => {
+  const loadDetail = async (
+    id: string,
+    options: { preserveFeedback?: boolean; preserveDrafts?: boolean } = {}
+  ): Promise<void> => {
     const token = ++detailRequest.current;
     if (scope !== 'customer') {
       // Internal order details open in the shared right-side drawer for both
@@ -135,9 +149,16 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
     }
     setSelectedId(id);
     setDetailLoading(true);
-    setActionError('');
-    setNotice('');
-    setCancelOpen(false);
+    if (!options.preserveFeedback) {
+      setActionError('');
+      setNotice('');
+      setCancelOpen(false);
+      setExtensionReason('');
+      setReleaseReason('');
+      setVerificationNote('');
+      setVerifiedUnpaid(false);
+      setVerifiedNotShipped(false);
+    }
     try {
       const item =
         scope === 'customer'
@@ -147,35 +168,37 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
             : await getAdminOrder(id);
       if (token !== detailRequest.current) return;
       setDetail(item);
-      setLineDrafts(
-        Object.fromEntries(item.lines.map(line => [line.skuId, String(line.quantity)]))
-      );
-      const planLines = item.currentPlan?.lines;
-      const draftLines = planLines?.length ? planLines : item.lines;
-      setPlanDrafts(
-        Object.fromEntries(
-          draftLines.map(line => {
-            const unitPriceCents =
-              'unitPriceCents' in line ? line.unitPriceCents : line.referenceUnitPriceCents;
-            return [
+      if (!options.preserveDrafts) {
+        setLineDrafts(
+          Object.fromEntries(item.lines.map(line => [line.skuId, String(line.quantity)]))
+        );
+        const planLines = item.currentPlan?.lines;
+        const draftLines = planLines?.length ? planLines : item.lines;
+        setPlanDrafts(
+          Object.fromEntries(
+            draftLines.map(line => {
+              const unitPriceCents =
+                'unitPriceCents' in line ? line.unitPriceCents : line.referenceUnitPriceCents;
+              return [
+                line.skuId,
+                {
+                  quantity: String(line.quantity),
+                  unitPrice: (unitPriceCents / 100).toFixed(2),
+                },
+              ];
+            })
+          )
+        );
+        const firstWarehouse = warehouses[0]?.id ?? '';
+        setAllocations(
+          Object.fromEntries(
+            draftLines.map(line => [
               line.skuId,
-              {
-                quantity: String(line.quantity),
-                unitPrice: (unitPriceCents / 100).toFixed(2),
-              },
-            ];
-          })
-        )
-      );
-      const firstWarehouse = warehouses[0]?.id ?? '';
-      setAllocations(
-        Object.fromEntries(
-          draftLines.map(line => [
-            line.skuId,
-            [{ warehouseId: firstWarehouse, quantity: String(line.quantity) }],
-          ])
-        )
-      );
+              [{ warehouseId: firstWarehouse, quantity: String(line.quantity) }],
+            ])
+          )
+        );
+      }
     } catch (err) {
       if (token !== detailRequest.current) return;
       setActionError(err instanceof Error ? err.message : 'The order could not be loaded.');
@@ -235,9 +258,14 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
     return user ? `${user.name} · ${user.email}` : id;
   };
 
-  const refreshAll = async (id?: string) => {
+  const refreshAll = async (id?: string, preserveFeedback = false) => {
     await loadList();
-    if (id) await loadDetail(id);
+    if (id) {
+      await loadDetail(id, {
+        preserveFeedback,
+        preserveDrafts: preserveFeedback,
+      });
+    }
   };
 
   const saveLines = async () => {
@@ -269,7 +297,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       setActionError(
         err instanceof AuthApiError ? err.message : err instanceof Error ? err.message : 'Update failed.'
       );
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -294,7 +322,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       setActionError(
         err instanceof AuthApiError ? err.message : err instanceof Error ? err.message : 'Cancellation failed.'
       );
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -341,7 +369,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       await loadList();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Plan save failed.');
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -371,7 +399,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       await loadList();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Plan decision failed.');
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -405,7 +433,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       await loadList();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Confirmation failed.');
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -413,6 +441,20 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
 
   const submitExtension = async () => {
     if (!detail || busy || !detail.confirmation?.reservation) return;
+    if (!extensionReason.trim()) {
+      setActionError(text('Enter a reason for the extension request.', '请填写延期原因。'));
+      return;
+    }
+    if (
+      !Number.isInteger(Number(extensionHours)) ||
+      Number(extensionHours) < 1 ||
+      Number(extensionHours) > 240
+    ) {
+      setActionError(
+        text('Enter a whole number of hours from 1 to 240.', '请输入 1 至 240 的整数小时。')
+      );
+      return;
+    }
     setBusy(true);
     setActionError('');
     setNotice('');
@@ -430,7 +472,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       await loadList();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Extension request failed.');
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -438,6 +480,25 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
 
   const submitRelease = async () => {
     if (!detail || busy || !detail.confirmation?.reservation) return;
+    if (!verifiedUnpaid || !verifiedNotShipped) {
+      setActionError(
+        text(
+          'Confirm that payment was verified as unpaid and the goods as not shipped.',
+          '请确认已核实未付款且未发货。'
+        )
+      );
+      return;
+    }
+    if (!releaseReason.trim()) {
+      setActionError(text('Enter a release reason.', '请填写释放原因。'));
+      return;
+    }
+    if (!verificationNote.trim()) {
+      setActionError(
+        text('Record the manual verification note.', '请填写人工核实说明。')
+      );
+      return;
+    }
     setBusy(true);
     setActionError('');
     setNotice('');
@@ -454,11 +515,13 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       setDetail(result.order);
       setReleaseReason('');
       setVerificationNote('');
+      setVerifiedUnpaid(false);
+      setVerifiedNotShipped(false);
       setNotice(text('Release request submitted for approval.', '释放申请已提交审批。'));
       await loadList();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Release request failed.');
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -941,36 +1004,42 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                     )}
                   {scope === 'customer' &&
                     detail.status === 'PENDING_CONFIRMATION' &&
-                    detail.canAcceptPlan && (
+                    (detail.canAcceptPlan || detail.canRejectPlan) && (
                       <div className="space-y-2 border-t border-slate-100 pt-2">
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void decidePlan('ACCEPTED')}
-                            data-testid="order-plan-accept"
-                            className="min-h-[40px] rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white disabled:opacity-50"
-                          >
-                            {text('Accept this plan', '认可该方案')}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void decidePlan('REJECTED')}
-                            data-testid="order-plan-reject"
-                            className="min-h-[40px] rounded-xl border border-rose-300 px-4 text-xs font-bold text-rose-700 disabled:opacity-50"
-                          >
-                            {text('Reject and return to sales', '拒绝并退回业务员')}
-                          </button>
+                          {detail.canAcceptPlan && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void decidePlan('ACCEPTED')}
+                              data-testid="order-plan-accept"
+                              className="min-h-[40px] rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white disabled:opacity-50"
+                            >
+                              {text('Accept this plan', '认可该方案')}
+                            </button>
+                          )}
+                          {detail.canRejectPlan && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void decidePlan('REJECTED')}
+                              data-testid="order-plan-reject"
+                              className="min-h-[40px] rounded-xl border border-rose-300 px-4 text-xs font-bold text-rose-700 disabled:opacity-50"
+                            >
+                              {text('Reject and return to sales', '拒绝并退回业务员')}
+                            </button>
+                          )}
                         </div>
-                        <input
-                          value={rejectReason}
-                          onChange={event => setRejectReason(event.target.value)}
-                          maxLength={1000}
-                          placeholder={text('Rejection reason (optional)', '拒绝原因（选填）')}
-                          className="h-10 w-full rounded-xl border border-slate-300 px-3 text-xs"
-                          data-testid="order-plan-reject-reason"
-                        />
+                        {detail.canRejectPlan && (
+                          <input
+                            value={rejectReason}
+                            onChange={event => setRejectReason(event.target.value)}
+                            maxLength={1000}
+                            placeholder={text('Rejection reason (optional)', '拒绝原因（选填）')}
+                            className="h-10 w-full rounded-xl border border-slate-300 px-3 text-xs"
+                            data-testid="order-plan-reject-reason"
+                          />
+                        )}
                       </div>
                     )}
                 </div>
@@ -1004,11 +1073,11 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                       </div>
                       <div>
                         {text('Expires', '到期')}:{' '}
-                        {formatEnglishDate(detail.confirmation.reservation.expiresAt)}
+                        {formatEnglishDateTime(detail.confirmation.reservation.expiresAt)}
                       </div>
                       <div>
                         {text('Hard deadline', '最迟期限')}:{' '}
-                        {formatEnglishDate(detail.confirmation.reservation.hardDeadlineAt)}
+                        {formatEnglishDateTime(detail.confirmation.reservation.hardDeadlineAt)}
                       </div>
                       <div>
                         {text('Approved extension', '已批延期')}:{' '}
@@ -1241,7 +1310,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                         <textarea
                           value={releaseReason}
                           onChange={event => setReleaseReason(event.target.value)}
-                          maxLength={1000}
+                          maxLength={500}
                           placeholder={text('Release reason', '释放原因')}
                           data-testid="release-reason"
                           className="w-full rounded-lg border border-slate-300 p-2"
@@ -1259,6 +1328,32 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                           className="w-full rounded-lg border border-slate-300 p-2"
                           rows={2}
                         />
+                        <label className="flex items-center gap-2 text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={verifiedUnpaid}
+                            onChange={event => setVerifiedUnpaid(event.target.checked)}
+                            data-testid="release-verify-unpaid"
+                            className="h-4 w-4"
+                          />
+                          {text(
+                            'I manually verified that payment is unpaid.',
+                            '我已人工核实付款状态为未付款。'
+                          )}
+                        </label>
+                        <label className="flex items-center gap-2 text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={verifiedNotShipped}
+                            onChange={event => setVerifiedNotShipped(event.target.checked)}
+                            data-testid="release-verify-not-shipped"
+                            className="h-4 w-4"
+                          />
+                          {text(
+                            'I manually verified that the goods are not shipped.',
+                            '我已人工核实货物未出库。'
+                          )}
+                        </label>
                         <div className="text-[10px] text-rose-700">
                           {text(
                             'Only a verified unpaid / not-shipped order may use this path. Payment or shipment evidence blocks it.',

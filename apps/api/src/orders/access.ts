@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { HttpError } from '../http/errors.js';
 import type { AuthContext } from '../auth/types.js';
 import { ORDER_SELECT, type OrderRow } from './dto.js';
+import { requireUuid } from './validation.js';
 
 export function requireInternalSalesWrite(auth: AuthContext): void {
   if (auth.user.type !== 'internal') {
@@ -117,6 +118,7 @@ export async function lockOrderForCurrentSalesWrite(
   orderId: string
 ): Promise<LockedSalesOrder> {
   requireInternalSalesWrite(auth);
+  requireUuid(orderId, 'orderId');
   const pointer = await client.query<{ company_id: string }>(
     'SELECT company_id FROM orders WHERE id = $1',
     [orderId]
@@ -161,6 +163,7 @@ export async function lockOrderForApproval(
   client: PoolClient,
   orderId: string
 ): Promise<OrderRow> {
+  requireUuid(orderId, 'orderId');
   const pointer = await client.query<{ company_id: string }>(
     'SELECT company_id FROM orders WHERE id = $1',
     [orderId]
@@ -190,6 +193,7 @@ export async function lockOrderForConfirmation(
   planVersion: number
 ): Promise<LockedSalesOrder> {
   requireInternalSalesWrite(auth);
+  requireUuid(orderId, 'orderId');
   const pointer = await client.query<{ company_id: string }>(
     'SELECT company_id FROM orders WHERE id = $1',
     [orderId]

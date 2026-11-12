@@ -180,8 +180,19 @@ export async function provisionRuntimeRole(
       `GRANT INSERT ON order_plans, order_plan_lines, order_price_approvals,
         buyer_confirmation_authorizations, order_plan_acceptances,
         order_reservations, order_reservation_lines, order_final_lines,
-        order_confirmations, order_extension_requests, order_release_requests,
+        order_confirmations, order_extension_requests,
         order_deadline_reminders, order_action_idempotency TO ${role}`
+    );
+    // A release request may only be inserted in its PENDING state. Status,
+    // decision and execution columns are reserved for the approval UPDATE
+    // path, so the API role cannot forge an already-approved request that the
+    // release bridge would accept.
+    await client.query(
+      `GRANT INSERT (id, order_id, company_id, requested_by_user_id,
+        requested_by_label, reason, payment_verification, shipment_verification,
+        verification_note, verified_by_user_id, verified_at,
+        expected_reservation_version)
+        ON order_release_requests TO ${role}`
     );
     await client.query(
       `GRANT UPDATE (status, version, revoked_by_user_id, revoked_at, revoke_reason)

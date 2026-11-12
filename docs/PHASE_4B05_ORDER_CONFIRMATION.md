@@ -75,9 +75,10 @@ implementation convenience.
    `on_hand`/`unsellable` do not change. Any failure rolls back everything,
    including an idempotent success row, audit and notifications.
 
-5. **Reservation lifetime.** Initial lifetime is 72 hours from first
-   confirmation. At most 240 additional hours may be approved, giving a hard
-   ceiling of 312 hours from first confirmation. Extensions are approved by a
+5. **Reservation lifetime.** The confirmed 3 + 10 day rule is implemented as
+   continuous hours: initial lifetime is 72 hours from first confirmation and
+   at most 240 additional hours may be approved, giving a hard ceiling of 312
+   hours from first confirmation. Extensions are approved by a
    business administrator (self-approval allowed) and approval+execution must
    be atomic, checking the old deadline, current reservation version and order
    state so concurrent approvals cannot exceed the ceiling. On expiry the
@@ -123,8 +124,10 @@ not new business authorisations.
   the clock from the approval time.
 - An already-overdue reservation may still be extended before the hard ceiling
   only when the resulting deadline is strictly after database `clock_timestamp()`.
-- The exact hour values and the overdue-recovery semantics are marked for
-  business acceptance in §9.
+- The Owner-confirmed rule is **3 days initial plus at most 10 additional days
+  (13 days in total)**. It is implemented as continuous UTC hours from first
+  confirmation: 72h initial, at most 240h additional and a 312h hard ceiling.
+  Only the overdue-recovery semantics remain an Owner review item in §9.
 
 ### 2.2 Reservation representation
 
@@ -145,17 +148,21 @@ not new business authorisations.
 - A recoverable Real-backend scan (`runExpiryScan` in
   `orders/reservationService.ts`) is callable by an authenticated internal
   operator through `POST /api/admin/order-approvals/expiry-scan` and runs
-  periodically in the API process. It takes bounded batches
-  (`FOR UPDATE SKIP LOCKED`), re-reads the reservation under its row lock and
-  uses database time. It only selects reservations whose `expires_at` is at or
+  periodically in the API process. It takes bounded batches, serialises
+  concurrent scanners with a transaction-scoped PostgreSQL advisory lock (a
+  competing scan returns an empty batch and retries on the next tick), re-reads
+  the reservation under company -> order -> reservation row locks and uses
+  database time. It only selects reservations whose `expires_at` is at or
   before `clock_timestamp()`; there is no pre-expiry reminder.
 - `order_deadline_reminders` has a unique
   `(reservation_id, deadline_at, kind)` key. Inserting the reminder and queuing
   the notification happen in the same transaction. Repeated scans, restarts and
   multiple API instances therefore emit at most one reminder per real deadline.
   An extension changes `expires_at`, so the new deadline gets its own reminder.
-  Expired reminders keep the stock held and the order `CONFIRMED`; they never
-  auto-release or auto-cancel.
+  A pre-existing reminder row never suppresses the `EXPIRED` transition: the
+  status change and stock hold remain authoritative, and the reminder insert is
+  only an at-most-once outbox side effect. Expired reminders keep the stock held
+  and the order `CONFIRMED`; they never auto-release or auto-cancel.
 - Notifications stay in the existing `order_notifications` outbox. There is no
   external channel. At minimum the overdue state is visible in the Real
   internal order screen, and the notification targets the current salesperson
@@ -230,6 +237,10 @@ Production initial grants are **pending Owner confirmation** (§9).
 - Approval decisions store both requester and decider (self-approval is two
   recorded roles on one person). Approvals reference the plan id/version at
   request time; the immutable plan snapshot is retained.
+- A price decision may present either the approval's request-time plan version
+  (what the queue shows) or the current plan version. The current plan must
+  still match the approval's fingerprint and epoch, so a quantity-only edit
+  cannot strand a pending approval, while a price change still makes it stale.
 - Counterexamples covered by tests: raise price; lower price; quantity-only
   with an approved price; quantity-only with a pending price (must remain
   blocked); change price then revert to reference; approve a price then change
@@ -364,7 +375,9 @@ order writes (foreign salesperson and foreign customer account return
 - Customer DTOs contain the acceptable plan lines and total, the plan/acceptance
   result, the final confirmed snapshot and the reservation deadline/status.
   They never contain internal approver identities/notes, warehouse allocation,
-  other accounts, sales notes or audit data.
+  other accounts, sales notes or audit data. The internal release reason and
+  manual verification note stay on the internal request/reservation evidence;
+  the customer sees only a generic cancelled-after-release reason and note.
 - Internal DTOs expose allocation and approval evidence only to an authorized
   internal session; the approval queue is permission-gated.
 - Rejection reasons follow the existing privacy filter.
@@ -373,14 +386,19 @@ order writes (foreign salesperson and foreign customer account return
 
 - Customer: view the complete plan, accept or reject, see pending price
   approval, see rejection/return-to-sales, see confirmed final total and
-  reservation deadline/overdue, and see the final cancelled state. Existing
-  English customer copy is preserved.
+  reservation deadline/overdue with date **and time**, and see the final
+  cancelled state. The reject action remains available while a price change is
+  pending; only acceptance is blocked. Existing English customer copy is
+  preserved.
 - Sales: build/update a plan with per-line quantity and USD unit price, see
   conflicts, request/execute confirmation with per-line warehouse allocation,
-  request an extension, and request whole-order release with the explicit
-  unpaid/not-shipped verification.
+  request an extension (reason required), and request whole-order release with
+  explicit checkboxes confirming the manual verification of unpaid and
+  not-shipped status plus a required verification note. Server errors are
+  preserved and rendered inside the active drawer.
 - Business administrator: approvals queue and detail, approve/reject with
-  recorded notes, run/observe the overdue scan, and grant/revoke buyer
+  recorded notes (decided requests are read-only), run/observe the overdue scan
+  with scanned/expired/reminded/skipped counts, and grant/revoke buyer
   confirmation authority. System administrator can grant/revoke authority but
   cannot approve or confirm through that alone.
 - The existing `SideDrawer`, V1 order detail, Real i18n, CSRF-aware API client,
@@ -404,7 +422,9 @@ byte-identical. It:
 - extends `inventory_movements` with `reserve`/`release` and
   `reserved_before`;
 - adds indexes, foreign keys, composite uniqueness, active-row partial
-  uniqueness and bounded checks;
+  uniqueness and bounded checks, including the database invariant
+  `hard_deadline_at = confirmed_at + interval '312 hours'` and
+  `expires_at <= hard_deadline_at` on `order_reservations`;
 - adds `order_reservation_ledger` and the two narrow `SECURITY DEFINER`
   functions below, with fixed `search_path` and `EXECUTE` revoked from `PUBLIC`;
 - sets `schema_version='4b05'`.
@@ -413,7 +433,10 @@ byte-identical. It:
 `provision-runtime-role.ts` grants only what the API commands need: SELECT and
 row INSERT/UPDATE on the new tables, no DELETE, SELECT-only on
 `order_reservation_ledger`, and `EXECUTE` on the two narrow reservation
-functions. It deliberately does **not** grant generic `UPDATE` on
+functions. `order_release_requests` receives a column-restricted INSERT grant
+that excludes `status`, the `decided_*` columns and `executed_at`, so the API
+role cannot insert an already-approved release request that the release bridge
+would accept. It deliberately does **not** grant generic `UPDATE` on
 `inventory_balances.reserved` or on the `reserved` column, and it does not grant
 `FOR SHARE` access to immutable `order_plan_lines`. There is no generic "retain
 quantity" or "permission catalogue self-write" API. Inventory
@@ -548,8 +571,10 @@ These items are **not** approved business rules. Until decided they remain
 acceptance blockers for production, not implementation blockers for this
 review branch.
 
-1. Exact initial and maximum reservation durations (implementation uses 72h
-   initial, 240h extra, 312h hard ceiling) and the overdue-recovery semantics.
+1. Overdue-recovery semantics only. The durations are already confirmed by the
+   Owner as 3 days initial plus at most 10 additional days (13 days total) and
+   are implemented as 72h initial, 240h maximum extra and a 312h hard ceiling
+   of continuous hours from first confirmation.
 2. Whether buyer-confirmation authority must be capped at one account per
    company (implementation currently allows explicit per-account grants).
 3. The production list of initial `business_admin` users and any additional

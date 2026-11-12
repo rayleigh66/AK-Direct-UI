@@ -47,6 +47,7 @@ interface AffectedRow {
   revision: string;
   reference_total_cents: string;
   submitted_at: Date;
+  current_plan_version: string;
 }
 
 function targetKey(kind: ImpactKind, targetId: string, companyId?: string | null): string {
@@ -92,7 +93,7 @@ function conditions(
 
 const AFFECTED_SELECT = `
   SELECT o.id, o.order_no, o.company_id, c.customer_code, o.status, o.revision,
-         o.reference_total_cents, o.submitted_at
+         o.reference_total_cents, o.submitted_at, o.current_plan_version
   FROM orders o
   JOIN customer_companies c ON c.id = o.company_id
   WHERE o.status = 'PENDING_CONFIRMATION' AND
@@ -365,6 +366,32 @@ export async function enforcePendingOrderImpact(
   }
 
   for (const row of rows) {
+    // A destructive administrative cancellation is a terminal order outcome.
+    // Supersede the active plan, invalidate any acceptance and close pending
+    // price approvals in this same transaction so the cancelled order never
+    // reports an "active" acceptance or an ACCEPTED plan.
+    if (Number(row.current_plan_version) > 0) {
+      await client.query(
+        `UPDATE order_plans
+         SET status = CASE WHEN status = 'REJECTED' THEN status ELSE 'SUPERSEDED' END,
+             decided_at = now()
+         WHERE order_id = $1 AND plan_version = $2`,
+        [row.id, row.current_plan_version]
+      );
+      await client.query(
+        `UPDATE order_plan_acceptances
+         SET invalidated_at = now(), invalidation_reason = 'order_cancelled'
+         WHERE order_id = $1 AND invalidated_at IS NULL`,
+        [row.id]
+      );
+      await client.query(
+        `UPDATE order_price_approvals
+         SET status = 'SUPERSEDED', decided_at = now(),
+             decision_note = 'Order cancelled by an administrative action before the price approval was decided.'
+         WHERE order_id = $1 AND status = 'PENDING'`,
+        [row.id]
+      );
+    }
     await client.query(
       `UPDATE orders SET status = 'CANCELLED', cancelled_at = now(), cancel_reason = $2,
          customer_visible_note = $3, revision = revision + 1, updated_at = now()

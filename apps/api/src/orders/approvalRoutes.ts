@@ -1,6 +1,6 @@
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { DbPool } from '../db/pool.js';
-import { asyncHandler } from '../http/errors.js';
+import { asyncHandler, HttpError } from '../http/errors.js';
 import { requireCsrfForUnsafeMethods } from '../http/csrf.js';
 import {
   requireAuth,
@@ -21,9 +21,19 @@ import {
   reconcileReservations,
   runExpiryScan,
 } from './reservationService.js';
+import { isUuid } from './validation.js';
+
+const uuidParam = (_req: Request, _res: Response, next: NextFunction, value: string) => {
+  if (!isUuid(value)) {
+    next(new HttpError(400, 'invalid_request', 'id must be a UUID.'));
+    return;
+  }
+  next();
+};
 
 export function createOrderApprovalRouter(pool: DbPool, config: AuthConfig): Router {
   const router = Router();
+  router.param('id', uuidParam);
   router.use(
     requireAuth(pool, config),
     requirePasswordChanged,

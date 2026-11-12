@@ -272,6 +272,7 @@ export interface CustomerPlanDto {
   priceApprovalStatus: PriceApprovalStatus;
   acceptanceReady: boolean;
   canAccept: boolean;
+  canReject: boolean;
   lines: PlanLineDto[];
   acceptance: AcceptanceDto | null;
   createdAt: string;
@@ -353,6 +354,7 @@ export interface CustomerOrderDto {
   }>;
   acceptance: AcceptanceDto | null;
   canAcceptPlan: boolean;
+  canRejectPlan: boolean;
   buyerAuthorized: boolean;
   confirmation: {
     confirmedAt: string;

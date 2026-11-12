@@ -213,6 +213,9 @@ CREATE TABLE IF NOT EXISTS order_reservations (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (expires_at <= hard_deadline_at),
+  -- The hard ceiling is a database invariant, not only an application check:
+  -- 72h initial + at most 240h of extensions = 312h from first confirmation.
+  CHECK (hard_deadline_at = confirmed_at + interval '312 hours'),
   CHECK (status <> 'RELEASED' OR released_at IS NOT NULL)
 );
 
@@ -548,8 +551,13 @@ BEGIN
 END;
 $$;
 
+-- Drop the shipped 9-argument signature and the earlier 8-argument draft so a
+-- stale overload can never retain the default PUBLIC EXECUTE grant.
 DROP FUNCTION IF EXISTS aoking_release_inventory(
   uuid, uuid, uuid, uuid, integer, bigint, integer, uuid
+);
+DROP FUNCTION IF EXISTS aoking_release_inventory(
+  uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid
 );
 
 CREATE OR REPLACE FUNCTION aoking_release_inventory(

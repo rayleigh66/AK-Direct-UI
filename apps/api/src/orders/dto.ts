@@ -83,6 +83,8 @@ export interface CustomerPlanDto {
   priceApprovalStatus: PriceApprovalStatus;
   acceptanceReady: boolean;
   canAccept: boolean;
+  /** Rejection is allowed while a price change is pending; acceptance is not. */
+  canReject: boolean;
   lines: PlanLineDto[];
   acceptance: AcceptanceDto | null;
   createdAt: string;
@@ -165,6 +167,7 @@ export interface CustomerOrderDto {
   }>;
   acceptance: AcceptanceDto | null;
   canAcceptPlan: boolean;
+  canRejectPlan: boolean;
   buyerAuthorized: boolean;
   confirmation: {
     confirmedAt: string;
@@ -548,6 +551,7 @@ async function buildPlan(
     priceApprovalStatus: status,
     acceptanceReady: status === 'NOT_REQUIRED' || status === 'APPROVED',
     canAccept: false,
+    canReject: false,
     lines,
     acceptance: acceptanceDto,
     createdAt: new Date(plan.created_at).toISOString(),
@@ -598,7 +602,7 @@ async function buildReservation(
     hardDeadlineAt: new Date(row.hard_deadline_at).toISOString(),
     totalExtensionHours: row.total_extension_hours,
     releasedAt: iso(row.released_at),
-    releaseReason: row.release_reason,
+    releaseReason: internal ? row.release_reason : null,
   };
   if (internal) {
     const lines = await db.query<ReservationLineRow>(
@@ -756,6 +760,11 @@ export async function buildCustomerOrder(
       plan.status === 'SUBMITTED' &&
       plan.acceptanceReady &&
       !acceptance;
+    plan.canReject =
+      authorized &&
+      row.status === 'PENDING_CONFIRMATION' &&
+      plan.status === 'SUBMITTED' &&
+      !acceptance;
   }
   const confirmation = await buildConfirmations(db, row, false);
   return {
@@ -785,6 +794,7 @@ export async function buildCustomerOrder(
     planHistory: await planHistory(db, row.id),
     acceptance,
     canAcceptPlan: plan?.canAccept ?? false,
+    canRejectPlan: plan?.canReject ?? false,
     buyerAuthorized: authorized,
     confirmation,
     history: customerHistory(history),

@@ -12,6 +12,7 @@ The default Mock application is unchanged.
 | Customer plan accepted | `real-orders/customer-plan-accepted-real-desktop-1440.png` | `real-orders/customer-plan-accepted-real-mobile-390.png` |
 | Two-warehouse confirmation | `real-orders/sales-confirmed-real-desktop-1440.png` | `real-orders/sales-confirmed-real-mobile-390.png` |
 | Confirmed then fully released, customer view | `real-orders/customer-released-real-desktop-1440.png` | `real-orders/customer-released-real-mobile-390.png` |
+| Buyer re-accepts after revoke + re-grant | `real-orders/customer-reaccepted-real-desktop-1440.png` | `real-orders/customer-reaccepted-real-mobile-390.png` |
 
 Screenshots are emitted only when `REAL_E2E_SCREENSHOTS=1` is set.
 
@@ -30,7 +31,14 @@ Screenshots are emitted only when `REAL_E2E_SCREENSHOTS=1` is set.
 - Extension and release success/error feedback is rendered **inside the active
   drawer** (`role="status"` / `role="alert"` with
   `data-testid="order-drawer-notice"` and `order-drawer-error`), so it is
-  visible on both desktop and mobile.
+  visible on both desktop and mobile. The drawer scrolls back to the feedback
+  after a long form is submitted.
+- Extension requires a reason. Release requires a reason, a manual verification
+  note, and two explicit checkboxes confirming that payment was verified as
+  unpaid and the goods as not shipped. Server errors stay visible instead of
+  being cleared by the follow-up refresh.
+- Reservation deadlines are shown with date and time because the 72h/312h
+  boundaries are continuous instants.
 - The customer sees the final cancelled state and released reservation after
   the approved full release.
 

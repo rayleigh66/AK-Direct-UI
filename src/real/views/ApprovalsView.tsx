@@ -23,7 +23,7 @@ import type {
 } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { SideDrawer } from '../../components/ui/SideDrawer';
-import { formatEnglishDate } from '../../utils/dateDisplay';
+import { formatEnglishDate, formatEnglishDateTime } from '../../utils/dateDisplay';
 import { useInternalLanguage } from '../internalLanguage';
 
 const idempotencyKey = () =>
@@ -169,8 +169,8 @@ export const ApprovalsView: React.FC<{
       const result = await runExpiryScan();
       setNotice(
         text(
-          `Expiry scan: ${result.expired} expired, ${result.skipped} skipped.`,
-          `到期扫描：${result.expired} 条逾期，${result.skipped} 条跳过。`
+          `Expiry scan: ${result.scanned} scanned, ${result.expired} expired, ${result.reminded} reminded, ${result.skipped} skipped.`,
+          `到期扫描：检查 ${result.scanned} 条，逾期 ${result.expired} 条，提醒 ${result.reminded} 条，跳过 ${result.skipped} 条。`
         )
       );
       load();
@@ -386,6 +386,15 @@ export const ApprovalsView: React.FC<{
           <LoadingBlock label={text('Loading approval…', '正在加载审批…')} />
         ) : detail ? (
           <div data-testid="approval-detail" className="space-y-3 text-xs">
+            {error && (
+              <div
+                role="alert"
+                data-testid="approval-detail-error"
+                className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-800"
+              >
+                {error}
+              </div>
+            )}
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="font-bold">{detail.order.orderNo}</div>
               <div className="text-slate-500">
@@ -420,7 +429,7 @@ export const ApprovalsView: React.FC<{
                   {text('Reservation', '预占')}:{' '}
                   {detail.order.confirmation.reservation.effectiveStatus} ·{' '}
                   {text('expires', '到期')}{' '}
-                  {formatEnglishDate(detail.order.confirmation.reservation.expiresAt)}
+                  {formatEnglishDateTime(detail.order.confirmation.reservation.expiresAt)}
                 </div>
               )}
             </div>
@@ -439,10 +448,18 @@ export const ApprovalsView: React.FC<{
               className="w-full rounded-xl border border-slate-300 p-2"
               rows={2}
             />
+            {String(requestValue('status') ?? '') !== 'PENDING' && (
+              <div className="rounded-xl bg-slate-100 p-3 text-slate-600">
+                {text(
+                  'This request has already been decided. Decisions are final and retained in history.',
+                  '该申请已审批完成。审批结果不可更改并保留在历史记录中。'
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || String(requestValue('status') ?? '') !== 'PENDING'}
                 onClick={() => void decide('APPROVED')}
                 data-testid="approval-approve"
                 className="min-h-[40px] rounded-xl bg-emerald-600 px-4 font-bold text-white disabled:opacity-50"
@@ -452,7 +469,7 @@ export const ApprovalsView: React.FC<{
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || String(requestValue('status') ?? '') !== 'PENDING'}
                 onClick={() => void decide('REJECTED')}
                 data-testid="approval-reject"
                 className="min-h-[40px] rounded-xl border border-rose-300 px-4 font-bold text-rose-700 disabled:opacity-50"

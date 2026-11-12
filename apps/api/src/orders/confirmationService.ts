@@ -25,7 +25,9 @@ import {
   INITIAL_RESERVATION_HOURS,
   MAX_ORDER_QUANTITY,
   SKU_MOQ,
+  isUuid,
   multiplyCents,
+  requireUuid,
 } from './validation.js';
 
 interface PlanRow {
@@ -124,11 +126,15 @@ function normalizeAllocations(input: unknown): Allocation[] {
       throw new HttpError(400, 'invalid_allocations', 'Each allocation must be an object.');
     }
     const item = raw as { skuId?: unknown; warehouseId?: unknown; quantity?: unknown };
-    if (typeof item.skuId !== 'string' || !item.skuId.trim()) {
-      throw new HttpError(400, 'invalid_allocations', 'Each allocation must include skuId.');
+    if (!isUuid(item.skuId)) {
+      throw new HttpError(400, 'invalid_allocations', 'Each allocation must include a UUID skuId.');
     }
-    if (typeof item.warehouseId !== 'string' || !item.warehouseId.trim()) {
-      throw new HttpError(400, 'invalid_allocations', 'Each allocation must include warehouseId.');
+    if (!isUuid(item.warehouseId)) {
+      throw new HttpError(
+        400,
+        'invalid_allocations',
+        'Each allocation must include a UUID warehouseId.'
+      );
     }
     if (
       typeof item.quantity !== 'number' ||
@@ -251,7 +257,7 @@ export async function confirmOrder(
   if (typeof input.acceptanceId !== 'string' || !input.acceptanceId.trim()) {
     throw new HttpError(400, 'invalid_request', 'acceptanceId is required.');
   }
-  const acceptanceId = input.acceptanceId.trim();
+  const acceptanceId = requireUuid(input.acceptanceId.trim(), 'acceptanceId');
   const allocations = normalizeAllocations(input.allocations);
   const digest = actionPayloadDigest('CONFIRM_ORDER', {
     orderId,
@@ -706,7 +712,7 @@ export async function confirmOrder(
         (id, order_id, plan_id, plan_version, plan_digest, acceptance_id,
          reservation_id, confirmed_by_user_id, confirmed_by_label, confirmed_at,
          total_cents, quantity_total)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, $11)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz, $11, $12)`,
       [
         randomUUID(),
         orderId,
@@ -717,6 +723,7 @@ export async function confirmOrder(
         reservationId,
         auth.user.id,
         auth.user.username,
+        reservationRow.confirmed_at,
         Number(plan.total_cents),
         plan.quantity_total,
       ]
@@ -742,7 +749,7 @@ export async function confirmOrder(
       ]
     );
     await client.query(
-      `UPDATE order_plans SET status = 'CONFIRMED', decided_at = now() WHERE id = $1`,
+      `UPDATE order_plans SET status = 'CONFIRMED', decided_at = clock_timestamp() WHERE id = $1`,
       [plan.id]
     );
     await client.query(

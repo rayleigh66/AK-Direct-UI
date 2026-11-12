@@ -80,6 +80,7 @@ function internalOrder(overrides: Partial<InternalOrderDto> = {}): InternalOrder
     planHistory: [],
     acceptance: null,
     canAcceptPlan: false,
+    canRejectPlan: false,
     buyerAuthorized: false,
     confirmation: null,
     history: [
@@ -133,6 +134,7 @@ function customerOrder(overrides: Partial<CustomerOrderDto> = {}): CustomerOrder
     planHistory: [],
     acceptance: null,
     canAcceptPlan: false,
+    canRejectPlan: false,
     buyerAuthorized: false,
     confirmation: null,
     history: [
