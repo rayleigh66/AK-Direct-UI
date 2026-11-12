@@ -1634,4 +1634,83 @@ describeDb('Phase 4B-05 order confirmation', () => {
       await pool.query(`DROP ROLE "${role}"`);
     }
   }, 90_000);
+
+  it('revokes restored PUBLIC EXECUTE on the reservation bridge when re-provisioning', async () => {
+    const role = `aoking_runtime_restore_${process.pid}`;
+    const password = 'RuntimeRestorePass123!';
+    const reserveSignature =
+      'public.aoking_reserve_inventory(uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid)';
+    const releaseSignature =
+      'public.aoking_release_inventory(uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid)';
+    const publicExecuteCount = async (): Promise<number> => {
+      const result = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count
+           FROM pg_proc p
+           CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+          WHERE p.oid IN (to_regprocedure($1), to_regprocedure($2))
+            AND acl.grantee = 0
+            AND acl.privilege_type = 'EXECUTE'`,
+        [reserveSignature, releaseSignature]
+      );
+      return result.rows[0]?.count ?? 0;
+    };
+
+    await provisionRuntimeRole({
+      adminDatabaseUrl: databaseUrl(),
+      runtimeUser: role,
+      runtimePassword: password,
+    });
+    // Simulate `pg_restore --no-privileges`: the function ACL reverts to the
+    // SQL default, which grants EXECUTE to PUBLIC even after migration 007.
+    await pool.query(`GRANT EXECUTE ON FUNCTION ${reserveSignature} TO PUBLIC`);
+    await pool.query(`GRANT EXECUTE ON FUNCTION ${releaseSignature} TO PUBLIC`);
+    expect(await publicExecuteCount()).toBe(2);
+
+    await provisionRuntimeRole({
+      adminDatabaseUrl: databaseUrl(),
+      runtimeUser: role,
+      runtimePassword: password,
+    });
+    expect(await publicExecuteCount()).toBe(0);
+
+    const runtimeUrl = new URL(databaseUrl());
+    runtimeUrl.username = role;
+    runtimeUrl.password = password;
+    const runtimePool = createPool(runtimeUrl.toString());
+    try {
+      // The functions are still executable by the runtime role: the expected
+      // failure is the function's own validation, not a permission denial.
+      const reserve = await runtimePool
+        .query(
+          `SELECT * FROM aoking_reserve_inventory($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [randomUUID(), randomUUID(), randomUUID(), randomUUID(), 1, 0, 0, 0, randomUUID()]
+        )
+        .then(() => null)
+        .catch((error: Error) => error);
+      expect(reserve?.message).toMatch(/reservation_not_found/);
+
+      const release = await runtimePool
+        .query(
+          `SELECT * FROM aoking_release_inventory($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            randomUUID(),
+            randomUUID(),
+            randomUUID(),
+            randomUUID(),
+            randomUUID(),
+            1,
+            0,
+            0,
+            randomUUID(),
+          ]
+        )
+        .then(() => null)
+        .catch((error: Error) => error);
+      expect(release?.message).toMatch(/reservation_not_found/);
+    } finally {
+      await runtimePool.end();
+      await pool.query(`DROP OWNED BY "${role}"`);
+      await pool.query(`DROP ROLE "${role}"`);
+    }
+  }, 30_000);
 });

@@ -5,6 +5,10 @@ import { loadMigrationDatabaseUrl } from '../config/env.js';
 
 const { Client } = pg;
 const USER_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
+const RESERVE_INVENTORY_FUNCTION =
+  'aoking_reserve_inventory(uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid)';
+const RELEASE_INVENTORY_FUNCTION =
+  'aoking_release_inventory(uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid)';
 
 export interface ProvisionRuntimeRoleInput {
   adminDatabaseUrl: string;
@@ -213,15 +217,24 @@ export async function provisionRuntimeRole(
     // and it goes through the two narrow SECURITY DEFINER functions below.
     // Direct `UPDATE inventory_balances SET reserved = ...` remains denied:
     // the original column grant intentionally excludes `reserved`.
+    //
+    // PostgreSQL grants EXECUTE on new functions to PUBLIC by default. A
+    // `pg_restore --no-privileges` restore recreates these functions with that
+    // default ACL even though migration 007 already ran, and this provisioner
+    // is the step CI reruns after a restore. Revoke the ambient grant before
+    // granting the runtime role so only that role (and the owning migrator)
+    // can execute the bridge.
     await client.query(
-      `GRANT EXECUTE ON FUNCTION aoking_reserve_inventory(
-        uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid
-      ) TO ${role}`
+      `REVOKE EXECUTE ON FUNCTION ${RESERVE_INVENTORY_FUNCTION} FROM PUBLIC`
     );
     await client.query(
-      `GRANT EXECUTE ON FUNCTION aoking_release_inventory(
-        uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid
-      ) TO ${role}`
+      `REVOKE EXECUTE ON FUNCTION ${RELEASE_INVENTORY_FUNCTION} FROM PUBLIC`
+    );
+    await client.query(
+      `GRANT EXECUTE ON FUNCTION ${RESERVE_INVENTORY_FUNCTION} TO ${role}`
+    );
+    await client.query(
+      `GRANT EXECUTE ON FUNCTION ${RELEASE_INVENTORY_FUNCTION} TO ${role}`
     );
     await client.query('COMMIT');
 

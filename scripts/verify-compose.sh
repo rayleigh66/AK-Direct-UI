@@ -389,6 +389,41 @@ RESTORED_RUNTIME_CHECK="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSW
   echo "Restored runtime role migration count mismatch: expected $EXPECTED_MIGRATION_COUNT, got $RESTORED_RUNTIME_CHECK" >&2
   exit 1
 }
+# A `pg_restore --no-privileges` restore recreates functions with the SQL
+# default ACL, which grants EXECUTE to PUBLIC. Re-provisioning after restore
+# must remove that ambient grant while both bridge functions remain executable
+# by the runtime role. Result: <PUBLIC EXECUTE count>|<runtime EXECUTE count>|<function count>.
+RESTORED_FUNCTION_ACL="$(psql_db -tAc "
+  SELECT
+    (SELECT count(*)
+       FROM pg_proc p
+       CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+      WHERE p.oid IN (
+        to_regprocedure('public.aoking_reserve_inventory(uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid)'),
+        to_regprocedure('public.aoking_release_inventory(uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid)')
+      )
+        AND acl.grantee = 0
+        AND acl.privilege_type = 'EXECUTE')
+    || '|' ||
+    (SELECT count(*)
+       FROM pg_proc p
+      WHERE p.oid IN (
+        to_regprocedure('public.aoking_reserve_inventory(uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid)'),
+        to_regprocedure('public.aoking_release_inventory(uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid)')
+      )
+        AND has_function_privilege('${SMOKE_RUNTIME_DB_USER}', p.oid, 'EXECUTE'))
+    || '|' ||
+    (SELECT count(*)
+       FROM pg_proc p
+      WHERE p.oid IN (
+        to_regprocedure('public.aoking_reserve_inventory(uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid)'),
+        to_regprocedure('public.aoking_release_inventory(uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid)')
+      ))
+" | tr -d '[:space:]')"
+[ "$RESTORED_FUNCTION_ACL" = "0|2|2" ] || {
+  echo "Restored reservation bridge ACL mismatch (expected PUBLIC/runtime/function counts 0|2|2, got $RESTORED_FUNCTION_ACL)." >&2
+  exit 1
+}
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
 
 # Media files are backed up separately from PostgreSQL. Prove the archive can
