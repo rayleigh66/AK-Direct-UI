@@ -1,6 +1,7 @@
 # Phase 4B-05 — Acceptance Evidence
 
-Status: local review branch, not pushed, no PR, no merge, no deployment.
+Status: local branch prepared for Draft PR review. Push, PR and CI status are
+determined by the actual GitHub state; this document does not assert them.
 Authoritative contract: [Phase 4B-05 Order Confirmation](PHASE_4B05_ORDER_CONFIRMATION.md).
 Baseline: `main` at `9d0d3bce992384e9fa93fb638ff3d619f4c4a3b4`.
 Branch: `feat/phase-4b05-order-confirmation`.
@@ -63,24 +64,23 @@ runs:
 - Cross-company last-stock race: one confirmation succeeds, the other returns
   409 with no reservation; revoke-first/confirm-first and re-grant/old-key
   barriers pass.
-- Latest full database suite: 117/118. The remaining failure was the new
-  concurrency barrier's wait condition: the second confirmation waiter is often
-  blocked by the first waiter's tuple lock, so a direct
-  `pg_blocking_pids(holderPid)` count saw only one. The test now walks the
-  recursive blocker chain and releases the inventory row only after both HTTP
-  transactions are queued; the outcome assertion remains exactly one success
-  and one `409 insufficient_stock`. Earlier fixture fixes in the same suite were
-  the non-existent `inventory_balances.id` (`SELECT sku_id`) and an extra
-  unused product in the expiry scenario (now uses the product returned by
-  `createConfirmedOrder`).
+- Final independent full database suite: **118/118 pass across 7 files** on
+  the committed head, including the fixed concurrency barrier. The barrier now
+  walks the recursive blocker chain so the inventory row is released only after
+  both HTTP confirmation transactions are queued; the assertion remains exactly
+  one success and one `409 insufficient_stock`, with no reservation, ledger,
+  success audit or `CONFIRMED` history for the failed order. Earlier fixture
+  fixes in the same suite were the non-existent `inventory_balances.id`
+  (`SELECT sku_id`) and an extra unused product in the expiry scenario (now uses
+  the product returned by `createConfirmedOrder`).
 - Latest complete Real regression: 20 passed and 9 skipped by existing viewport
   conditions. The new 1440 desktop and 390 mobile flows passed through
   buyer-authority grant/revoke/re-grant, price approval, acceptance,
   two-warehouse confirmation, extension, approved release and the customer
   `CANCELLED` state.
 
-The barrier fix and the final `git diff --check` were applied after the
-reviewer's 117/118 run and are queued for the reviewer's re-run.
+The committed tree passes `git diff --check`; the final database run above was
+executed by the independent reviewer on this head.
 
 ## 4. Acceptance matrix
 
@@ -97,7 +97,7 @@ reviewer's 117/118 run and are queued for the reviewer's re-run.
 | Release | Unpaid/not-shipped verification, approved-release binding in SQL, single ledger application, no double deduct |
 | Security | Router-level CSRF probes on every new write entry; foreign salesperson/customer 404; runtime-role forbidden SQL |
 | UI | Real plan/approval/acceptance/confirmation/extension/release at 1440 and 390, drawer-visible notices/alerts |
-| Delivery | Local commit only; no push/PR/merge/deploy; isolated test stack required |
+| Delivery | Local commits prepared for Draft PR review; push/PR/CI state per GitHub; no merge/deploy in this worktree; isolated test stack required |
 
 ## 5. Remaining acceptance blockers
 
@@ -112,5 +112,5 @@ These are business decisions, not implementation defects; see PRD §9:
    deactivation remains blocked).
 6. External notification channels.
 
-Production use also remains blocked on the reviewer's isolated re-run, CI, the
-pending Owner business decisions and a separately authorised deployment.
+Production use also remains blocked on the GitHub PR/CI result, the pending
+Owner business decisions and a separately authorised deployment.
