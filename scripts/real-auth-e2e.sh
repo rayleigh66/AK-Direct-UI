@@ -4,10 +4,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:18080}"
+# Capture explicit overrides before .env is sourced, then default to an
+# isolated Phase 4B-05 stack so the shared aoking-direct-*:4b04 images and the
+# existing project are never touched.
+E2E_PROJECT_OVERRIDE="${COMPOSE_PROJECT_NAME:-}"
+E2E_API_IMAGE_OVERRIDE="${API_IMAGE:-}"
+E2E_MIGRATE_IMAGE_OVERRIDE="${MIGRATE_IMAGE:-}"
+E2E_WEB_IMAGE_OVERRIDE="${WEB_IMAGE:-}"
+E2E_WEB_PORT_OVERRIDE="${WEB_PORT:-}"
+
 STAMP="$(date +%s)"
 ADMIN_EMAIL="e2e-admin-${STAMP}@example.test"
 ADMIN_PASSWORD="E2eAdminPass123-${STAMP}"
+BUSINESS_ADMIN_EMAIL="e2e-business-admin-${STAMP}@example.test"
+BUSINESS_ADMIN_PASSWORD="E2eBusinessAdminPass123-${STAMP}"
 CUSTOMER_CODE="C$(printf '%06d' $(( (STAMP % 900000) + 100000 )))"
 JAR="$(mktemp "${TMPDIR:-/tmp}/aoking-real-e2e-cookies.XXXXXX")"
 trap 'rm -f "$JAR"' EXIT
@@ -18,6 +28,16 @@ if [ -f .env ]; then
   . ./.env
   set +a
 fi
+
+export COMPOSE_PROJECT_NAME="${E2E_PROJECT_OVERRIDE:-akd4b05-test}"
+export API_IMAGE="${E2E_API_IMAGE_OVERRIDE:-akd4b05-test-api:local}"
+export MIGRATE_IMAGE="${E2E_MIGRATE_IMAGE_OVERRIDE:-akd4b05-test-migrate:local}"
+export WEB_IMAGE="${E2E_WEB_IMAGE_OVERRIDE:-akd4b05-test-web:local}"
+export WEB_PORT="${E2E_WEB_PORT_OVERRIDE:-18705}"
+# The isolated Real stack must serve the real-auth UI even if the shared .env
+# was written for the default Mock mode.
+export VITE_REAL_AUTH=true
+BASE_URL="${BASE_URL:-http://127.0.0.1:${WEB_PORT}}"
 
 echo "Checking stack readiness at $BASE_URL ..."
 curl -fsS --max-time 10 "$BASE_URL/api/ready" | grep -q '"status":"ready"' || {
@@ -87,6 +107,34 @@ printf '%s\n' "$SALES_PASSWORD" | docker compose exec -T \
 SALES_ID="$(curl -fsS -b "$JAR" -c "$JAR" "$BASE_URL/api/admin/sales-users" \
   | python3 -c "import sys,json; print(next(u['id'] for u in json.load(sys.stdin)['users'] if u['email']=='$SALES_EMAIL'))")"
 
+echo "Creating a business administrator ..."
+printf '%s\n' "$BUSINESS_ADMIN_PASSWORD" | docker compose exec -T \
+  -e MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL is required}" \
+  api node apps/api/dist/auth/create-admin.js \
+  --email "$BUSINESS_ADMIN_EMAIL" --name "E2E Business Admin" --password-stdin --no-must-change \
+  --role business_admin >/dev/null
+
+grant_buyer() {
+  local username="$1"
+  local lookup user_id company_id key
+  lookup="$(curl -fsS -b "$JAR" -c "$JAR" "$BASE_URL/api/admin/buyer-confirmation-accounts")"
+  read -r company_id user_id < <(printf '%s' "$lookup" | python3 -c "
+import sys, json
+username = sys.argv[1]
+for company in json.load(sys.stdin)['companies']:
+    for account in company['accounts']:
+        if account['username'] == username:
+            print(company['companyId'], account['customerUserId'])
+            raise SystemExit
+raise SystemExit('buyer account not found: ' + username)
+" "$username")
+  key="buyer-${STAMP}-${username}"
+  curl -fsS -o /dev/null -b "$JAR" -c "$JAR" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $TOKEN" \
+    -d "{\"customerUserId\":\"$user_id\",\"idempotencyKey\":\"$key\"}" \
+    "$BASE_URL/api/admin/companies/$company_id/buyer-authorizations"
+}
+
 ORDER_CODE="C$(printf '%06d' $(( ((STAMP + 2) % 900000) + 100000 )))"
 echo "Creating order-flow customer company $ORDER_CODE ..."
 ORDER_JSON="$(create_customer "$ORDER_CODE" "$SALES_ID")"
@@ -107,6 +155,10 @@ ORDER_B_MOBILE_JSON="$(create_subaccount "$ORDER_MOBILE_COMPANY_ID")"
 ORDER_CUSTOMER_B_USERNAME_MOBILE="$(printf '%s' "$ORDER_B_MOBILE_JSON" | json_field username)"
 ORDER_CUSTOMER_B_PASSWORD_MOBILE="$(printf '%s' "$ORDER_B_MOBILE_JSON" | json_field temporaryPassword)"
 
+echo "Granting buyer confirmation authority to the desktop and mobile A accounts ..."
+grant_buyer "$ORDER_CUSTOMER_USERNAME"
+grant_buyer "$ORDER_CUSTOMER_USERNAME_MOBILE"
+
 echo "Running real-auth Playwright flow ..."
 REAL_E2E_BASE_URL="$BASE_URL" \
 REAL_E2E_ADMIN_EMAIL="$ADMIN_EMAIL" \
@@ -119,6 +171,8 @@ REAL_E2E_CUSTOMER_USERNAME_MOBILE="$CUSTOMER_USERNAME_MOBILE" \
 REAL_E2E_CUSTOMER_PASSWORD_MOBILE="$CUSTOMER_PASSWORD_MOBILE" \
 REAL_E2E_SALES_EMAIL="$SALES_EMAIL" \
 REAL_E2E_SALES_PASSWORD="$SALES_PASSWORD" \
+REAL_E2E_BUSINESS_ADMIN_EMAIL="$BUSINESS_ADMIN_EMAIL" \
+REAL_E2E_BUSINESS_ADMIN_PASSWORD="$BUSINESS_ADMIN_PASSWORD" \
 REAL_E2E_ORDER_CUSTOMER_USERNAME="$ORDER_CUSTOMER_USERNAME" \
 REAL_E2E_ORDER_CUSTOMER_PASSWORD="$ORDER_CUSTOMER_PASSWORD" \
 REAL_E2E_ORDER_CUSTOMER_B_USERNAME="$ORDER_CUSTOMER_B_USERNAME" \

@@ -10,7 +10,6 @@ import { queueOrderNotifications } from './notifications.js';
 import {
   PRICING_MODE,
   PRICING_VERSION,
-  REFERENCE_PRICE_NOTE,
   SKU_MOQ,
   checkPrivacyViolations,
   formatOrderNumber,
@@ -22,281 +21,25 @@ import {
   validateDelivery,
   validateOrderQuantity,
   type Delivery,
-  type ShippingMethod,
 } from './validation.js';
+import {
+  ORDER_SELECT,
+  buildCustomerOrder,
+  buildInternalOrder,
+  loadLines,
+  orderRow,
+  type CustomerOrderDto,
+  type InternalOrderDto,
+  type OrderRow,
+} from './dto.js';
 
-type Queryable = Pick<DbPool, 'query'>;
-
-export interface OrderLineDto {
-  id: string;
-  lineNumber: number;
-  skuId: string;
-  productId: string;
-  productCode: string;
-  productTitle: string;
-  productTitleEn: string;
-  skuCode: string;
-  colorName: string;
-  colorNameEn: string;
-  colorHex: string;
-  quantity: number;
-  baseUnitPriceCents: number;
-  referenceUnitPriceCents: number;
-  lineReferenceCents: number;
-  priceSource: 'base_price';
-  pricingVersion: string;
-}
-
-export interface CustomerOrderHistoryDto {
-  eventType: 'SUBMITTED' | 'LINES_MODIFIED' | 'CANCELLED' | 'ADMIN_CANCELLED';
-  fromStatus: string | null;
-  toStatus: string;
-  reason: string;
-  createdAt: string;
-}
-
-export interface InternalOrderHistoryDto extends CustomerOrderHistoryDto {
-  actorType: 'customer' | 'internal' | 'system';
-  actorLabel: string;
-  details: Record<string, unknown>;
-}
-
-export interface CustomerOrderDto {
-  id: string;
-  orderNo: string;
-  status: string;
-  statusLabel: string;
-  revision: number;
-  lines: OrderLineDto[];
-  referenceTotalCents: number;
-  pricingMode: 'base_reference';
-  pricingVersion: string;
-  isReferenceQuote: true;
-  priceNote: string;
-  shippingMethod: ShippingMethod;
-  destinationCountryAlpha3: string;
-  expectedShipDate: string;
-  shippingRequirements: string;
-  customerVisibleNote: string;
-  submittedAt: string;
-  updatedAt: string;
-  cancelledAt: string | null;
-  cancelReason: string | null;
-  history: CustomerOrderHistoryDto[];
-}
-
-export interface InternalOrderDto extends Omit<CustomerOrderDto, 'history'> {
-  company: { id: string; customerCode: string; shortName: string };
-  submittedByUsername: string;
-  /** Immutable submission-time audit snapshot. */
-  assignedSalesUserId: string | null;
-  /** Current ownership used for sales access and notifications. */
-  currentAssignedSalesUserId: string | null;
-  history: InternalOrderHistoryDto[];
-}
-
-interface OrderRow {
-  id: string;
-  order_no: string;
-  company_id: string;
-  submitted_by_user_id: string;
-  assigned_sales_user_id: string | null;
-  status: string;
-  status_label: string;
-  revision: string;
-  shipping_method: ShippingMethod;
-  destination_country_alpha3: string;
-  expected_ship_date_text: string;
-  shipping_requirements: string;
-  pricing_mode: 'base_reference';
-  pricing_version: string;
-  is_reference_quote: boolean;
-  reference_total_cents: string;
-  customer_visible_note: string;
-  submitted_at: Date;
-  created_at: Date;
-  updated_at: Date;
-  cancelled_at: Date | null;
-  cancel_reason: string | null;
-  company_code: string;
-  company_name: string;
-  submitted_by_username: string;
-  current_assigned_sales_user_id: string | null;
-}
-
-interface OrderLineRow {
-  id: string;
-  line_number: number;
-  sku_id: string;
-  product_id: string;
-  product_code: string;
-  product_title: string;
-  product_title_en: string;
-  sku_code: string;
-  color_name: string;
-  color_name_en: string;
-  color_hex: string;
-  quantity: number;
-  base_unit_price_cents: number;
-  reference_unit_price_cents: number;
-  line_reference_cents: string;
-  price_source: 'base_price';
-  pricing_version: string;
-}
-
-interface HistoryRow {
-  event_type: 'SUBMITTED' | 'LINES_MODIFIED' | 'CANCELLED' | 'ADMIN_CANCELLED';
-  from_status: string | null;
-  to_status: string;
-  actor_type: 'customer' | 'internal' | 'system';
-  actor_id: string | null;
-  actor_label: string;
-  reason: string;
-  details: Record<string, unknown>;
-  created_at: Date;
-}
-
-const ORDER_SELECT = `
-  SELECT o.*, st.customer_label AS status_label,
-         to_char(o.expected_ship_date, 'YYYY-MM-DD') AS expected_ship_date_text,
-         c.customer_code AS company_code, c.short_name AS company_name,
-         c.assigned_sales_user_id AS current_assigned_sales_user_id,
-         u.username AS submitted_by_username
-  FROM orders o
-  JOIN order_statuses st ON st.id = o.status
-  JOIN customer_companies c ON c.id = o.company_id
-  JOIN customer_users u ON u.id = o.submitted_by_user_id
-`;
-
-function iso(value: Date | string | null): string | null {
-  return value ? new Date(value).toISOString() : null;
-}
-
-function orderLineDto(row: OrderLineRow): OrderLineDto {
-  return {
-    id: row.id,
-    lineNumber: row.line_number,
-    skuId: row.sku_id,
-    productId: row.product_id,
-    productCode: row.product_code,
-    productTitle: row.product_title,
-    productTitleEn: row.product_title_en,
-    skuCode: row.sku_code,
-    colorName: row.color_name,
-    colorNameEn: row.color_name_en,
-    colorHex: row.color_hex,
-    quantity: row.quantity,
-    baseUnitPriceCents: row.base_unit_price_cents,
-    referenceUnitPriceCents: row.reference_unit_price_cents,
-    lineReferenceCents: Number(row.line_reference_cents),
-    priceSource: row.price_source,
-    pricingVersion: row.pricing_version,
-  };
-}
-
-const CUSTOMER_EVENT_LABELS: Record<HistoryRow['event_type'], string> = {
-  SUBMITTED: 'Order submitted',
-  LINES_MODIFIED: 'Quantities updated',
-  CANCELLED: 'Order cancelled by customer',
-  ADMIN_CANCELLED: 'Order cancelled by AOKING Direct',
-};
-
-function customerOrderDto(
-  row: OrderRow,
-  lines: OrderLineRow[],
-  history: HistoryRow[]
-): CustomerOrderDto {
-  return {
-    id: row.id,
-    orderNo: row.order_no,
-    status: row.status,
-    statusLabel: row.status_label,
-    revision: Number(row.revision),
-    lines: lines.map(orderLineDto),
-    referenceTotalCents: Number(row.reference_total_cents),
-    pricingMode: row.pricing_mode,
-    pricingVersion: row.pricing_version,
-    isReferenceQuote: true,
-    priceNote: REFERENCE_PRICE_NOTE,
-    shippingMethod: row.shipping_method,
-    destinationCountryAlpha3: row.destination_country_alpha3.trim(),
-    expectedShipDate: row.expected_ship_date_text,
-    shippingRequirements: row.shipping_requirements,
-    customerVisibleNote: row.customer_visible_note,
-    submittedAt: new Date(row.submitted_at).toISOString(),
-    updatedAt: new Date(row.updated_at).toISOString(),
-    cancelledAt: iso(row.cancelled_at),
-    cancelReason: row.cancel_reason,
-    history: history.map(event => ({
-      eventType: event.event_type,
-      fromStatus: event.from_status,
-      toStatus: event.to_status,
-      reason: CUSTOMER_EVENT_LABELS[event.event_type] + (event.reason ? ` — ${event.reason}` : ''),
-      createdAt: new Date(event.created_at).toISOString(),
-    })),
-  };
-}
-
-function internalOrderDto(
-  row: OrderRow,
-  lines: OrderLineRow[],
-  history: HistoryRow[]
-): InternalOrderDto {
-  return {
-    ...customerOrderDto(row, lines, history),
-    company: {
-      id: row.company_id,
-      customerCode: row.company_code,
-      shortName: row.company_name,
-    },
-    submittedByUsername: row.submitted_by_username,
-    assignedSalesUserId: row.assigned_sales_user_id,
-    currentAssignedSalesUserId: row.current_assigned_sales_user_id,
-    history: history.map(event => ({
-      eventType: event.event_type,
-      fromStatus: event.from_status,
-      toStatus: event.to_status,
-      reason: event.reason,
-      createdAt: new Date(event.created_at).toISOString(),
-      actorType: event.actor_type,
-      actorLabel: event.actor_label,
-      details: event.details,
-    })),
-  };
-}
-
-async function loadLines(db: Queryable, orderId: string): Promise<OrderLineRow[]> {
-  const result = await db.query<OrderLineRow>(
-    'SELECT * FROM order_items WHERE order_id = $1 ORDER BY line_number',
-    [orderId]
-  );
-  return result.rows;
-}
-
-async function loadHistory(db: Queryable, orderId: string): Promise<HistoryRow[]> {
-  const result = await db.query<HistoryRow>(
-    'SELECT * FROM order_status_history WHERE order_id = $1 ORDER BY created_at, id',
-    [orderId]
-  );
-  return result.rows;
-}
-
-async function orderRow(db: Queryable, where: string, values: unknown[]): Promise<OrderRow | null> {
-  const result = await db.query<OrderRow>(`${ORDER_SELECT} ${where}`, values);
-  return result.rows[0] ?? null;
-}
-
-async function buildCustomerOrder(db: Queryable, row: OrderRow): Promise<CustomerOrderDto> {
-  const lines = await loadLines(db, row.id);
-  const history = await loadHistory(db, row.id);
-  return customerOrderDto(row, lines, history);
-}
-
-async function buildInternalOrder(db: Queryable, row: OrderRow): Promise<InternalOrderDto> {
-  const lines = await loadLines(db, row.id);
-  const history = await loadHistory(db, row.id);
-  return internalOrderDto(row, lines, history);
-}
+export type {
+  CustomerOrderDto,
+  CustomerOrderHistoryDto,
+  InternalOrderDto,
+  InternalOrderHistoryDto,
+  OrderLineDto,
+} from './dto.js';
 
 function actor(auth: AuthContext) {
   return {
@@ -483,7 +226,10 @@ export async function submitOrder(
         companyId,
       ]);
       if (!row) throw new HttpError(404, 'order_not_found', 'Order not found.');
-      return { order: await buildCustomerOrder(client, row), alreadySubmitted: true };
+      return {
+        order: await buildCustomerOrder(client, row, auth.user.id),
+        alreadySubmitted: true,
+      };
     }
 
     if (cartRevision !== expectedCartRevision) {
@@ -680,7 +426,10 @@ export async function submitOrder(
 
     const row = await orderRow(client, 'WHERE o.id = $1', [orderId]);
     if (!row) throw new HttpError(500, 'order_create_failed', 'The order could not be loaded.');
-    return { order: await buildCustomerOrder(client, row), alreadySubmitted: false };
+    return {
+      order: await buildCustomerOrder(client, row, auth.user.id),
+      alreadySubmitted: false,
+    };
   });
 }
 
@@ -695,7 +444,7 @@ export async function listCustomerOrders(
   );
   const result: CustomerOrderDto[] = [];
   for (const row of rows.rows) {
-    result.push(await buildCustomerOrder(pool, row));
+    result.push(await buildCustomerOrder(pool, row, auth.user.id));
   }
   return result;
 }
@@ -711,7 +460,7 @@ export async function getCustomerOrder(
     companyId,
   ]);
   if (!row) throw new HttpError(404, 'order_not_found', 'Order not found.');
-  return buildCustomerOrder(pool, row);
+  return buildCustomerOrder(pool, row, auth.user.id);
 }
 
 export interface ModifyOrderLinesInput {
@@ -830,13 +579,22 @@ export async function modifyOrderLines(
         'Only an order pending confirmation can be changed.'
       );
     }
+    if (row.current_plan_version > 0) {
+      throw new HttpError(
+        409,
+        'active_plan_exists',
+        'A sales plan is active for this order. Reject the plan or wait for the salesperson to replace it before changing quantities.',
+        undefined,
+        { planVersion: row.current_plan_version }
+      );
+    }
     if (Number(row.revision) !== expectedRevision) {
       throw new HttpError(
         409,
         'order_version_conflict',
         'The order changed in another session. Reload and retry.',
         undefined,
-        { order: await buildCustomerOrder(client, row) }
+        { order: await buildCustomerOrder(client, row, auth.user.id) }
       );
     }
 
@@ -939,7 +697,7 @@ export async function modifyOrderLines(
     });
 
     const updated = await orderRow(client, 'WHERE o.id = $1', [orderId]);
-    return buildCustomerOrder(client, updated!);
+    return buildCustomerOrder(client, updated!, auth.user.id);
   });
 }
 
@@ -984,12 +742,40 @@ export async function cancelCustomerOrder(
         'order_version_conflict',
         'The order changed in another session. Reload and retry.',
         undefined,
-        { order: await buildCustomerOrder(client, row) }
+        { order: await buildCustomerOrder(client, row, auth.user.id) }
+      );
+    }
+
+    // The legacy 4B-04 pending-cancel path stays available after a plan is
+    // proposed. It supersedes the active plan/acceptance and pending price
+    // approval in the same transaction. It can never reach a CONFIRMED order
+    // because the status check above rejects it.
+    if (row.current_plan_version > 0) {
+      await client.query(
+        `UPDATE order_plans
+         SET status = CASE WHEN status = 'REJECTED' THEN status ELSE 'SUPERSEDED' END,
+             decided_at = now()
+         WHERE order_id = $1 AND plan_version = $2`,
+        [orderId, row.current_plan_version]
+      );
+      await client.query(
+        `UPDATE order_plan_acceptances
+         SET invalidated_at = now(), invalidation_reason = 'order_cancelled'
+         WHERE order_id = $1 AND invalidated_at IS NULL`,
+        [orderId]
+      );
+      await client.query(
+        `UPDATE order_price_approvals
+         SET status = 'SUPERSEDED', decided_at = now(),
+             decision_note = 'Order cancelled before the price approval was decided.'
+         WHERE order_id = $1 AND status = 'PENDING'`,
+        [orderId]
       );
     }
 
     await client.query(
       `UPDATE orders SET status = 'CANCELLED', cancelled_at = now(), cancel_reason = $2,
+         cancellation_kind = 'CUSTOMER',
          customer_visible_note = $3, revision = revision + 1, updated_at = now()
        WHERE id = $1`,
       [orderId, reason, `The customer cancelled this pending request. Reason: ${reason}`]
@@ -1019,7 +805,7 @@ export async function cancelCustomerOrder(
     });
 
     const updated = await orderRow(client, 'WHERE o.id = $1', [orderId]);
-    return buildCustomerOrder(client, updated!);
+    return buildCustomerOrder(client, updated!, auth.user.id);
   });
 }
 

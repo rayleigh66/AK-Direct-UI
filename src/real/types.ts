@@ -227,6 +227,100 @@ export interface InternalOrderHistoryDto extends CustomerOrderHistoryDto {
   details: Record<string, unknown>;
 }
 
+export interface PlanLineDto {
+  lineNumber: number;
+  skuId: string;
+  productId: string;
+  productCode: string;
+  productTitle: string;
+  productTitleEn: string;
+  skuCode: string;
+  colorName: string;
+  colorNameEn: string;
+  colorHex: string;
+  quantity: number;
+  referenceUnitPriceCents: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
+  priceChanged: boolean;
+}
+
+export type PriceApprovalStatus =
+  | 'NOT_REQUIRED'
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'SUPERSEDED';
+
+export interface AcceptanceDto {
+  id: string;
+  outcome: 'ACCEPTED' | 'REJECTED';
+  decidedAt: string;
+  customerUsername?: string;
+  reason?: string;
+  invalidatedAt?: string | null;
+}
+
+export interface CustomerPlanDto {
+  id: string;
+  version: number;
+  status: 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'SUPERSEDED' | 'CONFIRMED';
+  planDigest: string;
+  quantityTotal: number;
+  totalCents: number;
+  requiresPriceApproval: boolean;
+  priceApprovalStatus: PriceApprovalStatus;
+  acceptanceReady: boolean;
+  canAccept: boolean;
+  lines: PlanLineDto[];
+  acceptance: AcceptanceDto | null;
+  createdAt: string;
+}
+
+export interface InternalPlanDto extends CustomerPlanDto {
+  createdByLabel: string;
+  priceApproval: {
+    id: string | null;
+    status: PriceApprovalStatus;
+    requestedByLabel: string | null;
+    requestedAt: string | null;
+    decidedByLabel: string | null;
+    decidedAt: string | null;
+    decisionNote: string | null;
+  } | null;
+}
+
+export interface ReservationLineDto {
+  lineNumber: number;
+  skuId: string;
+  productCode: string;
+  skuCode: string;
+  warehouseId: string;
+  warehouseCode: string;
+  quantity: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
+}
+
+export interface ReservationDto {
+  id: string;
+  version: number;
+  status: 'ACTIVE' | 'EXPIRED' | 'RELEASED';
+  effectiveStatus: 'ACTIVE' | 'EXPIRED' | 'RELEASED';
+  overdue: boolean;
+  confirmedAt: string;
+  expiresAt: string;
+  hardDeadlineAt: string;
+  totalExtensionHours: number;
+  releasedAt: string | null;
+  releaseReason: string | null;
+  lines?: ReservationLineDto[];
+}
+
+export interface FinalLineDto extends PlanLineDto {
+  baseReferenceUnitPriceCents: number;
+}
+
 export interface CustomerOrderDto {
   id: string;
   orderNo: string;
@@ -235,9 +329,10 @@ export interface CustomerOrderDto {
   revision: number;
   lines: OrderLineDto[];
   referenceTotalCents: number;
+  finalTotalCents: number | null;
   pricingMode: 'base_reference';
   pricingVersion: string;
-  isReferenceQuote: true;
+  isReferenceQuote: boolean;
   priceNote: string;
   shippingMethod: ShippingMethod;
   destinationCountryAlpha3: string;
@@ -248,18 +343,129 @@ export interface CustomerOrderDto {
   updatedAt: string;
   cancelledAt: string | null;
   cancelReason: string | null;
+  cancellationKind: string | null;
+  currentPlan: CustomerPlanDto | null;
+  planHistory: Array<{
+    version: number;
+    status: string;
+    totalCents: number;
+    createdAt: string;
+  }>;
+  acceptance: AcceptanceDto | null;
+  canAcceptPlan: boolean;
+  buyerAuthorized: boolean;
+  confirmation: {
+    confirmedAt: string;
+    finalTotalCents: number;
+    finalLines: FinalLineDto[];
+    reservation: ReservationDto | null;
+  } | null;
   history: CustomerOrderHistoryDto[];
 }
 
-export interface InternalOrderDto extends Omit<CustomerOrderDto, 'history'> {
+export interface InternalOrderDto extends Omit<CustomerOrderDto, 'currentPlan'> {
   company: { id: string; customerCode: string; shortName: string };
   submittedByUsername: string;
-  /** Immutable submission-time snapshot. */
   assignedSalesUserId: string | null;
-  /** Current company owner used for access and notifications. */
   currentAssignedSalesUserId: string | null;
+  currentPlan: InternalPlanDto | null;
+  confirmation: {
+    confirmedAt: string;
+    finalTotalCents: number;
+    finalLines: FinalLineDto[];
+    reservation: ReservationDto | null;
+    confirmedByLabel: string;
+  } | null;
+  pendingPriceApproval: boolean;
+  pendingExtensionRequest: boolean;
+  pendingReleaseRequest: boolean;
   history: InternalOrderHistoryDto[];
 }
+
+export type ApprovalType = 'price' | 'extension' | 'release';
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface ApprovalSummaryDto {
+  id: string;
+  type: ApprovalType;
+  orderId: string;
+  orderNo: string;
+  companyCode: string;
+  companyShortName: string;
+  status: ApprovalStatus;
+  requestedAt: string;
+  requestedByLabel: string;
+  summary: string;
+}
+
+export interface ApprovalDetailDto {
+  type: ApprovalType;
+  request: Record<string, unknown>;
+  order: InternalOrderDto;
+}
+
+export interface BuyerAuthorizationDto {
+  id: string;
+  companyId: string;
+  customerUserId: string;
+  username: string;
+  accountLetter: string;
+  status: 'active' | 'revoked';
+  version: number;
+  authorizedByLabel: string;
+  authorizedAt: string;
+  revokedByLabel: string | null;
+  revokedAt: string | null;
+  revokeReason: string | null;
+}
+
+export interface ConfirmerAccountCompanyDto {
+  companyId: string;
+  customerCode: string;
+  shortName: string;
+  accounts: Array<{
+    customerUserId: string;
+    username: string;
+    accountLetter: string;
+    status: 'active' | 'suspended';
+    activeAuthorizationId: string | null;
+  }>;
+}
+
+export interface ReservationExtensionRequestDto {
+  id: string;
+  orderId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  additionalHours: number;
+  reason: string;
+  expectedExpiresAt: string;
+  requestedByLabel: string;
+  requestedAt: string;
+  decidedByLabel: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  previousExpiresAt: string | null;
+  newExpiresAt: string | null;
+}
+
+export interface ReleaseRequestDto {
+  id: string;
+  orderId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reason: string;
+  paymentVerification: string;
+  shipmentVerification: string;
+  verificationNote: string;
+  verifiedByUserId: string;
+  verifiedAt: string;
+  requestedByLabel: string;
+  requestedAt: string;
+  decidedByLabel: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  executedAt: string | null;
+}
+
 
 export type OrderImpactKind =
   | 'product_unpublish'

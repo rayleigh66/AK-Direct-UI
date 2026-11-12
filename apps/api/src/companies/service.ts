@@ -8,9 +8,14 @@ import { generateInitialPassword, hashPassword } from '../auth/password.js';
 import type { AuthContext } from '../auth/types.js';
 import {
   enforcePendingOrderImpact,
+  recordConfirmedReservationImpact,
   type DestructiveOrderImpactOptions,
 } from '../orders/impact.js';
 import { cancelStaleSalesNotifications } from '../orders/notifications.js';
+import {
+  revokeAuthorizationsForCompany,
+  revokeAuthorizationsForCustomerUser,
+} from '../orders/authorizationService.js';
 
 export interface CompanyRow {
   id: string;
@@ -427,6 +432,21 @@ export async function setCompanyStatus(
           })
         : [];
 
+    let confirmedReservationOrders = 0;
+    if (status === 'suspended') {
+      confirmedReservationOrders = await recordConfirmedReservationImpact(
+        client,
+        auth,
+        'company_suspend',
+        companyId
+      );
+      await revokeAuthorizationsForCompany(
+        client,
+        companyId,
+        'Buyer confirmation authority was revoked because the company was suspended.'
+      );
+    }
+
     const result = await client.query<CompanyRow>(
       `UPDATE customer_companies SET status = $2, updated_at = now()
        WHERE id = $1 RETURNING *`,
@@ -443,7 +463,7 @@ export async function setCompanyStatus(
       action: status === 'suspended' ? 'SUSPEND_COMPANY' : 'REACTIVATE_COMPANY',
       targetType: 'customer_company',
       targetId: companyId,
-      details: { status, cancelledPendingOrders: affected.length },
+      details: { status, cancelledPendingOrders: affected.length, confirmedReservationOrders },
     });
     return companyDto(result.rows[0]);
   });
@@ -456,6 +476,18 @@ export async function setCustomerStatus(
   status: 'active' | 'suspended'
 ): Promise<void> {
   await withTransaction(pool, async client => {
+    const pointer = await client.query<{ company_id: string }>(
+      'SELECT company_id FROM customer_users WHERE id = $1',
+      [customerUserId]
+    );
+    if (!pointer.rows[0]) {
+      throw new HttpError(404, 'customer_not_found', 'Customer account not found.');
+    }
+    // Company first: this serialises account suspension with confirmation and
+    // authorization revocation without an order -> company reverse path.
+    await client.query('SELECT id FROM customer_companies WHERE id = $1 FOR UPDATE', [
+      pointer.rows[0].company_id,
+    ]);
     const result = await client.query(
       `UPDATE customer_users SET status = $2, updated_at = now()
        WHERE id = $1 RETURNING company_id, username`,
@@ -466,6 +498,11 @@ export async function setCustomerStatus(
       await client.query(
         'UPDATE auth_sessions SET revoked_at = now() WHERE customer_user_id = $1 AND revoked_at IS NULL',
         [customerUserId]
+      );
+      await revokeAuthorizationsForCustomerUser(
+        client,
+        customerUserId,
+        'Buyer confirmation authority was revoked because the account was suspended.'
       );
     }
     await writeAudit(client, {
@@ -495,7 +532,15 @@ export async function setBrandGrant(
     if (brand.rowCount !== 1) throw new HttpError(404, 'brand_not_found', 'Brand not found.');
 
     let affectedPendingOrders = 0;
+    let confirmedReservationOrders = 0;
     if (!granted) {
+      confirmedReservationOrders = await recordConfirmedReservationImpact(
+        client,
+        auth,
+        'brand_revoke',
+        brandId,
+        companyId
+      );
       affectedPendingOrders = (
         await enforcePendingOrderImpact(client, auth, {
           kind: 'brand_revoke',
@@ -525,7 +570,7 @@ export async function setBrandGrant(
       action: granted ? 'GRANT_BRAND' : 'REVOKE_BRAND',
       targetType: 'customer_company',
       targetId: companyId,
-      details: { brandId, cancelledPendingOrders: affectedPendingOrders },
+      details: { brandId, cancelledPendingOrders: affectedPendingOrders, confirmedReservationOrders },
     });
   });
 }

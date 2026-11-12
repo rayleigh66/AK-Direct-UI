@@ -70,8 +70,8 @@ describe('order delivery validation', () => {
     expect(orderBusinessDate(instant, 'UTC')).toBe('2026-11-05');
     expect(orderNumberDatePart(instant, 'Asia/Shanghai')).toBe('261106');
     expect(orderBusinessDate(instant, 'Asia/Shanghai')).toBe('2026-11-06');
-    expect(formatOrderNumber('261105', 1)).toBe('OD2611050001');
-    expect(formatOrderNumber('261105', 9999)).toBe('OD2611059999');
+    expect(formatOrderNumber('261105', 1)).toBe('OD-261105-0001');
+    expect(formatOrderNumber('261105', 9999)).toBe('OD-261105-9999');
     expect(() => formatOrderNumber('261105', 10000)).toThrow(/order number/i);
   });
 

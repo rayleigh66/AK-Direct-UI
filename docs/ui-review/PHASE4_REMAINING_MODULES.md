@@ -1,9 +1,13 @@
 # Formal-version remaining modules — dependency and risk order
 
-Status: planning only. No module below is implemented, no business rule is
-invented, and Phase 4B-05 has not started. The frozen rules in
-`AKD-BD-3C-001` remain authoritative. Modules marked **high risk** may only
-start after an approved contract, transaction design and counterexample tests.
+Status: planning baseline, partly superseded. Order confirmation and stock
+reservation (items 1 and 3, plus the manual price-approval path inside item 2)
+are implemented on the local `feat/phase-4b05-order-confirmation` branch; see
+[Phase 4B-05](../PHASE_4B05_ORDER_CONFIRMATION.md). Payment, shipping, WMS,
+promotions/tier pricing and external notification channels remain unimplemented
+and unapproved. The frozen rules in `AKD-BD-3C-001` remain authoritative.
+Modules marked **high risk** still require an approved contract, transaction
+design and counterexample tests before further implementation.
 
 The current formal slice adds administrator customer management on top of the
 latest PR #16. It introduces no pricing, reservation, payment or fulfilment

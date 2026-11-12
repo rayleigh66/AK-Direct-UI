@@ -21,6 +21,17 @@ export const SHIPPING_METHODS = [
   'Other',
 ] as const;
 
+/** New Phase 4B-05 format. Historical ODYYMMDDNNNN rows remain valid. */
+export const ORDER_NUMBER_PATTERN = /^OD-[0-9]{6}-[0-9]{4}$/;
+export const LEGACY_ORDER_NUMBER_PATTERN = /^OD[0-9]{10}$/;
+export const ANY_ORDER_NUMBER_PATTERN = /^(OD[0-9]{10}|OD-[0-9]{6}-[0-9]{4})$/;
+
+/** Fixed reservation policy values (engineering choice, see PRD §9). */
+export const INITIAL_RESERVATION_HOURS = 72;
+export const MAX_TOTAL_EXTENSION_HOURS = 240;
+export const HARD_RESERVATION_HOURS = INITIAL_RESERVATION_HOURS + MAX_TOTAL_EXTENSION_HOURS;
+
+
 export type ShippingMethod = (typeof SHIPPING_METHODS)[number];
 
 /**
@@ -259,7 +270,7 @@ export function formatOrderNumber(datePart: string, sequence: number): string {
   if (!/^[0-9]{6}$/.test(datePart) || !Number.isInteger(sequence) || sequence < 1 || sequence > 9999) {
     throw new HttpError(500, 'order_number_failed', 'The order number could not be generated.');
   }
-  return `OD${datePart}${String(sequence).padStart(4, '0')}`;
+  return `OD-${datePart}-${String(sequence).padStart(4, '0')}`;
 }
 
 /**

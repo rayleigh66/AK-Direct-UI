@@ -161,6 +161,68 @@ export async function provisionRuntimeRole(
     await client.query(
       `GRANT UPDATE (quantity, line_reference_cents) ON order_items TO ${role}`
     );
+
+    // Phase 4B-05 confirmation, approval, reservation and release. Every new
+    // table is append-only or status-updated; none is deletable by the API.
+    await client.query(
+      `GRANT SELECT ON buyer_confirmation_authorizations, order_plans,
+        order_plan_lines, order_price_approvals, order_plan_acceptances,
+        order_reservations, order_reservation_lines, order_reservation_ledger,
+        order_final_lines, order_confirmations, order_extension_requests,
+        order_release_requests, order_deadline_reminders,
+        order_action_idempotency TO ${role}`
+    );
+    await client.query(
+      `GRANT INSERT ON order_plans, order_plan_lines, order_price_approvals,
+        buyer_confirmation_authorizations, order_plan_acceptances,
+        order_reservations, order_reservation_lines, order_final_lines,
+        order_confirmations, order_extension_requests, order_release_requests,
+        order_deadline_reminders, order_action_idempotency TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, version, revoked_by_user_id, revoked_at, revoke_reason)
+        ON buyer_confirmation_authorizations TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_at) ON order_plans TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_by_user_id, decided_by_label, decided_at,
+        decided_plan_version, decision_note)
+        ON order_price_approvals TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (invalidated_at, invalidation_reason) ON order_plan_acceptances TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, reservation_version, expires_at, total_extension_hours,
+        released_at, released_by_user_id, release_reason, updated_at)
+        ON order_reservations TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_by_user_id, decided_by_label, decided_at,
+        decision_note, previous_expires_at, new_expires_at)
+        ON order_extension_requests TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_by_user_id, decided_by_label, decided_at,
+        decision_note, executed_at)
+        ON order_release_requests TO ${role}`
+    );
+    // Reservation lifecycle is the only writer of aggregate reserved stock,
+    // and it goes through the two narrow SECURITY DEFINER functions below.
+    // Direct `UPDATE inventory_balances SET reserved = ...` remains denied:
+    // the original column grant intentionally excludes `reserved`.
+    await client.query(
+      `GRANT EXECUTE ON FUNCTION aoking_reserve_inventory(
+        uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid
+      ) TO ${role}`
+    );
+    await client.query(
+      `GRANT EXECUTE ON FUNCTION aoking_release_inventory(
+        uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid
+      ) TO ${role}`
+    );
     await client.query('COMMIT');
 
     return { runtimeUser: input.runtimeUser, databaseName };

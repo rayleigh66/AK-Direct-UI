@@ -5,6 +5,7 @@ import { withTransaction } from '../db/transaction.js';
 import { writeAudit } from '../audit/audit.js';
 import { HttpError } from '../http/errors.js';
 import type { AuthContext } from '../auth/types.js';
+import { assertWarehouseHasNoActiveReservations } from '../orders/impact.js';
 
 const WAREHOUSE_CODE = /^[A-Z0-9][A-Z0-9-]{1,31}$/;
 const MAX_QUANTITY = 100_000_000;
@@ -133,6 +134,9 @@ export async function updateWarehouse(
       [warehouseId]
     );
     if (!existing.rows[0]) throw new HttpError(404, 'warehouse_not_found', 'Warehouse not found.');
+    if (input.active === false) {
+      await assertWarehouseHasNoActiveReservations(client, warehouseId);
+    }
     await client.query(
       `UPDATE warehouses SET
         name = COALESCE($2, name),

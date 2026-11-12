@@ -21,6 +21,12 @@ import {
   setCustomerStatus,
   setSalesAssignment,
 } from '../companies/service.js';
+import {
+  grantBuyerAuthorization,
+  listBuyerAuthorizations,
+  listConfirmerAccountCompanies,
+  revokeBuyerAuthorization,
+} from '../orders/authorizationService.js';
 
 function stringValue(value: unknown, field: string, max = 320): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -218,6 +224,55 @@ export function createAdminRouter(pool: DbPool, config: AuthConfig): Router {
       const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
       const logs = await listAuditLogs(pool, limit, offset);
       res.status(200).json({ logs, limit, offset });
+    })
+  );
+
+  // Phase 4B-05 buyer-confirmation authority. System administrators and
+  // business administrators may manage the instances; the permission alone
+  // never grants price, extension or release approval.
+  router.get(
+    '/buyer-confirmation-accounts',
+    requirePermission('orders.manage_confirmers'),
+    asyncHandler(async (req, res) => {
+      res.status(200).json({
+        companies: await listConfirmerAccountCompanies(pool, req.auth!),
+      });
+    })
+  );
+
+  router.get(
+    '/companies/:id/buyer-authorizations',
+    requirePermission('orders.manage_confirmers'),
+    asyncHandler(async (req, res) => {
+      res.status(200).json({
+        authorizations: await listBuyerAuthorizations(pool, req.auth!, req.params.id),
+      });
+    })
+  );
+
+  router.post(
+    '/companies/:id/buyer-authorizations',
+    requirePermission('orders.manage_confirmers'),
+    asyncHandler(async (req, res) => {
+      res.status(201).json({
+        authorization: await grantBuyerAuthorization(pool, req.auth!, req.params.id, {
+          customerUserId: req.body?.customerUserId,
+          idempotencyKey: req.body?.idempotencyKey,
+        }),
+      });
+    })
+  );
+
+  router.post(
+    '/buyer-authorizations/:id/revoke',
+    requirePermission('orders.manage_confirmers'),
+    asyncHandler(async (req, res) => {
+      res.status(200).json(
+        await revokeBuyerAuthorization(pool, req.auth!, req.params.id, {
+          reason: req.body?.reason,
+          idempotencyKey: req.body?.idempotencyKey,
+        })
+      );
     })
   );
 

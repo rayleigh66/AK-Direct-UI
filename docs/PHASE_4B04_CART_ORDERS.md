@@ -1,5 +1,12 @@
 # Phase 4B-04 — Company Shared Cart and Customer Orders
 
+> Superseded in part by Phase 4B-05, which adds order confirmation, price
+> approval, buyer acceptance, stock reservation, expiry/extension and full
+> release on top of this submission contract. New orders use
+> `OD-YYMMDD-NNNN`; this document's `ODYYMMDDNNNN` format and read-only sales
+> views describe the 4B-04 baseline and remain valid for historical orders.
+> See [Phase 4B-05](PHASE_4B05_ORDER_CONFIRMATION.md).
+
 Status: implementation for review. Order **confirmation**, inventory reservation, payment, shipment, WMS, promotions and customer-tier pricing are **not** implemented in this phase.
 
 ## 1. Scope

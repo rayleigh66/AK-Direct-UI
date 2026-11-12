@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { createPool } from './db/pool.js';
 import { checkReadiness } from './db/readiness.js';
+import { runExpiryScan } from './orders/reservationService.js';
 
 async function main() {
   const env = loadEnv();
@@ -21,8 +22,20 @@ async function main() {
     console.log(`AOKING Direct API listening on port ${env.port}.`);
   });
 
+  // Recoverable, bounded expiry scan. Multiple API instances are safe because
+  // the scan uses row locks, a unique reminder key and database time. Failures
+  // are retried on the next tick; they never change stock by themselves.
+  const expiryTimer = setInterval(() => {
+    runExpiryScan(pool).catch(() => {
+      // Readiness and the next scan remain the source of truth; never crash the
+      // API because the outbox/scan is temporarily unavailable.
+    });
+  }, 60_000);
+  expiryTimer.unref();
+
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}; shutting down.`);
+    clearInterval(expiryTimer);
     server.close(async () => {
       await pool.end().catch(() => {});
       process.exit(0);

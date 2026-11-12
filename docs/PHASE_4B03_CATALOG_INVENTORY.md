@@ -1,5 +1,12 @@
 # Phase 4B-03 — Persistent Catalogue, Media and Inventory
 
+> Phase 4B-05 adds order confirmation and reservation without broadening this
+> phase's inventory write API. Runtime reservation/release accounting goes
+> through two narrow SQL functions and a ledger; there is still no generic
+> `reserved` write. Warehouse deactivation remains guarded while active
+> reservation lines exist. See
+> [Phase 4B-05](PHASE_4B05_ORDER_CONFIRMATION.md).
+
 Status: implementation for review. It does **not** implement orders, cart submission, stock reservation for orders, payments, shipment, WMS, promotions or membership pricing.
 
 ## 1. Scope

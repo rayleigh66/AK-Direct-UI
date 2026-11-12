@@ -3,9 +3,15 @@ import type {
   AdminCustomerAccountDto,
   AdminCustomerCompanyDto,
   AdminSalesUserDto,
+  ApprovalDetailDto,
+  ApprovalStatus,
+  ApprovalSummaryDto,
+  ApprovalType,
   BrandDto,
+  BuyerAuthorizationDto,
   CartDto,
   CommitImportResultDto,
+  ConfirmerAccountCompanyDto,
   CustomerBrandDto,
   CustomerOrderDto,
   CustomerProductDto,
@@ -15,7 +21,10 @@ import type {
   InventoryRowDto,
   OrderImpactDto,
   OrderImpactKind,
+  PlanLineDto,
   ProductDto,
+  ReleaseRequestDto,
+  ReservationExtensionRequestDto,
   SeriesDto,
   ShippingMethod,
   SkuDto,
@@ -445,4 +454,213 @@ export async function setCompanySalesAssignment(
 /** Active salespeople for the assignment display; existing `companies.manage` route. */
 export async function listSalesUsers(): Promise<AdminSalesUserDto[]> {
   return (await apiJson<{ users: AdminSalesUserDto[] }>('GET', '/api/admin/sales-users')).users;
+}
+
+// --- Phase 4B-05 plans, acceptance, confirmation and release ---------------
+
+export async function decidePlanAcceptance(
+  id: string,
+  input: {
+    expectedRevision: number;
+    expectedPlanVersion: number;
+    planDigest: string;
+    outcome: 'ACCEPTED' | 'REJECTED';
+    reason?: string;
+    idempotencyKey: string;
+  }
+): Promise<CustomerOrderDto> {
+  return (
+    await apiJson<{ order: CustomerOrderDto }>(
+      'POST',
+      `/api/orders/${id}/plan-decision`,
+      input
+    )
+  ).order;
+}
+
+export interface SavePlanLineInput {
+  skuId: string;
+  quantity: number;
+  unitPriceCents: number;
+}
+
+export async function saveSalesPlan(
+  id: string,
+  input: {
+    expectedRevision: number;
+    expectedPlanVersion: number;
+    lines: SavePlanLineInput[];
+    idempotencyKey: string;
+  }
+): Promise<{ order: InternalOrderDto; plan: NonNullable<InternalOrderDto['currentPlan']> }> {
+  return apiJson('POST', `/api/sales/orders/${id}/plans`, input);
+}
+
+export async function confirmSalesOrder(
+  id: string,
+  input: {
+    expectedRevision: number;
+    expectedPlanVersion: number;
+    planDigest: string;
+    acceptanceId: string;
+    allocations: Array<{ skuId: string; warehouseId: string; quantity: number }>;
+    idempotencyKey: string;
+  }
+): Promise<InternalOrderDto> {
+  return (await apiJson<{ order: InternalOrderDto }>('POST', `/api/sales/orders/${id}/confirm`, input))
+    .order;
+}
+
+export async function requestOrderExtension(
+  id: string,
+  input: {
+    expectedRevision: number;
+    expectedReservationVersion: number;
+    additionalHours: number;
+    reason: string;
+    idempotencyKey: string;
+  }
+): Promise<{ order: InternalOrderDto; request: ReservationExtensionRequestDto }> {
+  return apiJson('POST', `/api/sales/orders/${id}/extension-requests`, input);
+}
+
+export async function requestOrderRelease(
+  id: string,
+  input: {
+    expectedRevision: number;
+    expectedReservationVersion: number;
+    reason: string;
+    paymentVerification: 'unpaid';
+    shipmentVerification: 'not_shipped';
+    verificationNote: string;
+    idempotencyKey: string;
+  }
+): Promise<{ order: InternalOrderDto; request: ReleaseRequestDto }> {
+  return apiJson('POST', `/api/sales/orders/${id}/release-requests`, input);
+}
+
+export async function listOrderApprovals(
+  type: ApprovalType,
+  status: ApprovalStatus = 'PENDING'
+): Promise<ApprovalSummaryDto[]> {
+  const params = new URLSearchParams({ type, status });
+  return (
+    await apiJson<{ approvals: ApprovalSummaryDto[] }>(
+      'GET',
+      `/api/admin/order-approvals?${params.toString()}`
+    )
+  ).approvals;
+}
+
+export async function getOrderApproval(
+  type: ApprovalType,
+  id: string
+): Promise<ApprovalDetailDto> {
+  return (
+    await apiJson<{ approval: ApprovalDetailDto }>(
+      'GET',
+      `/api/admin/order-approvals/${type}/${id}`
+    )
+  ).approval;
+}
+
+export async function decidePriceApproval(
+  id: string,
+  input: {
+    decision: 'APPROVED' | 'REJECTED';
+    note?: string;
+    expectedPlanVersion: number;
+    idempotencyKey: string;
+  }
+): Promise<{ order: InternalOrderDto; approval: Record<string, unknown> }> {
+  return apiJson('POST', `/api/admin/order-approvals/price/${id}/decision`, input);
+}
+
+export async function decideExtensionApproval(
+  id: string,
+  input: {
+    decision: 'APPROVED' | 'REJECTED';
+    note?: string;
+    expectedReservationVersion: number;
+    idempotencyKey: string;
+  }
+): Promise<{ order: InternalOrderDto; request: ReservationExtensionRequestDto }> {
+  return apiJson('POST', `/api/admin/order-approvals/extension/${id}/decision`, input);
+}
+
+export async function decideReleaseApproval(
+  id: string,
+  input: {
+    decision: 'APPROVED' | 'REJECTED';
+    note?: string;
+    expectedReservationVersion: number;
+    idempotencyKey: string;
+  }
+): Promise<{ order: InternalOrderDto; request: ReleaseRequestDto }> {
+  return apiJson('POST', `/api/admin/order-approvals/release/${id}/decision`, input);
+}
+
+export async function runExpiryScan(): Promise<{
+  scanned: number;
+  expired: number;
+  reminded: number;
+  skipped: number;
+}> {
+  return (await apiJson<{ result: { scanned: number; expired: number; reminded: number; skipped: number } }>(
+    'POST',
+    '/api/admin/order-approvals/expiry-scan',
+    {}
+  )).result;
+}
+
+export async function listConfirmerAccountCompanies(): Promise<ConfirmerAccountCompanyDto[]> {
+  return (
+    await apiJson<{ companies: ConfirmerAccountCompanyDto[] }>(
+      'GET',
+      '/api/admin/buyer-confirmation-accounts'
+    )
+  ).companies;
+}
+
+export async function listBuyerAuthorizations(companyId: string): Promise<BuyerAuthorizationDto[]> {
+  return (
+    await apiJson<{ authorizations: BuyerAuthorizationDto[] }>(
+      'GET',
+      `/api/admin/companies/${companyId}/buyer-authorizations`
+    )
+  ).authorizations;
+}
+
+export async function grantBuyerAuthorization(
+  companyId: string,
+  customerUserId: string,
+  idempotencyKey: string
+): Promise<BuyerAuthorizationDto> {
+  return (
+    await apiJson<{ authorization: BuyerAuthorizationDto }>(
+      'POST',
+      `/api/admin/companies/${companyId}/buyer-authorizations`,
+      { customerUserId, idempotencyKey }
+    )
+  ).authorization;
+}
+
+export async function revokeBuyerAuthorization(
+  authorizationId: string,
+  reason: string,
+  idempotencyKey: string
+): Promise<{ authorization: BuyerAuthorizationDto; invalidatedAcceptances: number }> {
+  return apiJson('POST', `/api/admin/buyer-authorizations/${authorizationId}/revoke`, {
+    reason,
+    idempotencyKey,
+  });
+}
+
+export async function listAdminWarehousesForAllocation(): Promise<WarehouseDto[]> {
+  return (await apiJson<{ warehouses: WarehouseDto[] }>('GET', '/api/admin/warehouses')).warehouses;
+}
+
+/** Salespeople have inventory.read but not inventory.manage. */
+export async function listSalesWarehouses(): Promise<WarehouseDto[]> {
+  return (await apiJson<{ warehouses: WarehouseDto[] }>('GET', '/api/sales/warehouses')).warehouses;
 }
