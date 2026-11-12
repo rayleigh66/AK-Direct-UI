@@ -243,15 +243,38 @@ compose restart api >/dev/null
 wait_http "$BASE_URL/api/ready" 200 60
 
 step "T05: migrations are idempotent"
+# Mirror the migrator's own file filter (apps/api/src/db/migrate.ts) so a new
+# migration updates this assertion automatically instead of drifting from a
+# hard-coded count.
+EXPECTED_MIGRATION_COUNT="$(python3 - "$ROOT_DIR/apps/api/migrations" <<'PY'
+import os
+import re
+import sys
+
+pattern = re.compile(r'^[0-9]{3}_[A-Za-z0-9_-]+\.sql$')
+print(sum(1 for name in os.listdir(sys.argv[1]) if pattern.fullmatch(name)))
+PY
+)"
+case "$EXPECTED_MIGRATION_COUNT" in
+  ''|*[!0-9]*)
+    echo "Could not determine the expected migration count." >&2
+    exit 1
+    ;;
+esac
+[ "$EXPECTED_MIGRATION_COUNT" -gt 0 ] || {
+  echo "No migration files found in $ROOT_DIR/apps/api/migrations." >&2
+  exit 1
+}
+
 MIGRATION_COUNT="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT" = "6" ] || {
-  echo "Expected 6 migration rows, got $MIGRATION_COUNT" >&2
+[ "$MIGRATION_COUNT" = "$EXPECTED_MIGRATION_COUNT" ] || {
+  echo "Expected $EXPECTED_MIGRATION_COUNT migration rows, got $MIGRATION_COUNT" >&2
   exit 1
 }
 compose run --rm migrate
 MIGRATION_COUNT_AGAIN="$(psql_db -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$MIGRATION_COUNT_AGAIN" = "6" ] || {
-  echo "Migration count changed after second run: $MIGRATION_COUNT_AGAIN" >&2
+[ "$MIGRATION_COUNT_AGAIN" = "$EXPECTED_MIGRATION_COUNT" ] || {
+  echo "Migration count changed after second run: expected $EXPECTED_MIGRATION_COUNT, got $MIGRATION_COUNT_AGAIN" >&2
   exit 1
 }
 
@@ -292,7 +315,7 @@ if compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0
   exit 1
 fi
 RUNTIME_MIGRATION_COUNT="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME"   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RUNTIME_MIGRATION_COUNT" = "6" ] || {
+[ "$RUNTIME_MIGRATION_COUNT" = "$EXPECTED_MIGRATION_COUNT" ] || {
   echo "Runtime role cannot read the expected migration metadata (got $RUNTIME_MIGRATION_COUNT)." >&2
   exit 1
 }
@@ -362,7 +385,10 @@ wait_http "$BASE_URL/api/ready" 200 60
 RESTORED_RUNTIME_CHECK="$(compose exec -T -e PGPASSWORD="$SMOKE_RUNTIME_DB_PASSWORD" db psql \
   -h 127.0.0.1 -U "$SMOKE_RUNTIME_DB_USER" -d "$SMOKE_DB_NAME" \
   -tAc 'SELECT count(*) FROM schema_migrations' | tr -d '[:space:]')"
-[ "$RESTORED_RUNTIME_CHECK" = "6" ]
+[ "$RESTORED_RUNTIME_CHECK" = "$EXPECTED_MIGRATION_COUNT" ] || {
+  echo "Restored runtime role migration count mismatch: expected $EXPECTED_MIGRATION_COUNT, got $RESTORED_RUNTIME_CHECK" >&2
+  exit 1
+}
 psql_db -c "DELETE FROM system_metadata WHERE key = '$BACKUP_PROBE';"
 
 # Media files are backed up separately from PostgreSQL. Prove the archive can

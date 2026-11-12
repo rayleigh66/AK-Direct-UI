@@ -4,14 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Capture explicit overrides before .env is sourced, then default to an
-# isolated Phase 4B-05 stack so the shared aoking-direct-*:4b04 images and the
-# existing project are never touched.
+# Capture explicit caller overrides before .env is sourced. Without an
+# override, the values from .env and the Compose defaults are preserved so the
+# script checks the stack that was actually started (CI uses the default
+# project and port 18080). Local 4B-05 isolation still works by exporting the
+# overrides below.
 E2E_PROJECT_OVERRIDE="${COMPOSE_PROJECT_NAME:-}"
 E2E_API_IMAGE_OVERRIDE="${API_IMAGE:-}"
 E2E_MIGRATE_IMAGE_OVERRIDE="${MIGRATE_IMAGE:-}"
 E2E_WEB_IMAGE_OVERRIDE="${WEB_IMAGE:-}"
 E2E_WEB_PORT_OVERRIDE="${WEB_PORT:-}"
+E2E_BASE_URL_OVERRIDE="${BASE_URL:-}"
 
 STAMP="$(date +%s)"
 ADMIN_EMAIL="e2e-admin-${STAMP}@example.test"
@@ -29,15 +32,28 @@ if [ -f .env ]; then
   set +a
 fi
 
-export COMPOSE_PROJECT_NAME="${E2E_PROJECT_OVERRIDE:-akd4b05-test}"
-export API_IMAGE="${E2E_API_IMAGE_OVERRIDE:-akd4b05-test-api:local}"
-export MIGRATE_IMAGE="${E2E_MIGRATE_IMAGE_OVERRIDE:-akd4b05-test-migrate:local}"
-export WEB_IMAGE="${E2E_WEB_IMAGE_OVERRIDE:-akd4b05-test-web:local}"
-export WEB_PORT="${E2E_WEB_PORT_OVERRIDE:-18705}"
-# The isolated Real stack must serve the real-auth UI even if the shared .env
-# was written for the default Mock mode.
-export VITE_REAL_AUTH=true
-BASE_URL="${BASE_URL:-http://127.0.0.1:${WEB_PORT}}"
+# Explicit caller overrides take precedence over .env; otherwise keep the
+# sourced .env values and let Compose fall back to its defaults.
+if [ -n "$E2E_PROJECT_OVERRIDE" ]; then
+  export COMPOSE_PROJECT_NAME="$E2E_PROJECT_OVERRIDE"
+fi
+if [ -n "$E2E_API_IMAGE_OVERRIDE" ]; then
+  export API_IMAGE="$E2E_API_IMAGE_OVERRIDE"
+fi
+if [ -n "$E2E_MIGRATE_IMAGE_OVERRIDE" ]; then
+  export MIGRATE_IMAGE="$E2E_MIGRATE_IMAGE_OVERRIDE"
+fi
+if [ -n "$E2E_WEB_IMAGE_OVERRIDE" ]; then
+  export WEB_IMAGE="$E2E_WEB_IMAGE_OVERRIDE"
+fi
+if [ -n "$E2E_WEB_PORT_OVERRIDE" ]; then
+  export WEB_PORT="$E2E_WEB_PORT_OVERRIDE"
+fi
+
+# This script only verifies an already-running Real-auth stack; it does not
+# build or start one. Derive BASE_URL from the port Compose was started with,
+# falling back to the legacy CI port when no port is configured.
+BASE_URL="${E2E_BASE_URL_OVERRIDE:-${BASE_URL:-http://127.0.0.1:${WEB_PORT:-18080}}}"
 
 echo "Checking stack readiness at $BASE_URL ..."
 curl -fsS --max-time 10 "$BASE_URL/api/ready" | grep -q '"status":"ready"' || {

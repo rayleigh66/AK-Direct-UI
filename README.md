@@ -109,10 +109,12 @@ MIGRATE_IMAGE=akd4b05-test-migrate:local \
 WEB_IMAGE=akd4b05-test-web:local \
 WEB_PORT=18705 VITE_REAL_AUTH=true \
 docker compose -p akd4b05-test up -d --build
+# The E2E script only verifies the running stack; pass the same project/port.
+COMPOSE_PROJECT_NAME=akd4b05-test WEB_PORT=18705 \
 bash scripts/real-auth-e2e.sh
 ```
 
-See [Phase 4B-05 Order Confirmation](docs/PHASE_4B05_ORDER_CONFIRMATION.md) for the authoritative contract, API and lock/transaction design, and [Phase 4B-05 Acceptance](docs/PHASE_4B05_ACCEPTANCE.md) for measured evidence and remaining acceptance blockers. The default Compose image tags remain `4b04`; always pass isolated image tags/project/port for 4B-05 verification.
+See [Phase 4B-05 Order Confirmation](docs/PHASE_4B05_ORDER_CONFIRMATION.md) for the authoritative contract, API and lock/transaction design, and [Phase 4B-05 Acceptance](docs/PHASE_4B05_ACCEPTANCE.md) for measured evidence and remaining acceptance blockers. The default Compose image tags remain `4b04`; always pass isolated image tags/project/port for 4B-05 verification and pass the same project/port to `scripts/real-auth-e2e.sh`.
 
 ## Scope and limitations
 
