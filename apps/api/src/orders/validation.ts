@@ -8,6 +8,21 @@ export const MAX_ORDER_TOTAL_CENTS = 9_000_000_000_000;
 export const MAX_SHIPPING_REQUIREMENTS = 1000;
 export const MAX_PRICE_CENTS = 100_000_000;
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+/** Reject malformed identifiers as a 400 instead of letting PostgreSQL 22P02 become a 500. */
+export function requireUuid(value: unknown, field: string): string {
+  if (!isUuid(value)) {
+    throw new HttpError(400, 'invalid_request', `${field} must be a UUID.`);
+  }
+  return value;
+}
+
 export const REFERENCE_PRICE_NOTE =
   'Reference quote based on the current base wholesale price. Customer-tier and promotion pricing, confirmation and stock reservation are handled by sales in Phase 4B-05.';
 export const PRICING_MODE = 'base_reference' as const;
@@ -20,6 +35,17 @@ export const SHIPPING_METHODS = [
   'Customer Pickup',
   'Other',
 ] as const;
+
+/** New Phase 4B-05 format. Historical ODYYMMDDNNNN rows remain valid. */
+export const ORDER_NUMBER_PATTERN = /^OD-[0-9]{6}-[0-9]{4}$/;
+export const LEGACY_ORDER_NUMBER_PATTERN = /^OD[0-9]{10}$/;
+export const ANY_ORDER_NUMBER_PATTERN = /^(OD[0-9]{10}|OD-[0-9]{6}-[0-9]{4})$/;
+
+/** Owner-confirmed 3 + 10 day rule, implemented as continuous hours. */
+export const INITIAL_RESERVATION_HOURS = 72;
+export const MAX_TOTAL_EXTENSION_HOURS = 240;
+export const HARD_RESERVATION_HOURS = INITIAL_RESERVATION_HOURS + MAX_TOTAL_EXTENSION_HOURS;
+
 
 export type ShippingMethod = (typeof SHIPPING_METHODS)[number];
 
@@ -259,7 +285,7 @@ export function formatOrderNumber(datePart: string, sequence: number): string {
   if (!/^[0-9]{6}$/.test(datePart) || !Number.isInteger(sequence) || sequence < 1 || sequence > 9999) {
     throw new HttpError(500, 'order_number_failed', 'The order number could not be generated.');
   }
-  return `OD${datePart}${String(sequence).padStart(4, '0')}`;
+  return `OD-${datePart}-${String(sequence).padStart(4, '0')}`;
 }
 
 /**

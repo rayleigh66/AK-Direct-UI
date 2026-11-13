@@ -4,7 +4,7 @@ import type { DbPool } from '../db/pool.js';
 import { writeAudit } from '../audit/audit.js';
 import { HttpError } from '../http/errors.js';
 import type { AuthContext } from '../auth/types.js';
-import { queueOrderNotifications } from './notifications.js';
+import { queueBusinessAdminNotifications, queueOrderNotifications } from './notifications.js';
 
 export type ImpactKind =
   | 'product_unpublish'
@@ -47,6 +47,7 @@ interface AffectedRow {
   revision: string;
   reference_total_cents: string;
   submitted_at: Date;
+  current_plan_version: string;
 }
 
 function targetKey(kind: ImpactKind, targetId: string, companyId?: string | null): string {
@@ -92,7 +93,7 @@ function conditions(
 
 const AFFECTED_SELECT = `
   SELECT o.id, o.order_no, o.company_id, c.customer_code, o.status, o.revision,
-         o.reference_total_cents, o.submitted_at
+         o.reference_total_cents, o.submitted_at, o.current_plan_version
   FROM orders o
   JOIN customer_companies c ON c.id = o.company_id
   WHERE o.status = 'PENDING_CONFIRMATION' AND
@@ -153,6 +154,124 @@ export async function findPendingOrderImpact(
     values
   );
   return impactFrom(kind, targetId, companyId ?? null, result.rows);
+}
+
+/**
+ * Phase 4B-05 guard for destructive catalogue/company actions. A confirmed
+ * order's stock is held until an approved full release or exception
+ * cancellation. The action is refused; nothing is silently released.
+ */
+export async function assertNoConfirmedReservationsAffected(
+  client: PoolClient,
+  kind: ImpactKind,
+  targetId: string,
+  companyId?: string | null
+): Promise<void> {
+  const { where, values } = conditions(kind, targetId, companyId);
+  const result = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+     FROM orders o
+     JOIN order_reservations r ON r.order_id = o.id
+     WHERE o.status = 'CONFIRMED'
+       AND r.status IN ('ACTIVE', 'EXPIRED')
+       AND ${where}`,
+    values
+  );
+  const count = Number(result.rows[0]?.count ?? 0);
+  if (count > 0) {
+    throw new HttpError(
+      409,
+      'confirmed_orders_affected',
+      `${count} confirmed order(s) still hold stock for this change. Approve a full release or exception cancellation first.`,
+      undefined,
+      { confirmedOrders: count }
+    );
+  }
+}
+
+export async function assertWarehouseHasNoActiveReservations(
+  client: PoolClient,
+  warehouseId: string
+): Promise<void> {
+  const result = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+     FROM order_reservation_lines rl
+     JOIN order_reservations r ON r.id = rl.reservation_id
+     WHERE rl.warehouse_id = $1 AND r.status IN ('ACTIVE', 'EXPIRED')`,
+    [warehouseId]
+  );
+  const count = Number(result.rows[0]?.count ?? 0);
+  if (count > 0) {
+    throw new HttpError(
+      409,
+      'confirmed_orders_affected',
+      `${count} reservation line(s) still hold stock in this warehouse. Approve a full release or exception cancellation first.`,
+      undefined,
+      { reservationLines: count }
+    );
+  }
+}
+
+/**
+ * Product/SKU/brand/company destructive actions are allowed to continue even
+ * when a confirmed order holds stock. They must never release or cancel that
+ * reservation implicitly. This records the affected confirmed orders and
+ * notifies the release approvers; the stock stays held until the explicit
+ * approved release path is used.
+ */
+export async function recordConfirmedReservationImpact(
+  client: PoolClient,
+  auth: AuthContext,
+  kind: ImpactKind,
+  targetId: string,
+  companyId?: string | null
+): Promise<number> {
+  const { where, values } = conditions(kind, targetId, companyId);
+  const rows = await client.query<{
+    id: string;
+    order_no: string;
+    company_id: string;
+    customer_code: string;
+  }>(
+    `SELECT DISTINCT o.id, o.order_no, o.company_id, c.customer_code
+     FROM orders o
+     JOIN order_reservations r ON r.order_id = o.id
+     JOIN customer_companies c ON c.id = o.company_id
+     WHERE o.status = 'CONFIRMED'
+       AND r.status IN ('ACTIVE', 'EXPIRED')
+       AND ${where}
+     ORDER BY o.id
+     LIMIT 50`,
+    values
+  );
+  if (!rows.rows.length) return 0;
+  for (const row of rows.rows) {
+    await queueBusinessAdminNotifications(client, {
+      orderId: row.id,
+      companyId: row.company_id,
+      orderNo: row.order_no,
+      companyCode: row.customer_code,
+      eventType: 'CONFIRMED_RESERVATION_EXCEPTION',
+      title: `Confirmed reservation exception · ${row.order_no}`,
+      message: `A destructive catalogue/company action (${kind}) affects confirmed order ${row.order_no}. Stock is still held; resolve it only through an approved release.`,
+      permission: 'orders.approve_release',
+    });
+  }
+  await writeAudit(client, {
+    actorType: auth.user.type,
+    actorId: auth.user.id,
+    actorLabel: auth.user.username,
+    action: 'CONFIRMED_RESERVATIONS_AFFECTED',
+    targetType: 'order',
+    targetId,
+    details: {
+      kind,
+      targetId,
+      confirmedOrders: rows.rows.length,
+      orderNos: rows.rows.map(row => row.order_no),
+    },
+  });
+  return rows.rows.length;
 }
 
 /**
@@ -247,6 +366,32 @@ export async function enforcePendingOrderImpact(
   }
 
   for (const row of rows) {
+    // A destructive administrative cancellation is a terminal order outcome.
+    // Supersede the active plan, invalidate any acceptance and close pending
+    // price approvals in this same transaction so the cancelled order never
+    // reports an "active" acceptance or an ACCEPTED plan.
+    if (Number(row.current_plan_version) > 0) {
+      await client.query(
+        `UPDATE order_plans
+         SET status = CASE WHEN status = 'REJECTED' THEN status ELSE 'SUPERSEDED' END,
+             decided_at = now()
+         WHERE order_id = $1 AND plan_version = $2`,
+        [row.id, row.current_plan_version]
+      );
+      await client.query(
+        `UPDATE order_plan_acceptances
+         SET invalidated_at = now(), invalidation_reason = 'order_cancelled'
+         WHERE order_id = $1 AND invalidated_at IS NULL`,
+        [row.id]
+      );
+      await client.query(
+        `UPDATE order_price_approvals
+         SET status = 'SUPERSEDED', decided_at = now(),
+             decision_note = 'Order cancelled by an administrative action before the price approval was decided.'
+         WHERE order_id = $1 AND status = 'PENDING'`,
+        [row.id]
+      );
+    }
     await client.query(
       `UPDATE orders SET status = 'CANCELLED', cancelled_at = now(), cancel_reason = $2,
          customer_visible_note = $3, revision = revision + 1, updated_at = now()

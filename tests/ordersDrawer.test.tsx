@@ -12,6 +12,8 @@ vi.mock('../src/real/RealWorkspace', () => ({
 
 vi.mock('../src/real/api', () => ({
   cancelCustomerOrder: vi.fn(),
+  confirmSalesOrder: vi.fn(),
+  decidePlanAcceptance: vi.fn(),
   getAdminCompany: vi.fn(),
   getAdminOrder: vi.fn(),
   getCustomerOrder: vi.fn(),
@@ -20,7 +22,11 @@ vi.mock('../src/real/api', () => ({
   listCustomerOrders: vi.fn(),
   listSalesOrders: vi.fn(),
   listSalesUsers: vi.fn(),
+  listSalesWarehouses: vi.fn(),
   modifyOrderLines: vi.fn(),
+  requestOrderExtension: vi.fn(),
+  requestOrderRelease: vi.fn(),
+  saveSalesPlan: vi.fn(),
 }));
 
 import { OrdersView } from '../src/real/views/OrdersView';
@@ -55,6 +61,7 @@ function internalOrder(overrides: Partial<InternalOrderDto> = {}): InternalOrder
     revision: 1,
     lines: [line],
     referenceTotalCents: 50400,
+    finalTotalCents: null,
     pricingMode: 'base_reference',
     pricingVersion: 'pricing-v1',
     isReferenceQuote: true,
@@ -68,6 +75,14 @@ function internalOrder(overrides: Partial<InternalOrderDto> = {}): InternalOrder
     updatedAt: '2026-11-10T08:00:00.000Z',
     cancelledAt: null,
     cancelReason: null,
+    cancellationKind: null,
+    currentPlan: null,
+    planHistory: [],
+    acceptance: null,
+    canAcceptPlan: false,
+    canRejectPlan: false,
+    buyerAuthorized: false,
+    confirmation: null,
     history: [
       {
         eventType: 'SUBMITTED',
@@ -84,6 +99,9 @@ function internalOrder(overrides: Partial<InternalOrderDto> = {}): InternalOrder
     submittedByUsername: 'AK180018A',
     assignedSalesUserId: 'sales-1',
     currentAssignedSalesUserId: 'sales-1',
+    pendingPriceApproval: false,
+    pendingExtensionRequest: false,
+    pendingReleaseRequest: false,
     ...overrides,
   };
 }
@@ -97,6 +115,7 @@ function customerOrder(overrides: Partial<CustomerOrderDto> = {}): CustomerOrder
     revision: 1,
     lines: [line],
     referenceTotalCents: 50400,
+    finalTotalCents: null,
     pricingMode: 'base_reference',
     pricingVersion: 'pricing-v1',
     isReferenceQuote: true,
@@ -110,6 +129,14 @@ function customerOrder(overrides: Partial<CustomerOrderDto> = {}): CustomerOrder
     updatedAt: '2026-11-10T08:00:00.000Z',
     cancelledAt: null,
     cancelReason: null,
+    cancellationKind: null,
+    currentPlan: null,
+    planHistory: [],
+    acceptance: null,
+    canAcceptPlan: false,
+    canRejectPlan: false,
+    buyerAuthorized: false,
+    confirmation: null,
     history: [
       {
         eventType: 'SUBMITTED',
@@ -153,6 +180,7 @@ beforeEach(() => {
     })),
   });
   vi.mocked(api.listSalesUsers).mockResolvedValue([]);
+  vi.mocked(api.listSalesWarehouses).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -177,7 +205,8 @@ describe('internal order details', () => {
     expect(drawer.textContent).toContain('Reference');
     expect(screen.getAllByTestId('order-detail')).toHaveLength(1);
     expect(drawer.className).toContain('w-full');
-    expect(screen.getByTestId('sales-confirm-disabled').textContent).toContain('Phase 4B-05');
+    expect(screen.getByTestId('sales-plan-editor')).toBeTruthy();
+    expect(screen.getByTestId('sales-plan-save')).toBeTruthy();
 
     fireEvent.click(screen.getByTestId('order-drawer-close'));
     await waitFor(() => expect(screen.queryByTestId('order-detail-drawer')).toBeNull(), {

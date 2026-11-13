@@ -5,7 +5,24 @@ export type OrderNotificationEvent =
   | 'ORDER_SUBMITTED'
   | 'ORDER_MODIFIED'
   | 'ORDER_CANCELLED'
-  | 'ORDER_CANCELLED_BY_ADMIN';
+  | 'ORDER_CANCELLED_BY_ADMIN'
+  | 'PLAN_READY'
+  | 'PLAN_ACCEPTED'
+  | 'PLAN_REJECTED'
+  | 'PRICE_APPROVAL_REQUIRED'
+  | 'PRICE_APPROVED'
+  | 'PRICE_REJECTED'
+  | 'ORDER_CONFIRMED'
+  | 'RESERVATION_EXPIRING'
+  | 'RESERVATION_EXPIRED'
+  | 'RESERVATION_EXTENDED'
+  | 'RESERVATION_RELEASED'
+  | 'EXTENSION_REQUESTED'
+  | 'EXTENSION_DECIDED'
+  | 'RELEASE_REQUESTED'
+  | 'RELEASE_DECIDED'
+  | 'CONFIRMED_RESERVATION_EXCEPTION'
+  | 'ORDER_CANCELLED_AFTER_CONFIRMATION';
 
 export interface QueueOrderNotificationsInput {
   orderId: string;
@@ -85,4 +102,70 @@ export async function cancelStaleSalesNotifications(
     [companyId, currentSalesUserId]
   );
   return result.rowCount ?? 0;
+}
+
+export interface InternalNotificationInput {
+  orderId: string;
+  companyId: string;
+  orderNo: string;
+  companyCode: string;
+  eventType: OrderNotificationEvent;
+  internalUserId: string;
+  title: string;
+  message: string;
+}
+
+/** One internal outbox row. Used for the current salesperson, business admins
+ * and deadline reminders. The audience vocabulary stays 'sales' for internal
+ * recipients; the recipient column carries the exact account. */
+export async function queueInternalNotification(
+  client: PoolClient,
+  input: InternalNotificationInput
+): Promise<void> {
+  await client.query(
+    `INSERT INTO order_notifications
+      (id, order_id, company_id, audience, internal_user_id, event_type, title, message, status)
+     VALUES ($1, $2, $3, 'sales', $4, $5, $6, $7, 'pending')`,
+    [
+      randomUUID(),
+      input.orderId,
+      input.companyId,
+      input.internalUserId,
+      input.eventType,
+      input.title,
+      input.message,
+    ]
+  );
+}
+
+/**
+ * Queue one row per active holder of the exact approval permission. Role name,
+ * `sales.read_all`, administrator status or a frontend menu are never used as a
+ * substitute: the permission table is the only source of truth.
+ */
+export async function queueBusinessAdminNotifications(
+  client: PoolClient,
+  input: Omit<InternalNotificationInput, 'internalUserId'> & { permission: string }
+): Promise<string[]> {
+  const holders = await client.query<{ id: string }>(
+    `SELECT DISTINCT iu.id
+     FROM internal_users iu
+     WHERE iu.status = 'active' AND (
+       EXISTS (
+         SELECT 1 FROM internal_user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+         WHERE ur.internal_user_id = iu.id AND rp.permission_id = $1
+       )
+       OR EXISTS (
+         SELECT 1 FROM internal_user_permissions up
+         WHERE up.internal_user_id = iu.id AND up.permission_id = $1
+       )
+     )
+     ORDER BY iu.id`,
+    [input.permission]
+  );
+  for (const holder of holders.rows) {
+    await queueInternalNotification(client, { ...input, internalUserId: holder.id });
+  }
+  return holders.rows.map(row => row.id);
 }

@@ -6,7 +6,7 @@ import { hashPassword, validatePasswordPolicy } from './password.js';
 
 const { Client } = pg;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const INTERNAL_ROLES = ['admin', 'sales', 'sales_writer', 'auditor'];
+const INTERNAL_ROLES = ['admin', 'business_admin', 'sales', 'sales_writer', 'auditor'];
 
 function argValue(name: string): string | undefined {
   const index = process.argv.indexOf(name);

@@ -3,6 +3,8 @@ import { ArrowLeft, ClipboardList, RefreshCw, ShieldAlert } from 'lucide-react';
 import { AuthApiError } from '../../auth/api';
 import {
   cancelCustomerOrder,
+  confirmSalesOrder,
+  decidePlanAcceptance,
   getAdminCompany,
   getAdminOrder,
   getCustomerOrder,
@@ -11,7 +13,11 @@ import {
   listCustomerOrders,
   listSalesOrders,
   listSalesUsers,
+  listSalesWarehouses,
   modifyOrderLines,
+  requestOrderExtension,
+  requestOrderRelease,
+  saveSalesPlan,
 } from '../api';
 import { usdFromCents } from '../cart';
 import type {
@@ -19,6 +25,8 @@ import type {
   AdminSalesUserDto,
   CustomerOrderDto,
   InternalOrderDto,
+  InternalPlanDto,
+  WarehouseDto,
 } from '../types';
 import { ErrorBlock, LoadingBlock } from '../RealWorkspace';
 import { OrderStatusBadge } from '../../components/ui/OrderStatusBadge';
@@ -27,7 +35,7 @@ import { shippingMethodLabel } from '../../utils/orderStatus';
 import { QuantityField } from '../../components/ui/QuantityField';
 import { SideDrawer } from '../../components/ui/SideDrawer';
 import { HelpTooltip } from '../../components/ui/HelpTooltip';
-import { formatEnglishDate } from '../../utils/dateDisplay';
+import { formatEnglishDate, formatEnglishDateTime } from '../../utils/dateDisplay';
 import { useInternalLanguage } from '../internalLanguage';
 
 type OrderView = CustomerOrderDto | InternalOrderDto;
@@ -60,9 +68,32 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
   const [customerLoading, setCustomerLoading] = useState(false);
   const [customerError, setCustomerError] = useState('');
   const [salesUsers, setSalesUsers] = useState<AdminSalesUserDto[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
+  const [planDrafts, setPlanDrafts] = useState<
+    Record<string, { quantity: string; unitPrice: string }>
+  >({});
+  const [allocations, setAllocations] = useState<
+    Record<string, Array<{ warehouseId: string; quantity: string }>>
+  >({});
+  const [rejectReason, setRejectReason] = useState('');
+  const [extensionHours, setExtensionHours] = useState('24');
+  const [extensionReason, setExtensionReason] = useState('');
+  const [releaseReason, setReleaseReason] = useState('');
+  const [verificationNote, setVerificationNote] = useState('');
+  const [verifiedUnpaid, setVerifiedUnpaid] = useState(false);
+  const [verifiedNotShipped, setVerifiedNotShipped] = useState(false);
   const detailRequest = useRef(0);
   const customerRequest = useRef(0);
   const { language } = useInternalLanguage();
+
+  // Action feedback lives at the top of the scrollable drawer body. Move the
+  // body back to that position so a success/error after a long form is visible.
+  useEffect(() => {
+    if (!notice && !actionError) return;
+    const body = document.querySelector('[data-testid="order-detail-drawer-body"]');
+    (body as HTMLElement | null)?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }, [notice, actionError]);
+
   const text = (en: string, zh: string) => (scope === 'customer' ? en : language === 'zh' ? zh : en);
   const localizedError = (value: string) =>
     scope === 'customer' || language === 'en' || /[\u3400-\u9fff]/.test(value)
@@ -97,7 +128,17 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       .catch(() => setSalesUsers([]));
   }, [scope]);
 
-  const loadDetail = async (id: string): Promise<void> => {
+  useEffect(() => {
+    if (scope !== 'sales') return;
+    listSalesWarehouses()
+      .then(setWarehouses)
+      .catch(() => setWarehouses([]));
+  }, [scope]);
+
+  const loadDetail = async (
+    id: string,
+    options: { preserveFeedback?: boolean; preserveDrafts?: boolean } = {}
+  ): Promise<void> => {
     const token = ++detailRequest.current;
     if (scope !== 'customer') {
       // Internal order details open in the shared right-side drawer for both
@@ -108,8 +149,16 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
     }
     setSelectedId(id);
     setDetailLoading(true);
-    setActionError('');
-    setCancelOpen(false);
+    if (!options.preserveFeedback) {
+      setActionError('');
+      setNotice('');
+      setCancelOpen(false);
+      setExtensionReason('');
+      setReleaseReason('');
+      setVerificationNote('');
+      setVerifiedUnpaid(false);
+      setVerifiedNotShipped(false);
+    }
     try {
       const item =
         scope === 'customer'
@@ -119,9 +168,37 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
             : await getAdminOrder(id);
       if (token !== detailRequest.current) return;
       setDetail(item);
-      setLineDrafts(
-        Object.fromEntries(item.lines.map(line => [line.skuId, String(line.quantity)]))
-      );
+      if (!options.preserveDrafts) {
+        setLineDrafts(
+          Object.fromEntries(item.lines.map(line => [line.skuId, String(line.quantity)]))
+        );
+        const planLines = item.currentPlan?.lines;
+        const draftLines = planLines?.length ? planLines : item.lines;
+        setPlanDrafts(
+          Object.fromEntries(
+            draftLines.map(line => {
+              const unitPriceCents =
+                'unitPriceCents' in line ? line.unitPriceCents : line.referenceUnitPriceCents;
+              return [
+                line.skuId,
+                {
+                  quantity: String(line.quantity),
+                  unitPrice: (unitPriceCents / 100).toFixed(2),
+                },
+              ];
+            })
+          )
+        );
+        const firstWarehouse = warehouses[0]?.id ?? '';
+        setAllocations(
+          Object.fromEntries(
+            draftLines.map(line => [
+              line.skuId,
+              [{ warehouseId: firstWarehouse, quantity: String(line.quantity) }],
+            ])
+          )
+        );
+      }
     } catch (err) {
       if (token !== detailRequest.current) return;
       setActionError(err instanceof Error ? err.message : 'The order could not be loaded.');
@@ -181,9 +258,14 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
     return user ? `${user.name} · ${user.email}` : id;
   };
 
-  const refreshAll = async (id?: string) => {
+  const refreshAll = async (id?: string, preserveFeedback = false) => {
     await loadList();
-    if (id) await loadDetail(id);
+    if (id) {
+      await loadDetail(id, {
+        preserveFeedback,
+        preserveDrafts: preserveFeedback,
+      });
+    }
   };
 
   const saveLines = async () => {
@@ -215,7 +297,7 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       setActionError(
         err instanceof AuthApiError ? err.message : err instanceof Error ? err.message : 'Update failed.'
       );
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -240,10 +322,239 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
       setActionError(
         err instanceof AuthApiError ? err.message : err instanceof Error ? err.message : 'Cancellation failed.'
       );
-      await refreshAll(detail.id).catch(() => {});
+      await refreshAll(detail.id, true).catch(() => {});
     } finally {
       setBusy(false);
     }
+  };
+
+  const idempotencyKey = () =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const savePlan = async () => {
+    if (!detail || busy || !isInternal(detail)) return;
+    setBusy(true);
+    setActionError('');
+    setNotice('');
+    try {
+      const lines = detail.lines.map(line => {
+        const draft = planDrafts[line.skuId];
+        return {
+          skuId: line.skuId,
+          quantity: Number(draft?.quantity ?? line.quantity),
+          unitPriceCents: Math.round(Number(draft?.unitPrice ?? '0') * 100),
+        };
+      });
+      const result = await saveSalesPlan(detail.id, {
+        expectedRevision: detail.revision,
+        expectedPlanVersion: detail.currentPlan?.version ?? 0,
+        lines,
+        idempotencyKey: idempotencyKey(),
+      });
+      setDetail(result.order);
+      setNotice(
+        text(
+          `Plan v${result.plan.version} saved. ${
+            result.plan.priceApprovalStatus === 'PENDING'
+              ? 'A business administrator must approve the price change.'
+              : result.plan.priceApprovalStatus === 'REJECTED'
+                ? 'The current price state is still declined; change the price to request a new approval.'
+                : 'The plan is ready for the buyer confirmer.'
+          }`,
+          `方案 v${result.plan.version} 已保存。`
+        )
+      );
+      await loadList();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Plan save failed.');
+      await refreshAll(detail.id, true).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const decidePlan = async (outcome: 'ACCEPTED' | 'REJECTED') => {
+    if (!detail || busy || !detail.currentPlan) return;
+    setBusy(true);
+    setActionError('');
+    setNotice('');
+    try {
+      const updated = await decidePlanAcceptance(detail.id, {
+        expectedRevision: detail.revision,
+        expectedPlanVersion: detail.currentPlan.version,
+        planDigest: detail.currentPlan.planDigest,
+        outcome,
+        reason: outcome === 'REJECTED' ? rejectReason.trim() : undefined,
+        idempotencyKey: idempotencyKey(),
+      });
+      setDetail(updated);
+      setRejectReason('');
+      setNotice(
+        outcome === 'ACCEPTED'
+          ? text('Plan accepted. Sales can now confirm the order.', '方案已认可，业务员现在可以确认订单。')
+          : text('Plan returned to sales.', '方案已退回业务员。')
+      );
+      await loadList();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Plan decision failed.');
+      await refreshAll(detail.id, true).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmWithAllocations = async () => {
+    if (!detail || busy || !detail.currentPlan || !detail.acceptance) return;
+    setBusy(true);
+    setActionError('');
+    setNotice('');
+    try {
+      const payload = detail.currentPlan.lines.flatMap(line =>
+        (allocations[line.skuId] ?? [])
+          .filter(row => row.warehouseId && Number(row.quantity) > 0)
+          .map(row => ({
+            skuId: line.skuId,
+            warehouseId: row.warehouseId,
+            quantity: Number(row.quantity),
+          }))
+      );
+      const updated = await confirmSalesOrder(detail.id, {
+        expectedRevision: detail.revision,
+        expectedPlanVersion: detail.currentPlan.version,
+        planDigest: detail.currentPlan.planDigest,
+        acceptanceId: detail.acceptance.id,
+        allocations: payload,
+        idempotencyKey: idempotencyKey(),
+      });
+      setDetail(updated);
+      setNotice(text('Order confirmed and stock reserved.', '订单已确认并预占库存。'));
+      await loadList();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Confirmation failed.');
+      await refreshAll(detail.id, true).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitExtension = async () => {
+    if (!detail || busy || !detail.confirmation?.reservation) return;
+    if (!extensionReason.trim()) {
+      setActionError(text('Enter a reason for the extension request.', '请填写延期原因。'));
+      return;
+    }
+    if (
+      !Number.isInteger(Number(extensionHours)) ||
+      Number(extensionHours) < 1 ||
+      Number(extensionHours) > 240
+    ) {
+      setActionError(
+        text('Enter a whole number of hours from 1 to 240.', '请输入 1 至 240 的整数小时。')
+      );
+      return;
+    }
+    setBusy(true);
+    setActionError('');
+    setNotice('');
+    try {
+      const result = await requestOrderExtension(detail.id, {
+        expectedRevision: detail.revision,
+        expectedReservationVersion: detail.confirmation.reservation.version,
+        additionalHours: Number(extensionHours),
+        reason: extensionReason.trim(),
+        idempotencyKey: idempotencyKey(),
+      });
+      setDetail(result.order);
+      setExtensionReason('');
+      setNotice(text('Extension request submitted for approval.', '延期申请已提交审批。'));
+      await loadList();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Extension request failed.');
+      await refreshAll(detail.id, true).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitRelease = async () => {
+    if (!detail || busy || !detail.confirmation?.reservation) return;
+    if (!verifiedUnpaid || !verifiedNotShipped) {
+      setActionError(
+        text(
+          'Confirm that payment was verified as unpaid and the goods as not shipped.',
+          '请确认已核实未付款且未发货。'
+        )
+      );
+      return;
+    }
+    if (!releaseReason.trim()) {
+      setActionError(text('Enter a release reason.', '请填写释放原因。'));
+      return;
+    }
+    if (!verificationNote.trim()) {
+      setActionError(
+        text('Record the manual verification note.', '请填写人工核实说明。')
+      );
+      return;
+    }
+    setBusy(true);
+    setActionError('');
+    setNotice('');
+    try {
+      const result = await requestOrderRelease(detail.id, {
+        expectedRevision: detail.revision,
+        expectedReservationVersion: detail.confirmation.reservation.version,
+        reason: releaseReason.trim(),
+        paymentVerification: 'unpaid',
+        shipmentVerification: 'not_shipped',
+        verificationNote: verificationNote.trim(),
+        idempotencyKey: idempotencyKey(),
+      });
+      setDetail(result.order);
+      setReleaseReason('');
+      setVerificationNote('');
+      setVerifiedUnpaid(false);
+      setVerifiedNotShipped(false);
+      setNotice(text('Release request submitted for approval.', '释放申请已提交审批。'));
+      await loadList();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Release request failed.');
+      await refreshAll(detail.id, true).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateAllocation = (
+    skuId: string,
+    index: number,
+    patch: { warehouseId?: string; quantity?: string }
+  ) => {
+    setAllocations(prev => ({
+      ...prev,
+      [skuId]: (prev[skuId] ?? []).map((row, rowIndex) =>
+        rowIndex === index ? { ...row, ...patch } : row
+      ),
+    }));
+  };
+
+  const addAllocationRow = (skuId: string, quantity: number) => {
+    setAllocations(prev => ({
+      ...prev,
+      [skuId]: [
+        ...(prev[skuId] ?? []),
+        { warehouseId: warehouses[0]?.id ?? '', quantity: String(quantity) },
+      ],
+    }));
+  };
+
+  const removeAllocationRow = (skuId: string, index: number) => {
+    setAllocations(prev => ({
+      ...prev,
+      [skuId]: (prev[skuId] ?? []).filter((_row, rowIndex) => rowIndex !== index),
+    }));
   };
 
   if (loading) {
@@ -573,7 +884,9 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                         {line.productTitleEn} · {line.colorNameEn}
                       </div>
                     </div>
-                    {scope === 'customer' && detail.status === 'PENDING_CONFIRMATION' ? (
+                    {scope === 'customer' &&
+                    detail.status === 'PENDING_CONFIRMATION' &&
+                    !detail.currentPlan ? (
                       <label className="text-[11px] text-slate-500">
                         {text('Qty', '数量')}
                         <QuantityField
@@ -611,6 +924,455 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                   </HelpTooltip>
                 </p>
               </div>
+
+              {detail.currentPlan && (
+                <div
+                  data-testid="order-plan"
+                  className="rounded-xl border border-slate-200 p-3 space-y-2 text-xs"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold">
+                      {text('Sales plan', '销售方案')} v{detail.currentPlan.version}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold">
+                      {detail.currentPlan.status}
+                    </span>
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      {text('Price approval', '价格审批')}: {detail.currentPlan.priceApprovalStatus}
+                    </span>
+                    <span className="ml-auto font-extrabold text-[#ff681e]">
+                      {usdFromCents(detail.currentPlan.totalCents)}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {detail.currentPlan.lines.map(line => (
+                      <div
+                        key={`plan-${line.skuId}`}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 p-2"
+                      >
+                        <span className="font-mono text-[10px] text-slate-400">
+                          {line.productCode} · {line.skuCode}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate font-semibold">
+                          {line.productTitleEn}
+                        </span>
+                        <span>{line.quantity} PCS</span>
+                        <span className="w-20 text-right">
+                          {usdFromCents(line.unitPriceCents)} / pc
+                        </span>
+                        <span className="w-24 text-right font-bold">
+                          {usdFromCents(line.lineTotalCents)}
+                        </span>
+                        {line.priceChanged && (
+                          <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                            {text('price changed', '已改价')}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {detail.currentPlan.priceApprovalStatus === 'PENDING' && (
+                    <div className="rounded-lg bg-amber-50 p-2 text-amber-800">
+                      {text(
+                        'A business administrator must approve this price change before the buyer can accept.',
+                        '业务管理员必须先批准本次改价，采购账号才能认可。'
+                      )}
+                    </div>
+                  )}
+                  {detail.currentPlan.priceApprovalStatus === 'REJECTED' && (
+                    <div className="rounded-lg bg-rose-50 p-2 text-rose-800">
+                      {text(
+                        'The price change was declined. Sales must submit a new price state.',
+                        '改价已被驳回，业务员必须提交新的价格状态。'
+                      )}
+                    </div>
+                  )}
+                  {detail.acceptance && (
+                    <div className="rounded-lg bg-emerald-50 p-2 text-emerald-800">
+                      {text('Buyer acceptance', '采购认可')}: {detail.acceptance.outcome} ·{' '}
+                      {formatEnglishDate(detail.acceptance.decidedAt)}
+                    </div>
+                  )}
+                  {detail.currentPlan.status === 'REJECTED' &&
+                    detail.currentPlan.priceApprovalStatus !== 'REJECTED' && (
+                      <div className="rounded-lg bg-rose-50 p-2 text-rose-800">
+                        {text(
+                          'The buyer returned this plan to sales.',
+                          '采购账号已将方案退回业务员。'
+                        )}
+                      </div>
+                    )}
+                  {scope === 'customer' &&
+                    detail.status === 'PENDING_CONFIRMATION' &&
+                    (detail.canAcceptPlan || detail.canRejectPlan) && (
+                      <div className="space-y-2 border-t border-slate-100 pt-2">
+                        <div className="flex flex-wrap gap-2">
+                          {detail.canAcceptPlan && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void decidePlan('ACCEPTED')}
+                              data-testid="order-plan-accept"
+                              className="min-h-[40px] rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white disabled:opacity-50"
+                            >
+                              {text('Accept this plan', '认可该方案')}
+                            </button>
+                          )}
+                          {detail.canRejectPlan && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void decidePlan('REJECTED')}
+                              data-testid="order-plan-reject"
+                              className="min-h-[40px] rounded-xl border border-rose-300 px-4 text-xs font-bold text-rose-700 disabled:opacity-50"
+                            >
+                              {text('Reject and return to sales', '拒绝并退回业务员')}
+                            </button>
+                          )}
+                        </div>
+                        {detail.canRejectPlan && (
+                          <input
+                            value={rejectReason}
+                            onChange={event => setRejectReason(event.target.value)}
+                            maxLength={1000}
+                            placeholder={text('Rejection reason (optional)', '拒绝原因（选填）')}
+                            className="h-10 w-full rounded-xl border border-slate-300 px-3 text-xs"
+                            data-testid="order-plan-reject-reason"
+                          />
+                        )}
+                      </div>
+                    )}
+                </div>
+              )}
+
+              {detail.confirmation && (
+                <div
+                  data-testid="order-confirmation"
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold">{text('Confirmed order', '已确认订单')}</span>
+                    <span className="ml-auto text-base font-extrabold">
+                      {usdFromCents(detail.confirmation.finalTotalCents)}
+                    </span>
+                  </div>
+                  {detail.confirmation.reservation && (
+                    <div className="grid gap-1 sm:grid-cols-2">
+                      <div>
+                        {text('Reservation', '预占')}:{' '}
+                        <span
+                          data-testid="reservation-status"
+                          className={
+                            detail.confirmation.reservation.effectiveStatus === 'EXPIRED'
+                              ? 'font-bold text-rose-700'
+                              : 'font-bold'
+                          }
+                        >
+                          {detail.confirmation.reservation.effectiveStatus}
+                        </span>
+                      </div>
+                      <div>
+                        {text('Expires', '到期')}:{' '}
+                        {formatEnglishDateTime(detail.confirmation.reservation.expiresAt)}
+                      </div>
+                      <div>
+                        {text('Hard deadline', '最迟期限')}:{' '}
+                        {formatEnglishDateTime(detail.confirmation.reservation.hardDeadlineAt)}
+                      </div>
+                      <div>
+                        {text('Approved extension', '已批延期')}:{' '}
+                        {detail.confirmation.reservation.totalExtensionHours}h
+                      </div>
+                      {detail.confirmation.reservation.overdue && (
+                        <div className="font-bold text-rose-700 sm:col-span-2">
+                          {text(
+                            'This reservation is overdue. Stock is still held and requires an approved extension or release.',
+                            '预占已逾期。库存仍被占用，需要审批延期或释放。'
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {scope === 'sales' &&
+                isInternal(detail) &&
+                detail.status === 'PENDING_CONFIRMATION' && (
+                  <div
+                    data-testid="sales-plan-editor"
+                    className="rounded-xl border border-slate-200 p-3 space-y-2 text-xs"
+                  >
+                    <div className="font-bold">
+                      {text('Build the complete plan', '拟定完整方案')}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {text(
+                        'Every line is required. Any manual unit-price change, in either direction, creates a new price approval.',
+                        '必须包含全部订单行。任何人工单价改动（升降皆然）都会生成新的价格审批。'
+                      )}
+                    </div>
+                    {detail.lines.map(line => (
+                      <div
+                        key={`plan-edit-${line.skuId}`}
+                        className="flex flex-wrap items-center gap-2"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
+                          {line.skuCode}
+                        </span>
+                        <label className="text-[10px] text-slate-500">
+                          {text('Qty', '数量')}
+                          <input
+                            type="number"
+                            min={10}
+                            value={planDrafts[line.skuId]?.quantity ?? ''}
+                            onChange={event =>
+                              setPlanDrafts(prev => ({
+                                ...prev,
+                                [line.skuId]: {
+                                  ...(prev[line.skuId] ?? { unitPrice: '' }),
+                                  quantity: event.target.value,
+                                },
+                              }))
+                            }
+                            data-testid={`plan-qty-${line.skuCode}`}
+                            className="ml-1 h-9 w-20 rounded-lg border border-slate-300 px-2 text-center"
+                          />
+                        </label>
+                        <label className="text-[10px] text-slate-500">
+                          {text('USD / pc', '美元单价')}
+                          <input
+                            type="number"
+                            min={0.01}
+                            step="0.01"
+                            value={planDrafts[line.skuId]?.unitPrice ?? ''}
+                            onChange={event =>
+                              setPlanDrafts(prev => ({
+                                ...prev,
+                                [line.skuId]: {
+                                  ...(prev[line.skuId] ?? { quantity: '' }),
+                                  unitPrice: event.target.value,
+                                },
+                              }))
+                            }
+                            data-testid={`plan-price-${line.skuCode}`}
+                            className="ml-1 h-9 w-24 rounded-lg border border-slate-300 px-2 text-right"
+                          />
+                        </label>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void savePlan()}
+                      data-testid="sales-plan-save"
+                      className="min-h-[40px] rounded-xl bg-slate-900 px-4 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      {text(
+                        `Save plan v${(detail.currentPlan?.version ?? 0) + 1}`,
+                        `保存方案 v${(detail.currentPlan?.version ?? 0) + 1}`
+                      )}
+                    </button>
+                  </div>
+                )}
+
+              {scope === 'sales' &&
+                isInternal(detail) &&
+                detail.status === 'PENDING_CONFIRMATION' &&
+                detail.currentPlan?.status === 'ACCEPTED' &&
+                detail.acceptance && (
+                  <div
+                    data-testid="sales-confirm"
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 space-y-2 text-xs"
+                  >
+                    <div className="font-bold">
+                      {text('Confirm with warehouse allocation', '按仓库分配并正式确认')}
+                    </div>
+                    <div className="text-[10px] text-emerald-900">
+                      {text(
+                        'Each line allocation must add up to the accepted quantity. A shortage in any warehouse fails the whole order.',
+                        '每行分仓数量合计必须等于已认可数量。任一仓库存不足则整单失败。'
+                      )}
+                    </div>
+                    {detail.currentPlan.lines.map(line => (
+                      <div key={`alloc-${line.skuId}`} className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
+                            {line.skuCode} · {line.quantity} PCS
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => addAllocationRow(line.skuId, 0)}
+                            data-testid={`alloc-add-${line.skuCode}`}
+                            className="rounded-lg border border-emerald-300 px-2 py-1 text-[10px] font-semibold"
+                          >
+                            {text('Add warehouse', '添加仓库')}
+                          </button>
+                        </div>
+                        {(allocations[line.skuId] ?? []).map((row, index) => (
+                          <div key={`${line.skuId}-${index}`} className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={row.warehouseId}
+                              onChange={event =>
+                                updateAllocation(line.skuId, index, {
+                                  warehouseId: event.target.value,
+                                })
+                              }
+                              data-testid={`alloc-warehouse-${line.skuCode}-${index}`}
+                              className="h-9 min-w-[150px] rounded-lg border border-emerald-300 px-2"
+                            >
+                              <option value="">{text('Select warehouse', '选择仓库')}</option>
+                              {warehouses.filter(item => item.active).map(warehouse => (
+                                <option key={warehouse.id} value={warehouse.id}>
+                                  {warehouse.code} · {warehouse.nameEn}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              min={1}
+                              value={row.quantity}
+                              onChange={event =>
+                                updateAllocation(line.skuId, index, {
+                                  quantity: event.target.value,
+                                })
+                              }
+                              data-testid={`alloc-qty-${line.skuCode}-${index}`}
+                              className="h-9 w-20 rounded-lg border border-emerald-300 px-2 text-center"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeAllocationRow(line.skuId, index)}
+                              className="rounded-lg border border-emerald-300 px-2 py-1 text-[10px]"
+                            >
+                              {text('Remove', '移除')}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void confirmWithAllocations()}
+                      data-testid="sales-confirm-submit"
+                      className="min-h-[42px] rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      {text('Confirm order and reserve stock', '确认订单并预占库存')}
+                    </button>
+                  </div>
+                )}
+
+              {scope === 'sales' &&
+                isInternal(detail) &&
+                detail.status === 'CONFIRMED' &&
+                detail.confirmation?.reservation && (
+                  <div
+                    data-testid="sales-reservation-actions"
+                    className="rounded-xl border border-slate-200 p-3 space-y-3 text-xs"
+                  >
+                    <div>
+                      <div className="font-bold">{text('Request extension', '申请延期')}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={240}
+                          value={extensionHours}
+                          onChange={event => setExtensionHours(event.target.value)}
+                          data-testid="extension-hours"
+                          className="h-9 w-20 rounded-lg border border-slate-300 px-2 text-center"
+                        />
+                        <input
+                          value={extensionReason}
+                          onChange={event => setExtensionReason(event.target.value)}
+                          maxLength={1000}
+                          placeholder={text('Reason', '原因')}
+                          data-testid="extension-reason"
+                          className="h-9 min-w-[180px] flex-1 rounded-lg border border-slate-300 px-2"
+                        />
+                        <button
+                          type="button"
+                          disabled={busy || detail.pendingExtensionRequest}
+                          onClick={() => void submitExtension()}
+                          data-testid="extension-submit"
+                          className="min-h-[36px] rounded-lg bg-slate-900 px-3 font-semibold text-white disabled:opacity-50"
+                        >
+                          {text('Request', '提交')}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-bold">
+                        {text('Request full release / exception cancellation', '申请整单释放/异常取消')}
+                      </div>
+                      <div className="mt-1 space-y-1">
+                        <textarea
+                          value={releaseReason}
+                          onChange={event => setReleaseReason(event.target.value)}
+                          maxLength={500}
+                          placeholder={text('Release reason', '释放原因')}
+                          data-testid="release-reason"
+                          className="w-full rounded-lg border border-slate-300 p-2"
+                          rows={2}
+                        />
+                        <textarea
+                          value={verificationNote}
+                          onChange={event => setVerificationNote(event.target.value)}
+                          maxLength={1000}
+                          placeholder={text(
+                            'Manual verification note: explicitly confirm unpaid and not shipped',
+                            '人工核实说明：必须明确未付款、未出库'
+                          )}
+                          data-testid="release-verification-note"
+                          className="w-full rounded-lg border border-slate-300 p-2"
+                          rows={2}
+                        />
+                        <label className="flex items-center gap-2 text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={verifiedUnpaid}
+                            onChange={event => setVerifiedUnpaid(event.target.checked)}
+                            data-testid="release-verify-unpaid"
+                            className="h-4 w-4"
+                          />
+                          {text(
+                            'I manually verified that payment is unpaid.',
+                            '我已人工核实付款状态为未付款。'
+                          )}
+                        </label>
+                        <label className="flex items-center gap-2 text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={verifiedNotShipped}
+                            onChange={event => setVerifiedNotShipped(event.target.checked)}
+                            data-testid="release-verify-not-shipped"
+                            className="h-4 w-4"
+                          />
+                          {text(
+                            'I manually verified that the goods are not shipped.',
+                            '我已人工核实货物未出库。'
+                          )}
+                        </label>
+                        <div className="text-[10px] text-rose-700">
+                          {text(
+                            'Only a verified unpaid / not-shipped order may use this path. Payment or shipment evidence blocks it.',
+                            '仅核实为未付款、未出库的订单可走此路径；已付款或已出库会被拒绝。'
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy || detail.pendingReleaseRequest}
+                          onClick={() => void submitRelease()}
+                          data-testid="release-submit"
+                          className="min-h-[36px] rounded-lg border border-rose-300 px-3 font-semibold text-rose-700 disabled:opacity-50"
+                        >
+                          {text('Submit for approval', '提交审批')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
               <div className="grid sm:grid-cols-2 gap-2 text-xs">
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
@@ -670,15 +1432,17 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
 
               {scope === 'customer' && detail.status === 'PENDING_CONFIRMATION' && (
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void saveLines()}
-                    className="min-h-[42px] px-4 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-50"
-                    data-testid="order-modify-save"
-                  >
-                    {text('Save quantity changes', '保存数量变更')}
-                  </button>
+                  {!detail.currentPlan && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveLines()}
+                      className="min-h-[42px] px-4 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-50"
+                      data-testid="order-modify-save"
+                    >
+                      {text('Save quantity changes', '保存数量变更')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setCancelOpen(true)}
@@ -688,7 +1452,15 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                     {text('Cancel order', '取消订单')}
                   </button>
                   <span className="text-[10px] text-slate-500 self-center">
-                    {text('Only pending-confirmation orders can be changed or cancelled.', '只有待确认订单可以修改或取消。')}
+                    {detail.currentPlan
+                      ? text(
+                          'A plan is active. Reject it or cancel the order to return to sales.',
+                          '方案已提交。可拒绝方案或取消订单退回业务员。'
+                        )
+                      : text(
+                          'Only pending-confirmation orders can be changed or cancelled.',
+                          '只有待确认订单可以修改或取消。'
+                        )}
                   </span>
                 </div>
               )}
@@ -728,18 +1500,16 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
               )}
 
               {scope === 'sales' && detail.status === 'PENDING_CONFIRMATION' && (
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    disabled
-                    data-testid="sales-confirm-disabled"
-                    className="min-h-[42px] px-4 rounded-xl bg-slate-200 text-slate-500 text-xs font-bold cursor-not-allowed"
-                  >
-                    {text('Confirm order — available in Phase 4B-05', '确认订单 —— Phase 4B-05 开放')}
-                  </button>
-                  <span className="text-[10px] text-slate-500">
-                    {text('Confirmation, final pricing and stock reservation are not implemented in this phase.', '本阶段尚未实现确认、最终定价与库存预占。')}
-                  </span>
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-[10px] text-slate-500">
+                  {detail.currentPlan?.status === 'ACCEPTED'
+                    ? text(
+                        'The buyer accepted the current plan. Use the allocation panel above to confirm.',
+                        '采购账号已认可当前方案。请在上方分仓面板中正式确认。'
+                      )
+                    : text(
+                        'Save a complete plan first. A changed price needs business approval before the buyer can accept.',
+                        '请先保存完整方案。改价需业务管理员审批后，采购账号才能认可。'
+                      )}
                 </div>
               )}
 
@@ -747,8 +1517,8 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
                 <div className="flex items-start gap-2 rounded-xl bg-slate-50 border border-slate-200 p-3 text-[11px] text-slate-600">
                   <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
                   {text(
-                    'Administrator supervision is read-only. Sales confirmation requires the sales write workflow in Phase 4B-05.',
-                    '管理员监督为只读。销售确认需要 Phase 4B-05 的销售写流程。'
+                    'Administrator supervision is read-only. Price, extension and release decisions are in the Approvals tab and require the explicit approval permissions.',
+                    '管理员监督为只读。价格、延期与释放审批在“审批”页，需显式审批权限。'
                   )}
                 </div>
               )}
@@ -780,18 +1550,38 @@ export const OrdersView: React.FC<{ scope: 'customer' | 'sales' | 'admin' }> = (
               closeLabel={text('Close', '关闭')}
             >
               {adminDrawerKind === 'order' ? (
-                detailLoading ? (
-                  <LoadingBlock label={text('Loading order detail…', '正在加载订单详情…')} />
-                ) : orderContent ? (
-                  orderContent
-                ) : (
-                  <ErrorBlock
-                    message={localizedError(
-                      actionError || text('The order could not be loaded.', '订单加载失败。')
-                    )}
-                    onRetry={() => selectedId && void loadDetail(selectedId)}
-                  />
-                )
+                <>
+                  {notice && (
+                    <div
+                      role="status"
+                      data-testid="order-drawer-notice"
+                      className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800"
+                    >
+                      {notice}
+                    </div>
+                  )}
+                  {actionError && detail && (
+                    <div
+                      role="alert"
+                      data-testid="order-drawer-error"
+                      className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800"
+                    >
+                      {localizedError(actionError)}
+                    </div>
+                  )}
+                  {detailLoading ? (
+                    <LoadingBlock label={text('Loading order detail…', '正在加载订单详情…')} />
+                  ) : orderContent ? (
+                    orderContent
+                  ) : (
+                    <ErrorBlock
+                      message={localizedError(
+                        actionError || text('The order could not be loaded.', '订单加载失败。')
+                      )}
+                      onRetry={() => selectedId && void loadDetail(selectedId)}
+                    />
+                  )}
+                </>
               ) : (
                 renderCustomerDetail()
               )}

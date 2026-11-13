@@ -5,6 +5,10 @@ import { loadMigrationDatabaseUrl } from '../config/env.js';
 
 const { Client } = pg;
 const USER_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
+const RESERVE_INVENTORY_FUNCTION =
+  'aoking_reserve_inventory(uuid, uuid, uuid, uuid, integer, bigint, bigint, integer, uuid)';
+const RELEASE_INVENTORY_FUNCTION =
+  'aoking_release_inventory(uuid, uuid, uuid, uuid, uuid, integer, bigint, integer, uuid)';
 
 export interface ProvisionRuntimeRoleInput {
   adminDatabaseUrl: string;
@@ -160,6 +164,88 @@ export async function provisionRuntimeRole(
     // derived reference line total may be updated on a pending order.
     await client.query(
       `GRANT UPDATE (quantity, line_reference_cents) ON order_items TO ${role}`
+    );
+
+    // Phase 4B-05 confirmation, approval, reservation and release. Every new
+    // table is append-only or status-updated; none is deletable by the API.
+    await client.query(
+      `GRANT SELECT ON buyer_confirmation_authorizations, order_plans,
+        order_plan_lines, order_price_approvals, order_plan_acceptances,
+        order_reservations, order_reservation_lines, order_reservation_ledger,
+        order_final_lines, order_confirmations, order_extension_requests,
+        order_release_requests, order_deadline_reminders,
+        order_action_idempotency TO ${role}`
+    );
+    await client.query(
+      `GRANT INSERT ON order_plans, order_plan_lines, order_price_approvals,
+        buyer_confirmation_authorizations, order_plan_acceptances,
+        order_reservations, order_reservation_lines, order_final_lines,
+        order_confirmations, order_extension_requests,
+        order_deadline_reminders, order_action_idempotency TO ${role}`
+    );
+    // A release request may only be inserted in its PENDING state. Status,
+    // decision and execution columns are reserved for the approval UPDATE
+    // path, so the API role cannot forge an already-approved request that the
+    // release bridge would accept.
+    await client.query(
+      `GRANT INSERT (id, order_id, company_id, requested_by_user_id,
+        requested_by_label, reason, payment_verification, shipment_verification,
+        verification_note, verified_by_user_id, verified_at,
+        expected_reservation_version)
+        ON order_release_requests TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, version, revoked_by_user_id, revoked_at, revoke_reason)
+        ON buyer_confirmation_authorizations TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_at) ON order_plans TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_by_user_id, decided_by_label, decided_at,
+        decided_plan_version, decision_note)
+        ON order_price_approvals TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (invalidated_at, invalidation_reason) ON order_plan_acceptances TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, reservation_version, expires_at, total_extension_hours,
+        released_at, released_by_user_id, release_reason, updated_at)
+        ON order_reservations TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_by_user_id, decided_by_label, decided_at,
+        decision_note, previous_expires_at, new_expires_at)
+        ON order_extension_requests TO ${role}`
+    );
+    await client.query(
+      `GRANT UPDATE (status, decided_by_user_id, decided_by_label, decided_at,
+        decision_note, executed_at)
+        ON order_release_requests TO ${role}`
+    );
+    // Reservation lifecycle is the only writer of aggregate reserved stock,
+    // and it goes through the two narrow SECURITY DEFINER functions below.
+    // Direct `UPDATE inventory_balances SET reserved = ...` remains denied:
+    // the original column grant intentionally excludes `reserved`.
+    //
+    // PostgreSQL grants EXECUTE on new functions to PUBLIC by default. A
+    // `pg_restore --no-privileges` restore recreates these functions with that
+    // default ACL even though migration 007 already ran, and this provisioner
+    // is the step CI reruns after a restore. Revoke the ambient grant before
+    // granting the runtime role so only that role (and the owning migrator)
+    // can execute the bridge.
+    await client.query(
+      `REVOKE EXECUTE ON FUNCTION ${RESERVE_INVENTORY_FUNCTION} FROM PUBLIC`
+    );
+    await client.query(
+      `REVOKE EXECUTE ON FUNCTION ${RELEASE_INVENTORY_FUNCTION} FROM PUBLIC`
+    );
+    await client.query(
+      `GRANT EXECUTE ON FUNCTION ${RESERVE_INVENTORY_FUNCTION} TO ${role}`
+    );
+    await client.query(
+      `GRANT EXECUTE ON FUNCTION ${RELEASE_INVENTORY_FUNCTION} TO ${role}`
     );
     await client.query('COMMIT');
 

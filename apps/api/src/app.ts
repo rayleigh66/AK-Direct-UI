@@ -16,6 +16,7 @@ import {
   createCustomerOrderRouter,
   createSalesOrderRouter,
 } from './orders/routes.js';
+import { createOrderApprovalRouter } from './orders/approvalRoutes.js';
 import { HttpError } from './http/errors.js';
 
 export interface AuthDependencies {
@@ -75,6 +76,7 @@ export function createApp({ checkReadiness, auth, mediaRoot }: AppDependencies) 
     // routers; unmatched paths pass through to the next router.
     app.use('/api/admin/catalog', createAdminCatalogRouter(auth.pool, auth.config, imageRoot));
     app.use('/api/admin/orders', createAdminOrderRouter(auth.pool, auth.config));
+    app.use('/api/admin/order-approvals', createOrderApprovalRouter(auth.pool, auth.config));
     app.use('/api/admin', createAdminInventoryRouter(auth.pool, auth.config));
     app.use('/api/cart', createCartRouter(auth.pool, auth.config));
     app.use('/api/orders', createCustomerOrderRouter(auth.pool, auth.config));

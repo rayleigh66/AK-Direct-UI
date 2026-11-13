@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { DbPool } from '../db/pool.js';
 import { asyncHandler, HttpError } from '../http/errors.js';
 import { requireCsrfForUnsafeMethods } from '../http/csrf.js';
@@ -21,6 +21,21 @@ import {
   submitOrder,
 } from './service.js';
 import { IMPACT_KINDS, findPendingOrderImpact, type ImpactKind } from './impact.js';
+import { decidePlanAcceptance, saveSalesPlan } from './planService.js';
+import { confirmOrder } from './confirmationService.js';
+import { isUuid } from './validation.js';
+import {
+  requestOrderRelease,
+  requestReservationExtension,
+} from './reservationService.js';
+
+const uuidParam = (_req: Request, _res: Response, next: NextFunction, value: string) => {
+  if (!isUuid(value)) {
+    next(new HttpError(400, 'invalid_request', 'id must be a UUID.'));
+    return;
+  }
+  next();
+};
 
 function queryString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -35,6 +50,7 @@ function impactKind(value: unknown): ImpactKind {
 
 export function createCustomerOrderRouter(pool: DbPool, config: AuthConfig): Router {
   const router = Router();
+  router.param('id', uuidParam);
   router.use(
     requireAuth(pool, config),
     requirePasswordChanged,
@@ -105,11 +121,28 @@ export function createCustomerOrderRouter(pool: DbPool, config: AuthConfig): Rou
     })
   );
 
+  router.post(
+    '/:id/plan-decision',
+    asyncHandler(async (req, res) => {
+      res.status(200).json({
+        order: await decidePlanAcceptance(pool, req.auth!, req.params.id, {
+          expectedRevision: req.body?.expectedRevision,
+          expectedPlanVersion: req.body?.expectedPlanVersion,
+          planDigest: req.body?.planDigest,
+          outcome: req.body?.outcome,
+          reason: req.body?.reason,
+          idempotencyKey: req.body?.idempotencyKey,
+        }),
+      });
+    })
+  );
+
   return router;
 }
 
 export function createSalesOrderRouter(pool: DbPool, config: AuthConfig): Router {
   const router = Router();
+  router.param('id', uuidParam);
   router.use(
     requireAuth(pool, config),
     requirePasswordChanged,
@@ -135,11 +168,77 @@ export function createSalesOrderRouter(pool: DbPool, config: AuthConfig): Router
     })
   );
 
+  router.post(
+    '/:id/plans',
+    requirePermission('sales.write'),
+    asyncHandler(async (req, res) => {
+      const result = await saveSalesPlan(pool, req.auth!, req.params.id, {
+        expectedRevision: req.body?.expectedRevision,
+        expectedPlanVersion: req.body?.expectedPlanVersion,
+        lines: req.body?.lines,
+        idempotencyKey: req.body?.idempotencyKey,
+      });
+      res.status(200).json(result);
+    })
+  );
+
+  router.post(
+    '/:id/confirm',
+    requirePermission('sales.write'),
+    asyncHandler(async (req, res) => {
+      res.status(200).json({
+        order: await confirmOrder(pool, req.auth!, req.params.id, {
+          expectedRevision: req.body?.expectedRevision,
+          expectedPlanVersion: req.body?.expectedPlanVersion,
+          planDigest: req.body?.planDigest,
+          acceptanceId: req.body?.acceptanceId,
+          allocations: req.body?.allocations,
+          idempotencyKey: req.body?.idempotencyKey,
+        }),
+      });
+    })
+  );
+
+  router.post(
+    '/:id/extension-requests',
+    requirePermission('sales.write'),
+    asyncHandler(async (req, res) => {
+      res.status(201).json(
+        await requestReservationExtension(pool, req.auth!, req.params.id, {
+          expectedRevision: req.body?.expectedRevision,
+          expectedReservationVersion: req.body?.expectedReservationVersion,
+          additionalHours: req.body?.additionalHours,
+          reason: req.body?.reason,
+          idempotencyKey: req.body?.idempotencyKey,
+        })
+      );
+    })
+  );
+
+  router.post(
+    '/:id/release-requests',
+    requirePermission('sales.write'),
+    asyncHandler(async (req, res) => {
+      res.status(201).json(
+        await requestOrderRelease(pool, req.auth!, req.params.id, {
+          expectedRevision: req.body?.expectedRevision,
+          expectedReservationVersion: req.body?.expectedReservationVersion,
+          reason: req.body?.reason,
+          paymentVerification: req.body?.paymentVerification,
+          shipmentVerification: req.body?.shipmentVerification,
+          verificationNote: req.body?.verificationNote,
+          idempotencyKey: req.body?.idempotencyKey,
+        })
+      );
+    })
+  );
+
   return router;
 }
 
 export function createAdminOrderRouter(pool: DbPool, config: AuthConfig): Router {
   const router = Router();
+  router.param('id', uuidParam);
   router.use(
     requireAuth(pool, config),
     requirePasswordChanged,

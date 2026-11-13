@@ -1,6 +1,46 @@
 # Real-Mode Shared Cart and Orders — UI Review
 
-Phase 4B-04 real-auth screens. The default Mock application is unchanged.
+Phase 4B-04 real-auth screens, extended by the Phase 4B-05 confirmation flow.
+The default Mock application is unchanged.
+
+## Phase 4B-05 screens and states
+
+| Screen | Desktop 1440 | Mobile 390 |
+| --- | --- | --- |
+| Buyer-authority grant/revoke (Approvals) | `real-orders/approvals-confirmers-real-desktop-1440.png` | `real-orders/approvals-confirmers-real-mobile-390.png` |
+| Sales plan with changed price pending approval | `real-orders/sales-plan-pending-real-desktop-1440.png` | `real-orders/sales-plan-pending-real-mobile-390.png` |
+| Customer plan accepted | `real-orders/customer-plan-accepted-real-desktop-1440.png` | `real-orders/customer-plan-accepted-real-mobile-390.png` |
+| Two-warehouse confirmation | `real-orders/sales-confirmed-real-desktop-1440.png` | `real-orders/sales-confirmed-real-mobile-390.png` |
+| Confirmed then fully released, customer view | `real-orders/customer-released-real-desktop-1440.png` | `real-orders/customer-released-real-mobile-390.png` |
+| Buyer re-accepts after revoke + re-grant | `real-orders/customer-reaccepted-real-desktop-1440.png` | `real-orders/customer-reaccepted-real-mobile-390.png` |
+
+Screenshots are emitted only when `REAL_E2E_SCREENSHOTS=1` is set.
+
+## Phase 4B-05 interaction notes
+
+- Business administrators and system administrators manage buyer-confirmation
+  authority from the Approvals screen, selecting the company by customer code
+  and the account by username.
+- Sales build the complete plan in the shared order drawer. Quantity-only edits
+  keep the current approval state; a price change shows the pending approval
+  and blocks customer acceptance until decided.
+- Customer acceptance is inline on the order detail. The customer sees plan
+  lines, totals, pending approval and the confirmed reservation deadline.
+- Confirmation is performed in the shared drawer with explicit per-line,
+  per-warehouse allocation rows. A second warehouse row can be added per SKU.
+- Extension and release success/error feedback is rendered **inside the active
+  drawer** (`role="status"` / `role="alert"` with
+  `data-testid="order-drawer-notice"` and `order-drawer-error`), so it is
+  visible on both desktop and mobile. The drawer scrolls back to the feedback
+  after a long form is submitted.
+- Extension requires a reason. Release requires a reason, a manual verification
+  note, and two explicit checkboxes confirming that payment was verified as
+  unpaid and the goods as not shipped. Server errors stay visible instead of
+  being cleared by the follow-up refresh.
+- Reservation deadlines are shown with date and time because the 72h/312h
+  boundaries are continuous instants.
+- The customer sees the final cancelled state and released reservation after
+  the approved full release.
 
 ## Screens
 
@@ -22,7 +62,7 @@ Additional width checks for the shared cart: `shared-cart-375.png`, `shared-cart
 - Unavailable lines stay visible with an explicit issue message and block submission.
 - The delivery draft is stored locally per company and cleared only after a successful submission; the server snapshot is authoritative.
 - The success page shows the real `OD + YYMMDD + sequence` number, total pieces and reference amount. It states clearly that stock is not reserved.
-- Sales confirmation is visibly disabled and labelled Phase 4B-05.
+- Sales confirmation is enabled only for the current assigned salesperson with `sales.write`; the Phase 4B-04 disabled placeholder has been replaced by the 4B-05 plan/confirmation flow.
 - The admin catalogue shows an impact dialog listing affected pending orders before unpublishing or discontinuing.
 
 ## Responsive verification

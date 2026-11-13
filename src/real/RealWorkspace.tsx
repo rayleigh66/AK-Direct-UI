@@ -6,6 +6,7 @@ import {
   Package,
   RefreshCw,
   Settings2,
+  ShieldCheck,
   ShoppingCart,
   Sparkles,
   Upload,
@@ -20,6 +21,7 @@ import { ImportView } from './views/ImportView';
 import { SetupView } from './views/SetupView';
 import { CartView } from './views/CartView';
 import { OrdersView } from './views/OrdersView';
+import { ApprovalsView } from './views/ApprovalsView';
 import { TierPreviewView } from './views/TierPreviewView';
 import { RealCartProvider, useRealCart } from './cart';
 import { RealSidebar, type RealSidebarGroup } from './RealSidebar';
@@ -41,7 +43,8 @@ type TabKey =
   | 'import'
   | 'setup'
   | 'tiers'
-  | 'customers';
+  | 'customers'
+  | 'approvals';
 
 const TAB_LABELS: Record<TabKey, { en: string; zh: string; icon: React.ReactNode }> = {
   catalog: { en: 'Catalogue', zh: '商品目录', icon: <Package className="w-4 h-4" /> },
@@ -53,6 +56,7 @@ const TAB_LABELS: Record<TabKey, { en: string; zh: string; icon: React.ReactNode
   setup: { en: 'Setup', zh: '基础设置', icon: <Settings2 className="w-4 h-4" /> },
   tiers: { en: 'Customer tiers', zh: '客户等级与折扣', icon: <Sparkles className="w-4 h-4" /> },
   customers: { en: 'Customers', zh: '客户管理', icon: <Users className="w-4 h-4" /> },
+  approvals: { en: 'Approvals', zh: '审批', icon: <ShieldCheck className="w-4 h-4" /> },
 };
 
 const CartBadge: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
@@ -91,7 +95,7 @@ const INTERNAL_GROUPS: Array<{
   { label: { en: 'Catalogue', zh: '商品目录' }, keys: ['products'] },
   { label: { en: 'Operations', zh: '运营' }, keys: ['inventory', 'import', 'setup'] },
   { label: { en: 'Customers', zh: '客户' }, keys: ['customers'] },
-  { label: { en: 'Orders', zh: '订单' }, keys: ['orders'] },
+  { label: { en: 'Orders', zh: '订单' }, keys: ['orders', 'approvals'] },
   { label: { en: 'Pricing', zh: '客户等级' }, keys: ['tiers'] },
 ];
 
@@ -292,6 +296,11 @@ const WorkspaceShell: React.FC<{
 }> = ({ user, onSignOut }) => {
   const isCustomer = user.type === 'customer';
   const can = (permission: string) => user.permissions.includes(permission);
+  const canApprove =
+    can('orders.approve_price') ||
+    can('orders.approve_extension') ||
+    can('orders.approve_release') ||
+    can('orders.manage_confirmers');
   const tabs = useMemo<TabKey[]>(() => {
     if (isCustomer) return ['catalog', 'cart', 'orders'];
     const result: TabKey[] = [];
@@ -307,8 +316,13 @@ const WorkspaceShell: React.FC<{
       if (can('catalog.manage')) result.push('orders');
       else result.unshift('orders');
     }
+    if (canApprove) {
+      // The approval queue and confirmer management use their own explicit
+      // permissions. A business administrator does not need sales.read_all.
+      result.push('approvals');
+    }
     return result.length ? result : ['inventory'];
-  }, [isCustomer, user.permissions]);
+  }, [isCustomer, user.permissions, canApprove]);
 
   const [activeTab, setActiveTab] = useState<TabKey>(tabs[0]);
 
@@ -324,6 +338,14 @@ const WorkspaceShell: React.FC<{
       )}
       {activeTab === 'orders' && (
         <OrdersView scope={isCustomer ? 'customer' : can('sales.read_all') ? 'admin' : 'sales'} />
+      )}
+      {activeTab === 'approvals' && (
+        <ApprovalsView
+          canApprovePrice={can('orders.approve_price')}
+          canApproveExtension={can('orders.approve_extension')}
+          canApproveRelease={can('orders.approve_release')}
+          canManageConfirmers={can('orders.manage_confirmers')}
+        />
       )}
       {activeTab === 'products' && <AdminCatalogView canWrite={can('catalog.manage')} />}
       {activeTab === 'inventory' && (

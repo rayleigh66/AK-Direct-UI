@@ -1,7 +1,7 @@
 import type { DbPool } from './pool.js';
 
-export const EXPECTED_SCHEMA_VERSION = '4b04.1';
-export const REQUIRED_MIGRATION = '006_sales_reassignment.sql';
+export const EXPECTED_SCHEMA_VERSION = '4b05';
+export const REQUIRED_MIGRATION = '007_order_confirmation.sql';
 
 export interface ReadinessResult {
   ok: boolean;

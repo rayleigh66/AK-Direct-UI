@@ -691,7 +691,7 @@ describeDb('company shared cart and customer orders', () => {
     expect(created.status).toBe(201);
     expect(created.body.alreadySubmitted).toBe(false);
     const order = created.body.order;
-    expect(order.orderNo).toMatch(/^OD[0-9]{10}$/);
+    expect(order.orderNo).toMatch(/^OD-[0-9]{6}-[0-9]{4}$/);
     expect(order.status).toBe('PENDING_CONFIRMATION');
     expect(order.referenceTotalCents).toBe(57000); // 15 x 3800
     expect(order.pricingMode).toBe('base_reference');
@@ -900,7 +900,7 @@ describeDb('company shared cart and customer orders', () => {
     const orderNos = responses.map(response => response.body.order.orderNo as string);
     expect(new Set(orderNos).size).toBe(orderNos.length);
     for (const orderNo of orderNos) {
-      expect(orderNo).toMatch(/^OD[0-9]{10}$/);
+      expect(orderNo).toMatch(/^OD-[0-9]{6}-[0-9]{4}$/);
     }
   });
 

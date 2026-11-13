@@ -18,6 +18,11 @@ Implemented:
 
 Not implemented: order lifecycle, inventory reservation, cart, WMS, product/catalogue APIs, delivery, payment, refunds or business dashboards against PostgreSQL. Company suspension records the future PENDING-order cancellation contract but cannot cancel orders because the order module does not exist yet.
 
+> Phase 4B-05 adds the `business_admin` role and four order-approval
+> permissions on top of this foundation. See
+> [Phase 4B-05](PHASE_4B05_ORDER_CONFIRMATION.md); the role additions do not
+> change the session, CSRF or least-privilege rules below.
+
 ## 2. Database model (migration `002_auth_rbac.sql`)
 
 | Table | Purpose |

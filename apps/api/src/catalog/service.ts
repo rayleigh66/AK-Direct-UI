@@ -9,6 +9,7 @@ import { storeImage, removeStoredImage } from '../media/storage.js';
 import {
   enforcePendingOrderImpact,
   lockAffectedCompanies,
+  recordConfirmedReservationImpact,
   type DestructiveOrderImpactOptions,
 } from '../orders/impact.js';
 
@@ -501,6 +502,15 @@ export async function setProductPublished(
       productId,
     ]);
     if (!rows.rows[0]) throw new HttpError(404, 'product_not_found', 'Product not found.');
+    let confirmedReservationOrders = 0;
+    if (!published) {
+      confirmedReservationOrders = await recordConfirmedReservationImpact(
+        client,
+        auth,
+        'product_unpublish',
+        productId
+      );
+    }
 
     if (published) {
       const counts = await client.query<{ active_skus: string; images: string }>(
@@ -539,7 +549,7 @@ export async function setProductPublished(
       action: published ? 'PUBLISH_PRODUCT' : 'UNPUBLISH_PRODUCT',
       targetType: 'product',
       targetId: productId,
-      details: { published, cancelledPendingOrders: affected.length },
+      details: { published, cancelledPendingOrders: affected.length, confirmedReservationOrders },
     });
     const updated = await queryRows<ProductRow>(client, `${PRODUCT_SELECT} WHERE p.id = $1`, [productId]);
     return buildProductDto(client, updated[0]);
@@ -715,7 +725,14 @@ export async function updateSku(
     }
     const nextStatus = input.sellableStatus ?? current.sellable_status;
     let affectedPendingOrders = 0;
+    let confirmedReservationOrders = 0;
     if (current.sellable_status === 'active' && nextStatus === 'discontinued') {
+      confirmedReservationOrders = await recordConfirmedReservationImpact(
+        client,
+        auth,
+        'sku_discontinue',
+        skuId
+      );
       if (productLock.rows[0].published) {
         const others = await client.query<{ count: string }>(
           `SELECT count(*)::text AS count FROM product_skus
@@ -772,6 +789,7 @@ export async function updateSku(
         skuCode,
         productId: current.product_id,
         cancelledPendingOrders: affectedPendingOrders,
+        confirmedReservationOrders,
       },
     });
     const updated = await queryRows<SkuRow>(client, 'SELECT * FROM product_skus WHERE id = $1', [skuId]);

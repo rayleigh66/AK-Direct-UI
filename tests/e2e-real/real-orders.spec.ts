@@ -260,7 +260,7 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await page.getByTestId('cart-submit-confirm-button').click();
   await expect(page.getByTestId('cart-success')).toBeVisible({ timeout: 20_000 });
   const orderNo = (await page.getByTestId('success-order-no').innerText()).trim();
-  expect(orderNo).toMatch(/^OD[0-9]{10}$/);
+  expect(orderNo).toMatch(/^OD-[0-9]{6}-[0-9]{4}$/);
   await expect(page.getByTestId('success-pcs')).toContainText('12 PCS');
   await expect(page.getByTestId('success-total')).toContainText('$504.00');
   await expectNoHorizontalOverflow(page);
@@ -295,8 +295,8 @@ test('customer A and B share a cart, submit a real order and the salesperson see
   await expect(salesDrawer).toBeVisible();
   await expect(salesDrawer.getByTestId('order-detail')).toContainText(orderNo);
   await expect(salesDrawer.getByTestId('order-detail')).toContainText('Reference');
-  await expect(salesDrawer.getByTestId('sales-confirm-disabled')).toBeVisible();
-  await expect(salesDrawer.getByTestId('sales-confirm-disabled')).toContainText('Phase 4B-05');
+  await expect(salesDrawer.getByTestId('sales-plan-editor')).toBeVisible();
+  await expect(salesDrawer.getByTestId('sales-plan-save')).toBeVisible();
   await expect(page.getByTestId('order-detail')).toHaveCount(1);
   if (mobile) {
     const drawerBox = await salesDrawer.boundingBox();
