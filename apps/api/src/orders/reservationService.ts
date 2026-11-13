@@ -1025,7 +1025,9 @@ export async function decideOrderRelease(
         companyCode: order.company_code,
         orderNo: order.order_no,
         eventType: 'ORDER_CANCELLED_AFTER_CONFIRMATION',
-        customerMessage: `Order ${order.order_no} was cancelled after an approved full release. Reason: ${request.reason}`,
+        // The release reason and verification note are internal evidence.
+        // Customer-addressed outbox rows must carry only the generic outcome.
+        customerMessage: `Order ${order.order_no} was cancelled after an approved full release. Please submit a new order if needed.`,
         salesMessage: `Order ${order.order_no} was cancelled after an approved full release.`,
       });
       if (

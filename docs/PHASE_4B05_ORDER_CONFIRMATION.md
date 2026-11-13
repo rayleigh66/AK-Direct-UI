@@ -378,6 +378,10 @@ order writes (foreign salesperson and foreign customer account return
   other accounts, sales notes or audit data. The internal release reason and
   manual verification note stay on the internal request/reservation evidence;
   the customer sees only a generic cancelled-after-release reason and note.
+- The same boundary applies to the notification outbox. Every
+  `order_notifications` row with `audience='customer'` uses fixed generic text;
+  its title and message never interpolate the release reason, verification note,
+  decision note or any other internal approval text.
 - Internal DTOs expose allocation and approval evidence only to an authorized
   internal session; the approval queue is permission-gated.
 - Rejection reasons follow the existing privacy filter.

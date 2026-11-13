@@ -50,7 +50,7 @@ business data was read.
 | `npm run verify:assets` | pass (4 hashed images, no source-image references) |
 | `npm run api:build` | pass |
 | `npm run api:test` | 7 files / 30 tests pass |
-| `npm run api:test:db` | 8 files / **137 tests pass** (isolated PostgreSQL 16.4) |
+| `npm run api:test:db` | 8 files / **138 tests pass** (isolated PostgreSQL 16.4) |
 | Real E2E, isolated Compose at 18705 | **31 tests: 22 passed, 9 viewport skips, 0 failed** |
 | `npm run test:e2e` | 101 passed, 35 skipped by viewport, 0 failed |
 | `npm run test:e2e:preview` | 1 passed |
@@ -93,9 +93,16 @@ business data was read.
    longer suppresses the `EXPIRED` transition. The scan response reports
    `scanned/expired/reminded/skipped`. Regressions cover repeated scans,
    pre-existing reminders and the full extension/release flow.
-9. **A release reason over 500 characters caused a 500 at approval.** The
-   request now rejects it as a 400; the customer-facing cancellation fields are
-   generic and `releaseReason` is internal-only in the DTO.
+9. **Internal release text could reach customer outputs.** A release reason over
+   500 characters caused a 500 at approval; the request now rejects it as a 400.
+   The customer-facing cancellation fields are generic, `releaseReason` is
+   internal-only in the DTO, and the customer-addressed outbox message no longer
+   interpolates the release reason. A marker regression
+   (`keeps internal release reasons and verification notes out of every customer
+   output`) runs the full two-warehouse release and asserts the marker is absent
+   from every `audience='customer'` notification, the customer DTO and history,
+   while the internal request, reservation, audit and authorized sales view
+   retain it.
 10. **Malformed identifiers returned 500.** Order/approval `:id` parameters and
     allocation `skuId`/`warehouseId`/`acceptanceId` are validated as UUIDs and
     return 400 `invalid_request`.
@@ -167,7 +174,7 @@ on the final head; §3 is retained only as earlier independent evidence.
 | Concurrency | Company-lock permission barrier; two companies queued on one last-stock row using a recursive blocker chain (one 200, one 409, no failed reservation/ledger/audit/history); scan serialisation |
 | Warehouse | Two-warehouse reserve **and release**, sellable formula, `on_hand`/`unsellable` unchanged, reconciliation endpoint returns no mismatches, customer can reorder |
 | Deadline | 72h/240h/312h boundary tests, DB clock after locks, advisory-locked at-expiry scan, pre-existing reminder does not suppress expiry, stock held, extension recovery |
-| Release | Unpaid/not-shipped verification (unknown/paid/shipped refused), over-long reason 400, approved-release binding in SQL, column-restricted request INSERT, single ledger application, no double deduct |
+| Release | Unpaid/not-shipped verification (unknown/paid/shipped refused), over-long reason 400, approved-release binding in SQL, column-restricted request INSERT, single ledger application, no double deduct; release reason/verification note/decision note absent from every customer notification, DTO and history while retained in internal evidence |
 | Security | Router-level CSRF probes on every new write entry; foreign salesperson/customer 404; malformed UUID 400s; runtime-role DELETE and forged-release denial; full extension/release flow under the runtime role |
 | UI | Real plan/approval/acceptance/confirmation/extension/release at 1440 and 390; ordinary buyer has no accept/reject control; revoke invalidates acceptance and re-grant requires fresh acceptance; required release evidence; visible in-drawer errors/notices |
 | Delivery | Local commits prepared for Draft PR review; push/PR/CI state per GitHub; no merge/deploy in this worktree; isolated test stack required |

@@ -2073,6 +2073,156 @@ describeDb('Phase 4B-05 order confirmation', () => {
     expect(replacement.orderNo).toMatch(/^OD-[0-9]{6}-[0-9]{4}$/);
   }, 60_000);
 
+  it('keeps internal release reasons and verification notes out of every customer output', async () => {
+    const admin = await login('conf.admin@example.test');
+    const sales = await login('conf.sales@example.test');
+    const business = await login('conf.business@example.test');
+    const customer = await login('AK000501B');
+    const releaseReason = 'INTERNAL_RELEASE_REASON_SECRET_4B05';
+    const verificationNote = 'INTERNAL_VERIFICATION_SECRET_4B05';
+    const decisionNote = 'INTERNAL_DECISION_NOTE_SECRET_4B05';
+    const markers = [releaseReason, verificationNote, decisionNote];
+
+    const item = await createPublishedProduct(admin, { w1: 20, w2: 12 });
+    await addToCart(customer, item.skuId, 20);
+    const order = await submitOrder(customer);
+    const plan = await savePlan(sales, order, [
+      { skuId: item.skuId, quantity: 20, unitPriceCents: 4200 },
+    ]);
+    const accepted = await acceptPlan(customer, plan.order);
+    const confirmed = await confirm(sales, accepted, [
+      { skuId: item.skuId, warehouseId: warehouse1Id, quantity: 12 },
+      { skuId: item.skuId, warehouseId: warehouse2Id, quantity: 8 },
+    ]);
+    expect(confirmed.status).toBe(200);
+    const reservation = confirmed.body.order.confirmation.reservation;
+
+    const releaseRequest = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/release-requests`,
+      {
+        expectedRevision: confirmed.body.order.revision,
+        expectedReservationVersion: reservation.version,
+        reason: releaseReason,
+        paymentVerification: 'unpaid',
+        shipmentVerification: 'not_shipped',
+        verificationNote,
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(releaseRequest.status).toBe(201);
+    const releaseRequestId = releaseRequest.body.request.id as string;
+    const decisionKey = randomUUID();
+    const decision = await post(
+      business.agent,
+      `/api/admin/order-approvals/release/${releaseRequestId}/decision`,
+      {
+        decision: 'APPROVED',
+        note: decisionNote,
+        expectedReservationVersion: reservation.version,
+        idempotencyKey: decisionKey,
+      },
+      business.csrf
+    );
+    expect(decision.status).toBe(200);
+    expect(decision.body.order.status).toBe('CANCELLED');
+
+    // Internal evidence keeps the full reason, verification note and decision
+    // note.
+    const storedRequest = await pool.query(
+      `SELECT reason, verification_note, status FROM order_release_requests WHERE id = $1`,
+      [releaseRequestId]
+    );
+    expect(storedRequest.rows[0]).toMatchObject({
+      reason: releaseReason,
+      verification_note: verificationNote,
+      status: 'APPROVED',
+    });
+    const storedReservation = await pool.query(
+      'SELECT release_reason FROM order_reservations WHERE order_id = $1',
+      [order.id]
+    );
+    expect(storedReservation.rows[0].release_reason).toBe(releaseReason);
+    const audit = await pool.query<{ details: Record<string, unknown> }>(
+      `SELECT details FROM audit_logs WHERE action = 'RELEASE_ORDER' AND target_id = $1`,
+      [order.id]
+    );
+    expect(audit.rows[0].details).toMatchObject({
+      verificationNote,
+      note: decisionNote,
+    });
+
+    // Every customer-addressed outbox row is generic.
+    const customerNotifications = await pool.query<{ title: string; message: string }>(
+      `SELECT title, message FROM order_notifications
+       WHERE order_id = $1 AND audience = 'customer'`,
+      [order.id]
+    );
+    expect(customerNotifications.rowCount).toBeGreaterThan(0);
+    const customerText = customerNotifications.rows
+      .map(row => `${row.title}\n${row.message}`)
+      .join('\n');
+    for (const marker of markers) expect(customerText).not.toContain(marker);
+    expect(customerText).toContain('cancelled after an approved full release');
+
+    // The customer detail, including history, never contains the markers.
+    const customerDetail = await customer.agent.get(`/api/orders/${order.id}`);
+    expect(customerDetail.status).toBe(200);
+    expect(customerDetail.body.order.status).toBe('CANCELLED');
+    const customerJson = JSON.stringify(customerDetail.body);
+    for (const marker of markers) expect(customerJson).not.toContain(marker);
+    expect(customerDetail.body.order.history.length).toBeGreaterThan(0);
+
+    // An authorized internal view still sees the release evidence.
+    const internalDetail = await sales.agent.get(`/api/sales/orders/${order.id}`);
+    expect(internalDetail.status).toBe(200);
+    const internalJson = JSON.stringify(internalDetail.body);
+    expect(internalJson).toContain(releaseReason);
+    expect(internalJson).toContain(verificationNote);
+
+    // Stock and order state are correct.
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({
+      on_hand: 20,
+      reserved: 0,
+    });
+    expect(await inventory(item.skuId, warehouse2Id)).toMatchObject({
+      on_hand: 12,
+      reserved: 0,
+    });
+
+    // Same-key replay is a no-op; a new release request cannot double-deduct.
+    const replay = await post(
+      business.agent,
+      `/api/admin/order-approvals/release/${releaseRequestId}/decision`,
+      {
+        decision: 'APPROVED',
+        note: decisionNote,
+        expectedReservationVersion: reservation.version,
+        idempotencyKey: decisionKey,
+      },
+      business.csrf
+    );
+    expect(replay.status).toBe(200);
+    expect(await inventory(item.skuId, warehouse1Id)).toMatchObject({ reserved: 0 });
+    expect(await inventory(item.skuId, warehouse2Id)).toMatchObject({ reserved: 0 });
+    const secondRequest = await post(
+      sales.agent,
+      `/api/sales/orders/${order.id}/release-requests`,
+      {
+        expectedRevision: decision.body.order.revision,
+        expectedReservationVersion: decision.body.order.confirmation.reservation.version,
+        reason: releaseReason,
+        paymentVerification: 'unpaid',
+        shipmentVerification: 'not_shipped',
+        verificationNote,
+        idempotencyKey: randomUUID(),
+      },
+      sales.csrf
+    );
+    expect(secondRequest.status).toBe(409);
+  }, 60_000);
+
   it('blocks confirmation after the buyer authority was revoked', async () => {
     const admin = await login('conf.admin@example.test');
     const sales = await login('conf.sales@example.test');
